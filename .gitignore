@@ -1,18 +1,27 @@
+# ── 依赖 ──
 node_modules/
-dist/
-*.log
-.DS_Store
 *.tsbuildinfo
-# packages/*/node_modules/
+
+# ── 构建产物 ──
+dist/
 packages/*/dist/
 packages/*/dist-chrome/
 packages/*/dist-firefox/
-*.cpuprofile
 
-# Environment
+# ── 日志与调试 ──
+*.log
+*.cpuprofile
+out.jsonl
+out.html
+pi-*.html
+syntax.jsonl
+tui-debug.log
+compaction-results/
+
+# ── 密钥与环境变量 ──
 .env
 
-# Editor files
+# ── 编辑器与 IDE ──
 .vscode/
 .zed/
 .idea/
@@ -20,21 +29,31 @@ packages/*/dist-firefox/
 *.swo
 *~
 
-# Package specific
-.npm/
+# ── 操作系统 ──
+.DS_Store
+Thumbs.db
+
+# ── Claude Code 本地配置 ──
+.claude/
+.claude/
+
+# ── 测试覆盖率 ──
 coverage/
 .nyc_output/
+
+# ── 包管理器 ──
+.npm/
+
+# ── 本地开发配置 ──
 .pi_config/
-tui-debug.log
-compaction-results/
 .opencode/
-syntax.jsonl
-out.jsonl
-pi-*.html
-out.html
-packages/coding-agent/binaries/
 todo.md
 plans/
+collect.sh
+
+# ── 会话数据（本地 JSONL）──
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
-collect.sh
+
+# ── 二进制分发 ──
+packages/coding-agent/binaries/

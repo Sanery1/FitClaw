@@ -1,72 +1,74 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img src="https://pi.dev/logo.svg" alt="pi logo" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://github.com/badlogic/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/badlogic/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
-</p>
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+# FitClaw
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+> AI 健身私教 + 智能编程助手 — 基于 Claude Code 生态的全栈 AI Agent 平台
 
----
+FitClaw 是一个多模态 AI Agent 平台，将**全流程健身私教**与**智能编程助手**结合为一体。项目 Fork 自 [pi-mono](https://github.com/badlogic/pi-mono)，在原有编程代理能力之上，增加了完整的健身教练功能：
 
-# Pi Monorepo
+- **个性化训练计划生成**：基于用户经验、目标、器械自动设计分化训练方案
+- **动作数据库**：50+ 动作的详细教学（中文/英文），含标准动作要领、常见错误、变式
+- **训练记录追踪**：记录每次训练的重量/次数/RPE，支持渐进超负荷管理
+- **体测数据管理**：追踪体重、体脂率、围度变化
+- **长期进度分析**：个人记录汇总、进阶事件日志、训练一致性分析
 
-> **Looking for the pi coding agent?** See **[packages/coding-agent](packages/coding-agent)** for installation and usage.
+## 包结构
 
-Tools for building AI agents and managing LLM deployments.
+| 包 | 说明 |
+|----|------|
+| **[@fitclaw/ai](packages/ai)** | 统一多厂商 LLM API（OpenAI、Anthropic、Google 等） |
+| **[@fitclaw/agent-core](packages/agent)** | Agent 运行时：工具调用、状态管理、事件系统 |
+| **[@fitclaw/claw](packages/coding-agent)** | 主 CLI 应用：交互式编码 Agent + 健身私教 |
+| **[@fitclaw/tui](packages/tui)** | 终端 UI 库：差异渲染、组件化设计 |
+| **[@fitclaw/mom](packages/mom)** | Slack/飞书 Bot：将 Agent 接入即时通讯 |
+| **[@fitclaw/web-ui](packages/web-ui)** | Web 组件：AI 聊天界面的可复用 UI |
+| **[@fitclaw/pods](packages/pods)** | GPU Pod 管理：vLLM 部署 CLI |
 
-## Share your OSS coding agent sessions
-
-If you use pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
-
-## Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
-| **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
-| **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).
-
-## Development
+## 快速开始
 
 ```bash
-npm install          # Install all dependencies
-npm run build        # Build all packages
-npm run check        # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+npm install          # 安装所有依赖
+npm run build        # 构建所有包
+npm run check        # Lint + 格式化 + 类型检查
+npm run test         # 运行测试
 ```
 
-> **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
+## 健身私教功能
 
-## License
+启动 Coding Agent 后，使用以下工具完成健身教练全流程：
 
-MIT
+| 模块 | 工具 | 功能 |
+|------|------|------|
+| 动作数据库 | `query_exercises` | 按肌群/器械/难度搜索动作 |
+| 动作数据库 | `get_exercise_detail` | 获取动作完整教学（要领/错误/变式） |
+| 训练记录 | `log_workout` | 记录一次训练 |
+| 训练记录 | `get_workout_history` | 查询历史训练 |
+| 体测数据 | `log_body_metrics` | 记录体重/体脂/围度 |
+| 体测数据 | `get_body_metrics_history` | 查询体测历史 |
+| 训练计划 | `create_training_plan` | 创建/覆盖训练计划 |
+| 训练计划 | `get_current_plan` | 获取当前计划 |
+| 训练计划 | `get_today_workout` | 获取今日训练内容 |
+| 进度分析 | `get_progress_summary` | 获取进度摘要 |
+| 进度分析 | `log_progressive_overload` | 记录进阶事件 |
+
+## 开发
+
+```bash
+npm run check        # Lint + 格式化 + 类型检查
+npm run build        # 构建所有包（按依赖顺序）
+npm run test         # 运行所有测试
+npm run dev          # 并行 watch 所有包
+```
+
+## Fork 说明
+
+本项目 Fork 自 [badlogic/pi-mono](https://github.com/badlogic/pi-mono)，原始版权归 Mario Zechner 所有。
+
+主要改动：
+- 所有包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*`
+- 新增 11 个健身 Agent 工具 + 动作数据库
+- 新增分层知识库系统（`.fitclaw/prompts/` + `fitclaw.md`）
+- 新增飞书 Bot 适配器接口预留
+- 新增知识库校验脚本
+
+## 许可证
+
+MIT — 沿用原始项目协议

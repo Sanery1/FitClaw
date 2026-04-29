@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { Executor } from "../sandbox.js";
 

@@ -1,5 +1,5 @@
 {
-	"name": "@mariozechner/pi-coding-agent",
+	"name": "@fitclaw/claw",
 	"version": "0.70.5",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
@@ -39,9 +39,9 @@
 	},
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.2",
-		"@mariozechner/pi-agent-core": "^0.70.5",
-		"@mariozechner/pi-ai": "^0.70.5",
-		"@mariozechner/pi-tui": "^0.70.5",
+		"@fitclaw/agent-core": "^0.70.5",
+		"@fitclaw/ai": "^0.70.5",
+		"@fitclaw/tui": "^0.70.5",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",
