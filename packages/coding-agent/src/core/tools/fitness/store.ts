@@ -66,8 +66,11 @@ async function saveFitnessData(dataDir: string): Promise<void> {
 		const filePath = path.join(dataDir, "fitness-data.json");
 		await fs.mkdir(path.dirname(filePath), { recursive: true });
 		await fs.writeFile(filePath, JSON.stringify(store, null, 2));
-	} catch {
-		// Silently fail — data stays in memory
+	} catch (err) {
+		console.error(
+			`[fitness-store] Failed to persist data to ${dataDir}:`,
+			err instanceof Error ? err.message : String(err),
+		);
 	}
 }
 
