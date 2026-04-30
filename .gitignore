@@ -20,6 +20,7 @@ compaction-results/
 
 # ── 密钥与环境变量 ──
 .env
+ecosystem.config.cjs
 
 # ── 编辑器与 IDE ──
 .vscode/
@@ -54,6 +55,9 @@ collect.sh
 # ── 会话数据（本地 JSONL）──
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
+
+# ── 运行时数据 ──
+feishu-workspace/
 
 # ── 二进制分发 ──
 packages/coding-agent/binaries/
