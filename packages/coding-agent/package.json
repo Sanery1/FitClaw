@@ -3,10 +3,12 @@
 	"version": "0.70.5",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
-	"piConfig": {
-		"configDir": ".pi"
+	"fitClawConfig": {
+		"name": "fitclaw",
+		"configDir": ".fitclaw"
 	},
 	"bin": {
+		"fitclaw": "dist/cli.js",
 		"pi": "dist/cli.js"
 	},
 	"main": "./dist/index.js",

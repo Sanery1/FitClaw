@@ -310,6 +310,10 @@ export function getBundledInteractiveAssetPath(name: string): string {
 interface PackageJson {
 	name?: string;
 	version?: string;
+	fitClawConfig?: {
+		name?: string;
+		configDir?: string;
+	};
 	piConfig?: {
 		name?: string;
 		configDir?: string;
@@ -318,11 +322,12 @@ interface PackageJson {
 
 const pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8")) as PackageJson;
 
-const appConfigName: string | undefined = pkg.piConfig?.name;
+const appConfig: PackageJson["fitClawConfig"] | PackageJson["piConfig"] = pkg.fitClawConfig || pkg.piConfig;
+const appConfigName: string | undefined = appConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@fitclaw/claw";
 export const APP_NAME: string = appConfigName || "fitclaw";
 export const APP_TITLE: string = appConfigName ? APP_NAME : "FitClaw";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".fitclaw";
+export const CONFIG_DIR_NAME: string = appConfig?.configDir || ".fitclaw";
 export const VERSION: string = pkg.version || "0.0.0";
 
 // e.g., FITCLAW_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
