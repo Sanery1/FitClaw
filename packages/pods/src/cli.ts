@@ -49,8 +49,8 @@ Model Management:
 
 Environment:
   HF_TOKEN         HuggingFace token for model downloads
-  PI_API_KEY     API key for vLLM endpoints
-  PI_CONFIG_DIR    Config directory (default: ~/.pi)`);
+  FITCLAW_API_KEY (PI_*)  API key for vLLM endpoints
+  FITCLAW_CONFIG_DIR (PI_*)  Config directory (default: ~/.pi)`);
 }
 
 // Parse command line arguments
@@ -333,7 +333,7 @@ try {
 					process.exit(1);
 				}
 
-				const apiKey = process.env.PI_API_KEY;
+				const apiKey = process.env.FITCLAW_API_KEY || process.env.PI_API_KEY;
 
 				// Pass all args after the model name
 				const agentArgs = args.slice(2);

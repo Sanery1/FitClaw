@@ -3,7 +3,7 @@
  * Enable with PI_TIMING=1 environment variable.
  */
 
-const ENABLED = process.env.PI_TIMING === "1";
+const ENABLED = process.env.FITCLAW_TIMING === "1" || process.env.PI_TIMING === "1";
 const timings: Array<{ label: string; ms: number }> = [];
 let lastTime = Date.now();
 
