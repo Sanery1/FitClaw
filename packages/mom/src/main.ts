@@ -4,10 +4,12 @@ import { join, resolve } from "path";
 import { type AgentRunner, getOrCreateRunner } from "./agent.js";
 import { downloadChannel } from "./download.js";
 import { createEventsWatcher } from "./events.js";
+import { FeishuBot, type FeishuEvent } from "./feishu.js";
 import * as log from "./log.js";
 import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
 import { type MomHandler, type SlackBot, SlackBot as SlackBotClass, type SlackEvent } from "./slack.js";
 import { ChannelStore } from "./store.js";
+import type { BotContext } from "./types.js";
 
 // ============================================================================
 // Config
@@ -15,6 +17,10 @@ import { ChannelStore } from "./store.js";
 
 const MOM_SLACK_APP_TOKEN = process.env.MOM_SLACK_APP_TOKEN;
 const MOM_SLACK_BOT_TOKEN = process.env.MOM_SLACK_BOT_TOKEN;
+
+const MOM_FEISHU_APP_ID = process.env.MOM_FEISHU_APP_ID;
+const MOM_FEISHU_APP_SECRET = process.env.MOM_FEISHU_APP_SECRET;
+const MOM_FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitCoach";
 
 interface ParsedArgs {
 	workingDir?: string;
@@ -71,8 +77,8 @@ if (!parsedArgs.workingDir) {
 
 const { workingDir, sandbox } = { workingDir: parsedArgs.workingDir, sandbox: parsedArgs.sandbox };
 
-if (!MOM_SLACK_APP_TOKEN || !MOM_SLACK_BOT_TOKEN) {
-	console.error("Missing env: MOM_SLACK_APP_TOKEN, MOM_SLACK_BOT_TOKEN");
+if (!MOM_FEISHU_APP_ID && (!MOM_SLACK_APP_TOKEN || !MOM_SLACK_BOT_TOKEN)) {
+	console.error("Missing env: set MOM_FEISHU_APP_ID+MOM_FEISHU_APP_SECRET or MOM_SLACK_APP_TOKEN+MOM_SLACK_BOT_TOKEN");
 	process.exit(1);
 }
 
@@ -99,7 +105,7 @@ function getState(channelId: string): ChannelState {
 		state = {
 			running: false,
 			runner: getOrCreateRunner(sandbox, channelId, channelDir),
-			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN! }),
+			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN }),
 			stopRequested: false,
 		};
 		channelStates.set(channelId, state);
@@ -238,6 +244,7 @@ function createSlackContext(event: SlackEvent, slack: SlackBot, state: ChannelSt
 		},
 
 		setWorking: async (working: boolean) => {
+			log.logInfo(`[DEBUG] setWorking called — working=${working} accumulatedLen=${accumulatedText.length}`);
 			updatePromise = updatePromise.then(async () => {
 				try {
 					isWorking = working;
@@ -313,7 +320,9 @@ const handler: MomHandler = {
 			await ctx.setTyping(true);
 			await ctx.setWorking(true);
 			const result = await state.runner.run(ctx as any, state.store);
+			log.logInfo(`[DEBUG] runner.run() completed — result keys: ${Object.keys(result || {}).join(",")}`);
 			await ctx.setWorking(false);
+			log.logInfo("[DEBUG] setWorking(false) completed");
 
 			if (result.stopReason === "aborted" && state.stopRequested) {
 				if (state.stopMessageTs) {
@@ -332,36 +341,219 @@ const handler: MomHandler = {
 };
 
 // ============================================================================
+// Feishu Context Adapter
+// ============================================================================
+
+function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: ChannelState): BotContext {
+	let accumulatedText = "";
+	let _isWorking = true;
+	let updatePromise = Promise.resolve();
+	let finalSent = false;
+
+	const flushResponse = async () => {
+		if (finalSent || !accumulatedText.trim()) return;
+		log.logInfo(`[DEBUG] flushResponse proceeding — textLen=${accumulatedText.trim().length}`);
+		finalSent = true;
+		try {
+			log.logInfo(`[DEBUG] Calling bot.sendMessage chatId=${event.chatId} textLen=${accumulatedText.length}`);
+			await bot.sendMessage(event.chatId, accumulatedText);
+		} catch (err) {
+			log.logWarning("Feishu flush response error", err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	return {
+		message: {
+			text: event.text,
+			rawText: event.text,
+			user: event.user.openId,
+			userName: event.user.name,
+			channel: event.chatId,
+			ts: event.messageId,
+			attachments: (event.files || []).map((f) => ({ local: f.downloadedPath || "" })),
+		},
+		channels: [],
+		users: event.user.name
+			? [{ id: event.user.openId, userName: event.user.name, displayName: event.user.name }]
+			: [],
+
+		respond: async (text: string) => {
+			updatePromise = updatePromise.then(async () => {
+				accumulatedText = accumulatedText ? `${accumulatedText}\n${text}` : text;
+
+				const MAX_MAIN_LENGTH = 30000;
+				const truncationNote = "\n\n_(message truncated)_";
+				if (accumulatedText.length > MAX_MAIN_LENGTH) {
+					accumulatedText = accumulatedText.substring(0, MAX_MAIN_LENGTH - truncationNote.length) + truncationNote;
+				}
+			});
+			await updatePromise;
+		},
+
+		replaceMessage: async (text: string) => {
+			updatePromise = updatePromise.then(async () => {
+				accumulatedText = text;
+			});
+			await updatePromise;
+		},
+
+		respondInThread: async (text: string) => {
+			updatePromise = updatePromise.then(async () => {
+				try {
+					const MAX_THREAD_LENGTH = 20000;
+					const threadText =
+						text.length > MAX_THREAD_LENGTH
+							? `${text.substring(0, MAX_THREAD_LENGTH - 50)}\n\n_(truncated)_`
+							: text;
+					await bot.sendThreadMessage(event.messageId, threadText);
+				} catch (err) {
+					log.logWarning("Feishu respondInThread error", err instanceof Error ? err.message : String(err));
+				}
+			});
+			await updatePromise;
+		},
+
+		setTyping: async () => {
+			// Feishu text messages cannot be edited. Response sent once when complete.
+		},
+
+		uploadFile: async (_filePath: string, _title?: string) => {
+			// Feishu file upload not implemented in v1.
+		},
+
+		setWorking: async (working: boolean) => {
+			log.logInfo(`[DEBUG] setWorking called — working=${working} accumulatedLen=${accumulatedText.length}`);
+			updatePromise = updatePromise.then(async () => {
+				_isWorking = working;
+				if (!working) {
+					log.logInfo(`[DEBUG] setWorking calling flushResponse — accumulatedLen=${accumulatedText.length}`);
+					await flushResponse();
+				}
+			});
+			await updatePromise;
+		},
+
+		deleteMessage: async () => {
+			// Feishu message deletion not implemented in v1.
+		},
+	};
+}
+
+// ============================================================================
+// Feishu Mode
+// ============================================================================
+
+async function runFeishuMode() {
+	if (!MOM_FEISHU_APP_ID || !MOM_FEISHU_APP_SECRET) {
+		console.error("Missing required environment variables:");
+		console.error("  MOM_FEISHU_APP_ID");
+		console.error("  MOM_FEISHU_APP_SECRET");
+		process.exit(1);
+	}
+
+	// NOTE: Events watcher (scheduled/periodic events) is not supported in Feishu mode v1.
+	// EventsWatcher is tightly coupled to SlackBot.
+
+	const bot = new FeishuBot(
+		{ appId: MOM_FEISHU_APP_ID, appSecret: MOM_FEISHU_APP_SECRET, botName: MOM_FEISHU_BOT_NAME },
+		workingDir,
+	);
+
+	bot.onMessage(async (event) => {
+		// Download attachments before processing
+		if (event.files) {
+			for (const f of event.files) {
+				try {
+					f.downloadedPath = await bot.downloadFile(f.messageId, f.fileKey, f.type);
+				} catch (err) {
+					log.logWarning("Feishu download attachment error", err instanceof Error ? err.message : String(err));
+				}
+			}
+		}
+
+		const state = getState(event.chatId);
+		state.running = true;
+
+		log.logInfo(`[${event.chatId}] Feishu ${event.type}: ${event.text.substring(0, 50)}`);
+
+		try {
+			const ctx = createFeishuContext(event, bot, state);
+			await ctx.setTyping(true);
+			await ctx.setWorking(true);
+			log.logInfo("[DEBUG] About to runner.run()");
+			const result = await state.runner.run(ctx, state.store);
+			log.logInfo(`[DEBUG] runner.run() completed — result keys: ${Object.keys(result || {}).join(",")}`);
+			await ctx.setWorking(false);
+			log.logInfo("[DEBUG] setWorking(false) completed");
+
+			if (result.errorMessage) {
+				await ctx.respond(`Error: ${result.errorMessage}`);
+			}
+		} catch (err) {
+			log.logWarning(`[${event.chatId}] Run error`, err instanceof Error ? err.message : String(err));
+		} finally {
+			state.running = false;
+		}
+	});
+
+	await bot.start();
+	log.logInfo("FitClaw Feishu Bot (FitCoach) is running. Press Ctrl+C to exit.");
+
+	// Handle shutdown
+	process.on("SIGINT", () => {
+		log.logInfo("Shutting down...");
+		process.exit(0);
+	});
+	process.on("SIGTERM", () => {
+		log.logInfo("Shutting down...");
+		process.exit(0);
+	});
+
+	await new Promise(() => {}); // block forever
+}
+
+// ============================================================================
 // Start
 // ============================================================================
 
 log.logStartup(workingDir, sandbox.type === "host" ? "host" : `docker:${sandbox.container}`);
 
-// Shared store for attachment downloads (also used per-channel in getState)
-const sharedStore = new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN! });
+if (MOM_FEISHU_APP_ID) {
+	// === Feishu mode ===
+	await runFeishuMode();
+} else if (MOM_SLACK_APP_TOKEN && MOM_SLACK_BOT_TOKEN) {
+	// === Slack mode (original code, unchanged) ===
+	const sharedStore = new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN });
 
-const bot = new SlackBotClass(handler, {
-	appToken: MOM_SLACK_APP_TOKEN,
-	botToken: MOM_SLACK_BOT_TOKEN,
-	workingDir,
-	store: sharedStore,
-});
+	const bot = new SlackBotClass(handler, {
+		appToken: MOM_SLACK_APP_TOKEN,
+		botToken: MOM_SLACK_BOT_TOKEN,
+		workingDir,
+		store: sharedStore,
+	});
 
-// Start events watcher
-const eventsWatcher = createEventsWatcher(workingDir, bot);
-eventsWatcher.start();
+	// Start events watcher
+	const eventsWatcher = createEventsWatcher(workingDir, bot);
+	eventsWatcher.start();
 
-// Handle shutdown
-process.on("SIGINT", () => {
-	log.logInfo("Shutting down...");
-	eventsWatcher.stop();
-	process.exit(0);
-});
+	// Handle shutdown
+	process.on("SIGINT", () => {
+		log.logInfo("Shutting down...");
+		eventsWatcher.stop();
+		process.exit(0);
+	});
 
-process.on("SIGTERM", () => {
-	log.logInfo("Shutting down...");
-	eventsWatcher.stop();
-	process.exit(0);
-});
+	process.on("SIGTERM", () => {
+		log.logInfo("Shutting down...");
+		eventsWatcher.stop();
+		process.exit(0);
+	});
 
-bot.start();
+	bot.start();
+} else {
+	console.error("No bot platform configured.");
+	console.error("Please set one of the following environment variable groups:");
+	console.error("  Feishu: MOM_FEISHU_APP_ID + MOM_FEISHU_APP_SECRET");
+	console.error("  Slack: MOM_SLACK_APP_TOKEN + MOM_SLACK_BOT_TOKEN");
+	process.exit(1);
+}

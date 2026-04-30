@@ -1,5 +1,5 @@
 import { Agent, type AgentEvent } from "@fitclaw/agent-core";
-import { getModel, type ImageContent } from "@fitclaw/ai";
+import type { ImageContent } from "@fitclaw/ai";
 import {
 	AgentSession,
 	AuthStorage,
@@ -19,12 +19,9 @@ import { join } from "path";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
-import type { ChannelInfo, SlackContext, UserInfo } from "./slack.js";
 import type { ChannelStore } from "./store.js";
 import { createMomTools, setUploadFunction } from "./tools/index.js";
-
-// Hardcoded model for now - TODO: make configurable (issue #63)
-const model = getModel("anthropic", "claude-sonnet-4-5");
+import type { BotChannel, BotContext, BotUser } from "./types.js";
 
 export interface PendingMessage {
 	userName: string;
@@ -35,23 +32,11 @@ export interface PendingMessage {
 
 export interface AgentRunner {
 	run(
-		ctx: SlackContext,
+		ctx: BotContext,
 		store: ChannelStore,
 		pendingMessages?: PendingMessage[],
 	): Promise<{ stopReason: string; errorMessage?: string }>;
 	abort(): void;
-}
-
-async function getAnthropicApiKey(authStorage: AuthStorage): Promise<string> {
-	const key = await authStorage.getApiKey("anthropic");
-	if (!key) {
-		throw new Error(
-			"No API key found for anthropic.\n\n" +
-				"Set an API key environment variable, or use /login with Anthropic and link to auth.json from " +
-				join(homedir(), ".pi", "mom", "auth.json"),
-		);
-	}
-	return key;
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -143,8 +128,8 @@ function buildSystemPrompt(
 	channelId: string,
 	memory: string,
 	sandboxConfig: SandboxConfig,
-	channels: ChannelInfo[],
-	users: UserInfo[],
+	channels: BotChannel[],
+	users: BotUser[],
 	skills: Skill[],
 ): string {
 	const channelPath = `${workspacePath}/${channelId}`;
@@ -167,18 +152,21 @@ function buildSystemPrompt(
 - Bash working directory: ${process.cwd()}
 - Be careful with system modifications`;
 
-	return `You are mom, a Slack bot assistant. Be concise. No emojis.
+	return `You are FitCoach, an AI fitness personal trainer powered by FitClaw. Be concise, professional, and encouraging. No emojis.
+
+## Your Role
+You are FitCoach (FitClaw AI), a fitness personal trainer. Keep responses SHORT — 1-3 sentences for simple questions. Do NOT list your capabilities unless specifically asked. For "who are you" / "你是谁", just say: "我是 FitCoach，AI 健身私教。有什么可以帮你的？"
+
+Maintain a fitness-coach tone: motivating, knowledgeable, and supportive.
 
 ## Context
 - For current date/time, use: date
 - You have access to previous conversation context including tool results from prior turns.
 - For older history beyond your context, search log.jsonl (contains user messages and your final responses, but not tool results).
 
-## Slack Formatting (mrkdwn, NOT Markdown)
-Bold: *text*, Italic: _text_, Code: \`code\`, Block: \`\`\`code\`\`\`, Links: <url|text>
-Do NOT use **double asterisks** or [markdown](links).
-
-## Slack IDs
+## Formatting
+Use plain text with clear structure and line breaks. Avoid complex formatting.
+## Users & Channels
 Channels: ${channelMappings}
 
 Users: ${userMappings}
@@ -275,7 +263,7 @@ You receive a message like:
 Immediate and one-shot events auto-delete after triggering. Periodic events persist until you delete them.
 
 ### Silent Completion
-For periodic events where there's nothing to report, respond with just \`[SILENT]\` (no other text). This deletes the status message and posts nothing to Slack. Use this to avoid spamming the channel when periodic checks find nothing actionable.
+For periodic events where there's nothing to report, respond with just \`[SILENT]\` (no other text). This deletes the status message and posts nothing to chat. Use this to avoid spamming the channel when periodic checks find nothing actionable.
 
 ### Debouncing
 When writing programs that create immediate events (email watchers, webhook handlers, etc.), always debounce. If 50 emails arrive in a minute, don't create 50 immediate events. Instead collect events over a window and create ONE immediate event summarizing what happened, or just signal "new activity, check inbox" rather than per-item events. Or simpler: use a periodic event to check for new items every N minutes instead of immediate events.
@@ -322,7 +310,7 @@ grep '"userName":"mario"' log.jsonl | tail -20 | jq -c '{date: .date[0:19], text
 - read: Read files
 - write: Create/overwrite files
 - edit: Surgical file edits
-- attach: Share files to Slack
+- attach: Share files to chat
 
 Each tool requires a "label" parameter (shown to user).
 `;
@@ -428,19 +416,40 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
-	const authStorage = AuthStorage.create(join(homedir(), ".pi", "mom", "auth.json"));
+	const authStorage = AuthStorage.create(join(homedir(), ".fitclaw", "agent", "auth.json"));
 	const modelRegistry = ModelRegistry.create(authStorage);
+
+	// Resolve model from env vars, with fallback
+	const llmProvider = process.env.MOM_LLM_PROVIDER || "MiniMax";
+	const llmModelId = process.env.MOM_LLM_MODEL || "MiniMax-M2.7-highspeed";
+	const resolvedModel = modelRegistry.find(llmProvider, llmModelId);
+	if (!resolvedModel) {
+		throw new Error(
+			`Model not found: "${llmProvider}/${llmModelId}".\n` +
+				"Configure models.json or set MOM_LLM_PROVIDER / MOM_LLM_MODEL env vars.",
+		);
+	}
+	log.logInfo(`[${channelId}] Using model: ${llmProvider}/${llmModelId}`);
 
 	// Create agent
 	const agent = new Agent({
 		initialState: {
 			systemPrompt,
-			model,
+			model: resolvedModel,
 			thinkingLevel: "off",
 			tools,
 		},
 		convertToLlm,
-		getApiKey: async () => getAnthropicApiKey(authStorage),
+		getApiKey: async () => {
+			const auth = await modelRegistry.getApiKeyAndHeaders(resolvedModel);
+			if (!auth.ok || !auth.apiKey) {
+				throw new Error(
+					`No API key found for "${resolvedModel.provider}".\n\n` +
+						"Set API key via auth.json or environment variable (e.g., MINIMAX_API_KEY).",
+				);
+			}
+			return auth.apiKey;
+		},
 	});
 
 	// Load existing messages
@@ -477,7 +486,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	// Mutable per-run state - event handler references this
 	const runState = {
-		ctx: null as SlackContext | null,
+		ctx: null as BotContext | null,
 		logCtx: null as { channelId: string; userName?: string; channelName?: string } | null,
 		queue: null as {
 			enqueue(fn: () => Promise<void>, errorContext: string): void;
@@ -590,7 +599,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 				for (const thinking of thinkingParts) {
 					log.logThinking(logCtx, thinking);
-					queue.enqueueMessage(`_${thinking}_`, "main", "thinking main");
 					queue.enqueueMessage(`_${thinking}_`, "thread", "thinking thread", false);
 				}
 
@@ -638,7 +646,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	return {
 		async run(
-			ctx: SlackContext,
+			ctx: BotContext,
 			_store: ChannelStore,
 			_pendingMessages?: PendingMessage[],
 		): Promise<{ stopReason: string; errorMessage?: string }> {
@@ -746,6 +754,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const nonImagePaths: string[] = [];
 
 			for (const a of ctx.message.attachments || []) {
+				if (!a.local) continue;
 				const fullPath = `${workspacePath}/${a.local}`;
 				const mimeType = getImageMimeType(a.local);
 
@@ -839,7 +848,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 						lastAssistantMessage.usage.cacheRead +
 						lastAssistantMessage.usage.cacheWrite
 					: 0;
-				const contextWindow = model.contextWindow || 200000;
+				const contextWindow = resolvedModel.contextWindow || 200000;
 
 				const summary = log.logUsageSummary(runState.logCtx!, runState.totalUsage, contextTokens, contextWindow);
 				runState.queue.enqueue(() => ctx.respondInThread(summary), "usage summary");
