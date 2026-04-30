@@ -2,6 +2,8 @@ export { createGetBodyMetricsHistoryTool, createLogBodyMetricsTool } from "./bod
 export { createGetExerciseDetailTool, createQueryExercisesTool } from "./exercises.js";
 export { createGetCurrentPlanTool, createGetTodayWorkoutTool, createTrainingPlanTool } from "./plan.js";
 export { createGetProgressSummaryTool, createLogProgressiveOverloadTool } from "./progress.js";
+export type { FitnessData } from "./store.js";
+export { loadFitnessData, persist } from "./store.js";
 export { createGetWorkoutHistoryTool, createLogWorkoutTool } from "./workout.js";
 
 import type { AgentTool } from "@fitclaw/agent-core";
@@ -11,18 +13,20 @@ import { createGetCurrentPlanTool, createGetTodayWorkoutTool, createTrainingPlan
 import { createGetProgressSummaryTool, createLogProgressiveOverloadTool } from "./progress.js";
 import { createGetWorkoutHistoryTool, createLogWorkoutTool } from "./workout.js";
 
-export function createAllFitnessTools(): AgentTool<any>[] {
+export function createAllFitnessTools(dataDir?: string): AgentTool<any>[] {
+	const dir = dataDir ?? "";
+
 	return [
 		createQueryExercisesTool(),
 		createGetExerciseDetailTool(),
-		createLogWorkoutTool(),
-		createGetWorkoutHistoryTool(),
-		createLogBodyMetricsTool(),
-		createGetBodyMetricsHistoryTool(),
-		createTrainingPlanTool(),
-		createGetCurrentPlanTool(),
-		createGetTodayWorkoutTool(),
-		createGetProgressSummaryTool(),
-		createLogProgressiveOverloadTool(),
+		createLogWorkoutTool(dir),
+		createGetWorkoutHistoryTool(dir),
+		createLogBodyMetricsTool(dir),
+		createGetBodyMetricsHistoryTool(dir),
+		createTrainingPlanTool(dir),
+		createGetCurrentPlanTool(dir),
+		createGetTodayWorkoutTool(dir),
+		createGetProgressSummaryTool(dir),
+		createLogProgressiveOverloadTool(dir),
 	];
 }

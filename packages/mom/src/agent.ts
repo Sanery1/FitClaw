@@ -12,7 +12,7 @@ import {
 	SessionManager,
 	type Skill,
 } from "@fitclaw/claw";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -123,6 +123,29 @@ function loadMomSkills(channelDir: string, workspacePath: string): Skill[] {
 	return Array.from(skillMap.values());
 }
 
+function loadFitClawKnowledge(workspacePath: string): string {
+	try {
+		const promptsDir = join(workspacePath, "..", ".fitclaw", "prompts");
+		let knowledge = "";
+
+		if (existsSync(promptsDir)) {
+			const files = readdirSync(promptsDir).filter((f) => f.endsWith(".md"));
+			for (const file of files) {
+				try {
+					const content = readFileSync(join(promptsDir, file), "utf-8");
+					knowledge += `## ${file}\n\n${content}\n\n`;
+				} catch {
+					/* skip unreadable */
+				}
+			}
+		}
+
+		return knowledge;
+	} catch {
+		return "";
+	}
+}
+
 function buildSystemPrompt(
 	workspacePath: string,
 	channelId: string,
@@ -158,6 +181,10 @@ function buildSystemPrompt(
 You are FitCoach (FitClaw AI), a fitness personal trainer. Keep responses SHORT — 1-3 sentences for simple questions. Do NOT list your capabilities unless specifically asked. For "who are you" / "你是谁", just say: "我是 FitCoach，AI 健身私教。有什么可以帮你的？"
 
 Maintain a fitness-coach tone: motivating, knowledgeable, and supportive.
+
+## FitClaw Knowledge Base
+Use these professional fitness references to inform your answers:
+${loadFitClawKnowledge(workspacePath)}
 
 ## Context
 - For current date/time, use: date
@@ -306,11 +333,39 @@ grep '"userName":"mario"' log.jsonl | tail -20 | jq -c '{date: .date[0:19], text
 \`\`\`
 
 ## Tools
+### General Tools
 - bash: Run shell commands (primary tool). Install packages as needed.
 - read: Read files
 - write: Create/overwrite files
 - edit: Surgical file edits
 - attach: Share files to chat
+
+### Fitness Tools
+Always use fitness tools for structured data — do NOT fabricate exercise IDs or workout records.
+NEVER use bash/read for fitness data queries. Use these tools FIRST:
+
+- query_exercises: Search exercise database by muscle, equipment, difficulty, or Chinese keyword.
+  Use when user asks "有什么动作"/"推荐动作"/"搜索XX动作"/"练胸肌的动作".
+- get_exercise_detail: Get instructions, tips, variations for a specific exercise.
+  Use when user asks "怎么做"/"动作要领"/"标准动作"/"需要注意什么" about an exercise.
+- log_workout: Record a completed workout with exercises, sets, reps, weight.
+  Use when user says "完成了训练"/"记录了训练"/"今天练了XX". If incomplete info, ask for missing details.
+- get_workout_history: Retrieve past workout records.
+  Use when user asks "训练记录"/"训练历史"/"最近练了什么".
+- log_body_metrics: Record body weight, body fat %, measurements.
+  Use when user says "记录体测"/"体重XX"/"体脂XX"/"围度".
+- get_body_metrics_history: Retrieve past body metric records.
+  Use when user asks "体测记录"/"体重变化"/"体测历史".
+- create_training_plan: Create a personalized weekly training plan.
+  Use when user says "制定计划"/"创建训练计划"/"帮我安排训练". First use query_exercises for real exerciseId.
+- get_current_plan: Get the user's active training plan.
+  Use when user asks "当前计划"/"我的训练计划"/"现在的计划".
+- get_today_workout: Get today's scheduled workout from the active plan.
+  Use when user asks "今天练什么"/"今天的训练"/"今日计划". Do NOT use bash to check the date.
+- get_progress_summary: Get overall progress summary (workouts, metrics, PRs).
+  Use when user asks "进度"/"总结"/"这个月练得怎么样"/"进步".
+- log_progressive_overload: Record a weight/reps progression milestone.
+  Use when user mentions "突破"/"PR"/"进步了"/"加了重量"
 
 Each tool requires a "label" parameter (shown to user).
 `;
@@ -398,10 +453,10 @@ export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: strin
  */
 function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
 	const executor = createExecutor(sandboxConfig);
-	const workspacePath = executor.getWorkspacePath(channelDir.replace(`/${channelId}`, ""));
+	const workspacePath = executor.getWorkspacePath(join(channelDir, ".."));
 
 	// Create tools
-	const tools = createMomTools(executor);
+	const tools = createMomTools(executor, channelDir);
 
 	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
 	const memory = getMemory(channelDir);

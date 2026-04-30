@@ -1,8 +1,13 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { PlanExercise, TrainingPlan } from "../../fitness/schemas.js";
+import { getPlan, loadFitnessData, persist, setPlan } from "./store.js";
 
-let currentPlan: TrainingPlan | null = null;
+const DEFAULT = "";
+
+export function getCurrentPlanState(dataDir: string = DEFAULT): TrainingPlan | null {
+	return getPlan(dataDir);
+}
 
 const planExerciseSchema = Type.Object({
 	exerciseId: Type.String(),
@@ -48,7 +53,15 @@ const getTodayWorkoutSchema = Type.Object({
 	dayOfWeek: Type.Optional(Type.Number({ description: "Day of week (1=Mon, 7=Sun). Default: today's day" })),
 });
 
-export function createTrainingPlanTool(): AgentTool<typeof createTrainingPlanSchema> {
+async function ensureLoaded(dataDir: string): Promise<void> {
+	if (dataDir) await loadFitnessData(dataDir);
+}
+
+async function maybeSave(dataDir: string): Promise<void> {
+	if (dataDir) await persist(dataDir);
+}
+
+export function createTrainingPlanTool(dataDir: string = DEFAULT): AgentTool<typeof createTrainingPlanSchema> {
 	return {
 		name: "create_training_plan",
 		label: "Create Training Plan",
@@ -56,9 +69,12 @@ export function createTrainingPlanTool(): AgentTool<typeof createTrainingPlanSch
 			"Create or overwrite the user's training plan. The plan defines weekly schedule, exercises, sets/reps, and progression strategy. Use after collecting user preferences and consulting the exercise database.",
 		parameters: createTrainingPlanSchema,
 		async execute(_toolCallId, params) {
+			await ensureLoaded(dataDir);
+			const existing = getPlan(dataDir);
 			const now = new Date().toISOString();
-			currentPlan = {
-				createdAt: currentPlan?.createdAt ?? now,
+
+			const plan: TrainingPlan = {
+				createdAt: existing?.createdAt ?? now,
 				updatedAt: now,
 				goal: params.goal,
 				experienceLevel: params.experienceLevel as "beginner" | "intermediate" | "advanced",
@@ -85,6 +101,9 @@ export function createTrainingPlanTool(): AgentTool<typeof createTrainingPlanSch
 				})),
 			};
 
+			setPlan(dataDir, plan);
+			await maybeSave(dataDir);
+
 			const totalExercises = params.weeks.reduce(
 				(sum, w) => sum + w.days.reduce((dSum, d) => dSum + d.exercises.length, 0),
 				0,
@@ -103,13 +122,13 @@ export function createTrainingPlanTool(): AgentTool<typeof createTrainingPlanSch
 						}),
 					},
 				],
-				details: currentPlan,
+				details: plan,
 			};
 		},
 	};
 }
 
-export function createGetCurrentPlanTool(): AgentTool<typeof getCurrentPlanSchema> {
+export function createGetCurrentPlanTool(dataDir: string = DEFAULT): AgentTool<typeof getCurrentPlanSchema> {
 	return {
 		name: "get_current_plan",
 		label: "Get Current Plan",
@@ -117,7 +136,10 @@ export function createGetCurrentPlanTool(): AgentTool<typeof getCurrentPlanSchem
 			"Get the active training plan. Use when the user asks about their current plan or before making adjustments.",
 		parameters: getCurrentPlanSchema,
 		async execute() {
-			if (!currentPlan) {
+			await ensureLoaded(dataDir);
+			const plan = getPlan(dataDir);
+
+			if (!plan) {
 				return {
 					content: [
 						{
@@ -130,14 +152,14 @@ export function createGetCurrentPlanTool(): AgentTool<typeof getCurrentPlanSchem
 			}
 
 			return {
-				content: [{ type: "text" as const, text: JSON.stringify(currentPlan, null, 2) }],
+				content: [{ type: "text" as const, text: JSON.stringify(plan, null, 2) }],
 				details: { planExists: true },
 			};
 		},
 	};
 }
 
-export function createGetTodayWorkoutTool(): AgentTool<typeof getTodayWorkoutSchema> {
+export function createGetTodayWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeof getTodayWorkoutSchema> {
 	return {
 		name: "get_today_workout",
 		label: "Get Today's Workout",
@@ -145,9 +167,11 @@ export function createGetTodayWorkoutTool(): AgentTool<typeof getTodayWorkoutSch
 			"Get the planned workout for today (or specified day). Returns exercises, sets, reps, and notes for that day.",
 		parameters: getTodayWorkoutSchema,
 		async execute(_toolCallId, params) {
-			const day = (params.dayOfWeek ?? new Date().getDay()) || 7; // Sunday = 7
+			await ensureLoaded(dataDir);
+			const plan = getPlan(dataDir);
+			const day = (params.dayOfWeek ?? new Date().getDay()) || 7;
 
-			if (!currentPlan) {
+			if (!plan) {
 				return {
 					content: [
 						{
@@ -162,7 +186,7 @@ export function createGetTodayWorkoutTool(): AgentTool<typeof getTodayWorkoutSch
 				};
 			}
 
-			const allDays = currentPlan.weeks.flatMap((w) => w.days);
+			const allDays = plan.weeks.flatMap((w) => w.days);
 			const todayExercise = allDays.find((d) => d.dayOfWeek === day);
 
 			if (!todayExercise) {

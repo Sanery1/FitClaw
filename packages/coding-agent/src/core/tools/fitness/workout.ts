@@ -1,8 +1,9 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { WorkoutRecord } from "../../fitness/schemas.js";
+import { getWorkouts, loadFitnessData, persist } from "./store.js";
 
-const inMemoryWorkouts: WorkoutRecord[] = [];
+const DEFAULT = "";
 
 const logWorkoutSchema = Type.Object({
 	date: Type.Optional(Type.String({ description: "Workout date in YYYY-MM-DD format (default: today)" })),
@@ -29,7 +30,14 @@ const getWorkoutHistorySchema = Type.Object({
 	toDate: Type.Optional(Type.String({ description: "End date YYYY-MM-DD" })),
 });
 
-export function createLogWorkoutTool(): AgentTool<typeof logWorkoutSchema> {
+async function ensureLoaded(dataDir: string): Promise<void> {
+	if (dataDir) await loadFitnessData(dataDir);
+}
+async function maybeSave(dataDir: string): Promise<void> {
+	if (dataDir) await persist(dataDir);
+}
+
+export function createLogWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeof logWorkoutSchema> {
 	return {
 		name: "log_workout",
 		label: "Log Workout",
@@ -37,6 +45,9 @@ export function createLogWorkoutTool(): AgentTool<typeof logWorkoutSchema> {
 			"Record a completed workout session. Stores exercises performed, sets, reps, weights, duration, and notes. Call after user confirms a workout is complete.",
 		parameters: logWorkoutSchema,
 		async execute(_toolCallId, params) {
+			await ensureLoaded(dataDir);
+			const workouts = getWorkouts(dataDir);
+
 			const record: WorkoutRecord = {
 				date: params.date ?? new Date().toISOString().slice(0, 10),
 				exercises: params.exercises.map((ex) => ({
@@ -48,7 +59,8 @@ export function createLogWorkoutTool(): AgentTool<typeof logWorkoutSchema> {
 				notes: params.notes,
 			};
 
-			inMemoryWorkouts.push(record);
+			workouts.push(record);
+			await maybeSave(dataDir);
 
 			const totalSets = record.exercises.reduce((sum, ex) => sum + ex.sets.length, 0);
 
@@ -71,7 +83,7 @@ export function createLogWorkoutTool(): AgentTool<typeof logWorkoutSchema> {
 	};
 }
 
-export function createGetWorkoutHistoryTool(): AgentTool<typeof getWorkoutHistorySchema> {
+export function createGetWorkoutHistoryTool(dataDir: string = DEFAULT): AgentTool<typeof getWorkoutHistorySchema> {
 	return {
 		name: "get_workout_history",
 		label: "Get Workout History",
@@ -79,7 +91,8 @@ export function createGetWorkoutHistoryTool(): AgentTool<typeof getWorkoutHistor
 			"Retrieve past workout records. Use to review training consistency, track progress, or inform training plan adjustments.",
 		parameters: getWorkoutHistorySchema,
 		async execute(_toolCallId, params) {
-			let results = [...inMemoryWorkouts];
+			await ensureLoaded(dataDir);
+			let results = [...getWorkouts(dataDir)];
 
 			if (params.fromDate) {
 				results = results.filter((w) => w.date >= params.fromDate!);

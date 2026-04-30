@@ -38,12 +38,16 @@
 - ✅ 包重命名：200+ 源文件 import 路径、tsconfig、vitest 别名全部更新
 - ✅ 11 个健身 Agent 工具（动作数据库 / 训练记录 / 体测 / 训练计划 / 进度分析）
 - ✅ 50 个动作的完整数据库 `packages/coding-agent/data/exercises.json`（中英文）
-- ✅ 知识库系统 `.fitclaw/`（skills / prompts + `fitclaw.md`）
+- ✅ 知识库系统 `.fitclaw/`（skills / prompts）
 - ✅ 飞书 Bot 完整实现 `packages/mom/src/feishu.ts`（WebSocket 长连接模式）
 - ✅ `.gitignore` 更新、`README.md` 完整重写
 - ✅ 配置目录从 `~/.pi/` 迁移到 `~/.fitclaw/`
 - ✅ 代码推送到 GitHub
 - ✅ 文档归档到 `docs/` 目录
+- ✅ 健身工具集成到 Bot（`createMomTools` 包含 `createAllFitnessTools()`）
+- ✅ System prompt 工具描述加入触发词（P1）
+- ✅ 健身数据 JSON 文件持久化，按 channel 隔离（P0）
+- ✅ Bot 加载 `.fitclaw/prompts/` 知识库（P2）
 
 ## 技术记录（Plan 文件）
 
@@ -59,26 +63,61 @@
 1. **CLI 品牌重构**（详见 plan-tranquil-kahn.md）
    - System prompt 仍自称 "pi, a coding agent harness"
    - CLI 命令名仍为 `pi`，需改为 `fitclaw`
-   - 启动信息过多，需精简
-   - 涉及 6 个文件：`package.json`、`config.ts`、`system-prompt.ts`、`interactive-mode.ts`、`args.ts`、`package-manager-cli.ts`
+   - 涉及 6 个文件
 
 ### 🟡 中优先级
 
-2. **APP_NAME 全面替换** — 代码中仍有多处硬编码 `"pi"` 字符串（env var `PI_CODING_AGENT`、`PI_PACKAGE_DIR`、`PI_OFFLINE` 等），需分批替换
-3. **GitHub URL 更新** — `config.ts` 和 `interactive-mode.ts` 中仍有 `github.com/badlogic/pi-mono` 引用
+2. **CLI 健身模式** — CLI 虽然有健身工具可用，但 system prompt 不含健身私教身份，不加载健身知识库。需添加 `--fitness` 模式或复用 Bot 的 FitCoach 人格
+3. **APP_NAME 全面替换** — 代码中仍有多处硬编码 `"pi"` 字符串
+4. **GitHub URL 更新** — `config.ts` 和 `interactive-mode.ts` 中仍有 `github.com/badlogic/pi-mono` 引用
 
 ### 🟢 低优先级
 
-5. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面，无健身专用 UI
-6. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
-7. **移动端适配** — TUI 之外的移动端健身体验
+5. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
+6. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
+7. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
+8. **多用户数据隔离** — 当前 Bot 按 channel 隔离数据（P0 已实现），但同一 channel 的所有用户共享数据。未来可按 userId 细分
+
+## 健身数据架构
+
+### 数据存储位置
+
+| 数据类型 | 来源 | 存储 |
+|---------|------|------|
+| 动作数据库 | `packages/coding-agent/data/exercises.json`（静态文件） | 磁盘，永久 |
+| 训练记录 / 体测 / 计划 / 超负荷 | 用户通过 Bot 输入 | `<channelDir>/fitness-data.json`（JSON 文件） |
+| 对话历史 | 消息记录 | `<channelDir>/context.jsonl` + `log.jsonl` |
+
+### 数据写入流程
+
+```
+用户消息 → LLM 决定调用工具 → tool.execute()
+  → loadFitnessData(dataDir)  // 首次从磁盘加载
+  → getWorkouts(dataDir) 等    // 读写内存
+  → persist(dataDir)           // 立即 flush 到磁盘
+```
+
+### 工具调用检测
+
+PM2 日志中查看：
+- `↳ toolName` — 工具开始执行
+- `✓ toolName (Xs)` — 工具成功完成
+- `💬 Response` 但没有 `↳` — LLM 纯文本回答，未调工具
+
+### System Prompt 版本
+
+| 组件 | 文件 | 健身相关 |
+|------|------|---------|
+| Bot system prompt | `packages/mom/src/agent.ts` `buildSystemPrompt()` | 有：工具描述 + 触发词 + `.fitclaw/prompts/` 知识库 |
+| CLI system prompt | `packages/coding-agent/src/core/system-prompt.ts` `buildSystemPrompt()` | 无健身人格（仅 `buildFitnessPromptHook()` 在传入 profile 时注入） |
 
 ## 如何启动
 
 ```bash
 npm install
 npm run build                          # 构建全部包
-node packages/coding-agent/dist/cli.js # 启动 CLI（当前仍用此路径）
+node packages/coding-agent/dist/cli.js # 启动 CLI
+pm2 start ecosystem.config.cjs         # 启动飞书 Bot（需 PM2）
 ```
 
 ## 配置系统

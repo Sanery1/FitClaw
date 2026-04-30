@@ -230,6 +230,7 @@ export {
 } from "./core/skills.js";
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
+// Fitness tools
 export {
 	type BashOperations,
 	type BashSpawnContext,
@@ -237,6 +238,7 @@ export {
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
+	createAllFitnessTools,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createFindToolDefinition,
