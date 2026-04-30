@@ -24,13 +24,13 @@ describe("renderFeishuCard", () => {
 
 	it("truncates header to 64 characters", () => {
 		const longHeader = "A".repeat(100);
-		const result = renderFeishuCard(longHeader + "\nBody");
+		const result = renderFeishuCard(`${longHeader}\nBody`);
 		expect(result.header?.title?.content.length).toBe(64);
 	});
 
 	it("truncates body content to 2000 characters", () => {
 		const longBody = "B".repeat(3000);
-		const result = renderFeishuCard("Header\n" + longBody);
+		const result = renderFeishuCard(`Header\n${longBody}`);
 		expect(result.elements![0].text?.content.length).toBe(2000);
 	});
 
