@@ -25,17 +25,28 @@ export function renderFeishuCard(content: string): FeishuCard {
 	const lines = content.split("\n");
 	const elements: FeishuCardElement[] = [];
 	let headerText = "";
+	let inCodeBlock = false;
 
 	for (const line of lines) {
 		const trimmed = line.trim();
+
+		if (trimmed.startsWith("```")) {
+			inCodeBlock = !inCodeBlock;
+			elements.push({
+				tag: "div",
+				text: { tag: "lark_md", content: trimmed.slice(0, 2000) },
+			});
+			continue;
+		}
+
 		if (!trimmed) {
-			if (elements.length > 0) {
+			if (elements.length > 0 || headerText) {
 				elements.push({ tag: "hr" });
 			}
 			continue;
 		}
 
-		if (!headerText && !trimmed.startsWith("-") && !trimmed.startsWith("```")) {
+		if (!headerText && !trimmed.startsWith("-") && !inCodeBlock) {
 			headerText = trimmed.slice(0, 64);
 			continue;
 		}
