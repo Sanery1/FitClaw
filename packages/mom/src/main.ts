@@ -98,17 +98,18 @@ interface ChannelState {
 
 const channelStates = new Map<string, ChannelState>();
 
-function getState(channelId: string): ChannelState {
-	let state = channelStates.get(channelId);
+function getState(channelId: string, userId?: string): ChannelState {
+	const stateKey = userId ? `${channelId}/${userId}` : channelId;
+	let state = channelStates.get(stateKey);
 	if (!state) {
-		const channelDir = join(workingDir, channelId);
+		const channelDir = userId ? join(workingDir, channelId, userId) : join(workingDir, channelId);
 		state = {
 			running: false,
-			runner: getOrCreateRunner(sandbox, channelId, channelDir),
+			runner: getOrCreateRunner(sandbox, stateKey, channelDir),
 			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN }),
 			stopRequested: false,
 		};
-		channelStates.set(channelId, state);
+		channelStates.set(stateKey, state);
 	}
 	return state;
 }
@@ -456,7 +457,9 @@ async function runFeishuMode() {
 			}
 		}
 
-		const state = getState(event.chatId);
+		const isGroup = event.type === "mention";
+		const userId = isGroup ? event.user.openId : undefined;
+		const state = getState(event.chatId, userId);
 		state.running = true;
 
 		log.logInfo(`[${event.chatId}] Feishu ${event.type}: ${event.text.substring(0, 50)}`);
