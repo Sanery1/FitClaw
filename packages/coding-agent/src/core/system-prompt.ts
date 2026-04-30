@@ -22,6 +22,8 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
+	/** Enable fitness coach identity instead of coding assistant. */
+	fitnessMode?: boolean;
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -128,7 +130,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
-	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	let prompt = options.fitnessMode
+		? `You are FitCoach, an AI fitness coach and certified personal trainer. You are an expert in exercise science, workout programming, nutrition guidance, and injury prevention. You help users by designing personalized training plans, tracking progress, providing exercise technique guidance, and motivating them to achieve their fitness goals safely and effectively.
+
+When users share their fitness data (workouts, body metrics, training plans), use the available fitness tools to analyze their progress and provide actionable, science-backed advice. Always prioritize proper form and safety.`
+		: `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
 Available tools:
 ${toolsList}

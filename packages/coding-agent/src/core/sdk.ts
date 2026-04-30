@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, type ThinkingLevel } from "@fitclaw/agent-core";
 import { type Message, type Model, streamSimple } from "@fitclaw/ai";
-import { getAgentDir } from "../config.js";
+import { APP_NAME, getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -66,6 +66,8 @@ export interface CreateAgentSessionOptions {
 	tools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
+	/** Enable fitness coach identity instead of coding assistant. */
+	fitnessMode?: boolean;
 
 	/** Resource loader. When omitted, DefaultResourceLoader is used. */
 	resourceLoader?: ResourceLoader;
@@ -136,7 +138,7 @@ function getAttributionHeaders(
 	if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
 		return {
 			"HTTP-Referer": "https://fitclaw.dev",
-			"X-OpenRouter-Title": "fitclaw",
+			"X-OpenRouter-Title": APP_NAME,
 			"X-OpenRouter-Categories": "cli-agent",
 		};
 	}
@@ -395,6 +397,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		fitnessMode: options.fitnessMode,
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 

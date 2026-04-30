@@ -5,7 +5,8 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
-import { resolve } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual, supportsXhigh } from "@fitclaw/ai";
 import { ProcessTerminal, setKeybindings, TUI } from "@fitclaw/tui";
@@ -515,6 +516,25 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 	const authStorage = AuthStorage.create();
+
+	// Load fitness prompt files when --fitness is set
+	let fitnessPromptText: string | undefined;
+	if (parsed.fitness) {
+		try {
+			const promptsDir = join(cwd, ".fitclaw", "prompts");
+			const entries = await readdir(promptsDir);
+			const mdFiles = entries.filter((e) => e.endsWith(".md")).sort();
+			if (mdFiles.length > 0) {
+				const contents = await Promise.all(mdFiles.map((f) => readFile(join(promptsDir, f), "utf-8")));
+				fitnessPromptText =
+					"# Fitness Knowledge Base\n\n" +
+					mdFiles.map((f, i) => `## ${f.replace(".md", "")}\n\n${contents[i]}`).join("\n\n");
+			}
+		} catch {
+			/* prompts dir may not exist */
+		}
+	}
+
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
@@ -537,7 +557,9 @@ export async function main(args: string[], options?: MainOptions) {
 				noThemes: parsed.noThemes,
 				noContextFiles: parsed.noContextFiles,
 				systemPrompt: parsed.systemPrompt,
-				appendSystemPrompt: parsed.appendSystemPrompt,
+				appendSystemPrompt: fitnessPromptText
+					? [...(parsed.appendSystemPrompt ?? []), fitnessPromptText]
+					: parsed.appendSystemPrompt,
 				extensionFactories: options?.extensionFactories,
 			},
 		});
@@ -588,6 +610,7 @@ export async function main(args: string[], options?: MainOptions) {
 			tools: sessionOptions.tools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
+			fitnessMode: parsed.fitness ?? false,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
