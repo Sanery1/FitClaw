@@ -16,6 +16,7 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
+import { createAllFitnessTools } from "./tools/fitness/index.js";
 import {
 	createBashTool,
 	createCodingTools,
@@ -29,6 +30,7 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.js";
+import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -384,6 +386,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	let customTools = options.customTools;
+	if (options.fitnessMode) {
+		const fitnessTools = createAllFitnessTools(sessionManager.getSessionDir());
+		const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
+		customTools = [...(customTools ?? []), ...fitnessDefinitions];
+	}
+
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -391,7 +400,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
-		customTools: options.customTools,
+		customTools,
 		modelRegistry,
 		initialActiveToolNames,
 		allowedToolNames,
