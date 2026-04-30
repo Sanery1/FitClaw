@@ -2,7 +2,7 @@
 
 > AI 健身私教 + 智能编程助手 — 基于 Claude Code 生态的全栈 AI Agent 平台
 
-FitClaw 是一个多模态 AI Agent 平台，将**全流程健身私教**与**智能编程助手**结合为一体。项目 Fork 自 [pi-mono](https://github.com/badlogic/pi-mono)，在原有编程代理能力之上，增加了完整的健身教练功能：
+FitClaw 是一个多模态 AI Agent 平台，将**全流程健身私教**与**智能编程助手**结合为一体。项目 Fork 自 [pi-mono](https://github.com/Sanery1/FitClaw)，在原有编程代理能力之上，增加了完整的健身教练功能：
 
 - **个性化训练计划生成**：基于用户经验、目标、器械自动设计分化训练方案
 - **动作数据库**：50+ 动作的详细教学（中文/英文），含标准动作要领、常见错误、变式
@@ -60,7 +60,7 @@ npm run dev          # 并行 watch 所有包
 
 ## Fork 说明
 
-本项目 Fork 自 [badlogic/pi-mono](https://github.com/badlogic/pi-mono)，原始版权归 Mario Zechner 所有。
+本项目 Fork 自 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw)，原始版权归 Mario Zechner 所有。
 
 主要改动：
 - 所有包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*`

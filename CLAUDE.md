@@ -4,13 +4,13 @@
 
 ## 一句话定位
 
-**FitClaw = AI 健身私教 + 智能编程助手**，基于 [pi-mono](https://github.com/badlogic/pi-mono) Fork 的全栈 AI Agent 平台。
+**FitClaw = AI 健身私教 + 智能编程助手**，基于 [pi-mono](https://github.com/Sanery1/FitClaw) Fork 的全栈 AI Agent 平台。
 
 ## 项目来历
 
 | 时间 | 事件 |
 |------|------|
-| 2026-04 | 从 [badlogic/pi-mono](https://github.com/badlogic/pi-mono) Fork，原始作者 Mario Zechner |
+| 2026-04 | 从 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw) Fork，原始作者 Mario Zechner |
 | 2026-04 | 全部 7 个包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*` |
 | 2026-04 | 新增健身私教功能（11 个 Agent 工具 + 动作数据库 + 知识库） |
 | 2026-04 | 新增飞书 Bot 适配器占位 |
@@ -69,7 +69,7 @@
 
 2. **CLI 健身模式** — CLI 虽然有健身工具可用，但 system prompt 不含健身私教身份，不加载健身知识库。需添加 `--fitness` 模式或复用 Bot 的 FitCoach 人格
 3. **APP_NAME 全面替换** — 代码中仍有多处硬编码 `"pi"` 字符串
-4. **GitHub URL 更新** — `config.ts` 和 `interactive-mode.ts` 中仍有 `github.com/badlogic/pi-mono` 引用
+4. **GitHub URL 更新** — 部分文件中仍有 `github.com/badlogic/pi-mono` 残留引用（已完成）
 
 ### 🟢 低优先级
 
