@@ -58,25 +58,17 @@
 
 ## 待完成 / 待完善
 
-### 🔴 高优先级
+### ✅ 已完成 (2026-04-30)
 
-1. **CLI 品牌重构**（详见 plan-tranquil-kahn.md）
-   - System prompt 仍自称 "pi, a coding agent harness"
-   - CLI 命令名仍为 `pi`，需改为 `fitclaw`
-   - 涉及 6 个文件
+1. **CLI 品牌重构** — PiManifest → FitClawManifest 类型重命名，pi→fitclaw 字符串替换 (d743e3bc)
+2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + `.fitclaw/prompts/` 知识库加载 (1277ef74)
+3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE/.pi/prompts 全部更新 (c1d52c3d)
 
-### 🟡 中优先级
+### 🟢 低优先级（择机执行）
 
-2. **CLI 健身模式** — CLI 虽然有健身工具可用，但 system prompt 不含健身私教身份，不加载健身知识库。需添加 `--fitness` 模式或复用 Bot 的 FitCoach 人格
-3. **APP_NAME 全面替换** — 代码中仍有多处硬编码 `"pi"` 字符串
-4. **GitHub URL 更新** — 部分文件中仍有 `github.com/badlogic/pi-mono` 残留引用（已完成）
-
-### 🟢 低优先级
-
-5. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
-6. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
-7. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
-8. **多用户数据隔离** — 当前 Bot 按 channel 隔离数据（P0 已实现），但同一 channel 的所有用户共享数据。未来可按 userId 细分
+4. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
+5. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
+6. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
 
 ## 健身数据架构
 
