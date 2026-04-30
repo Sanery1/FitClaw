@@ -352,11 +352,9 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 
 	const flushResponse = async () => {
 		if (finalSent || !accumulatedText.trim()) return;
-		log.logInfo(`[DEBUG] flushResponse proceeding — textLen=${accumulatedText.trim().length}`);
 		finalSent = true;
 		try {
-			log.logInfo(`[DEBUG] Calling bot.sendMessage chatId=${event.chatId} textLen=${accumulatedText.length}`);
-			await bot.sendMessage(event.chatId, accumulatedText);
+			await bot.sendThreadMessage(event.messageId, accumulatedText);
 		} catch (err) {
 			log.logWarning("Feishu flush response error", err instanceof Error ? err.message : String(err));
 		}
@@ -397,20 +395,9 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 			await updatePromise;
 		},
 
-		respondInThread: async (text: string) => {
-			updatePromise = updatePromise.then(async () => {
-				try {
-					const MAX_THREAD_LENGTH = 20000;
-					const threadText =
-						text.length > MAX_THREAD_LENGTH
-							? `${text.substring(0, MAX_THREAD_LENGTH - 50)}\n\n_(truncated)_`
-							: text;
-					await bot.sendThreadMessage(event.messageId, threadText);
-				} catch (err) {
-					log.logWarning("Feishu respondInThread error", err instanceof Error ? err.message : String(err));
-				}
-			});
-			await updatePromise;
+		respondInThread: async (_text: string) => {
+			// Thinking content and tool details are suppressed in Feishu v1.
+			// The final response is sent once via flushResponse() as a reply to the original message.
 		},
 
 		setTyping: async () => {
@@ -422,11 +409,9 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 		},
 
 		setWorking: async (working: boolean) => {
-			log.logInfo(`[DEBUG] setWorking called — working=${working} accumulatedLen=${accumulatedText.length}`);
 			updatePromise = updatePromise.then(async () => {
 				_isWorking = working;
 				if (!working) {
-					log.logInfo(`[DEBUG] setWorking calling flushResponse — accumulatedLen=${accumulatedText.length}`);
 					await flushResponse();
 				}
 			});
@@ -480,11 +465,8 @@ async function runFeishuMode() {
 			const ctx = createFeishuContext(event, bot, state);
 			await ctx.setTyping(true);
 			await ctx.setWorking(true);
-			log.logInfo("[DEBUG] About to runner.run()");
 			const result = await state.runner.run(ctx, state.store);
-			log.logInfo(`[DEBUG] runner.run() completed — result keys: ${Object.keys(result || {}).join(",")}`);
 			await ctx.setWorking(false);
-			log.logInfo("[DEBUG] setWorking(false) completed");
 
 			if (result.errorMessage) {
 				await ctx.respond(`Error: ${result.errorMessage}`);

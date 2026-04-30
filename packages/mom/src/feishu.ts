@@ -94,14 +94,6 @@ export class FeishuBot {
 
 	async sendMessage(chatId: string, text: string): Promise<string> {
 		try {
-			log.logInfo(
-				"[DEBUG] sendMessage ENTER — chatId=" +
-					chatId +
-					" textLen=" +
-					text.length +
-					" firstChars=" +
-					JSON.stringify(text.slice(0, 50)),
-			);
 			const res = (await this.client.im.v1.message.create({
 				params: { receive_id_type: "chat_id" },
 				data: {
@@ -113,19 +105,12 @@ export class FeishuBot {
 
 			const data = res?.data as Record<string, unknown> | undefined;
 			const messageId = (data?.message_id as string) || "";
-			log.logInfo(
-				"[DEBUG] sendMessage RESULT — messageId=" +
-					JSON.stringify(messageId) +
-					" resKeys=" +
-					Object.keys(res || {}).join(","),
-			);
 			if (!messageId) {
 				log.logWarning("Feishu sendMessage returned empty message_id");
 			}
 			return messageId;
 		} catch (err) {
 			log.logWarning("Feishu sendMessage error", err instanceof Error ? err.message : String(err));
-			log.logInfo(`[DEBUG] sendMessage ERROR — ${err instanceof Error ? err.message : String(err)}`);
 			return "";
 		}
 	}
