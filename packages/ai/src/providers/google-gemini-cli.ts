@@ -950,8 +950,8 @@ export function buildRequest(
 		model: model.id,
 		request,
 		...(isAntigravity ? { requestType: "agent" } : {}),
-		userAgent: isAntigravity ? "antigravity" : "pi-coding-agent",
-		requestId: `${isAntigravity ? "agent" : "pi"}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+		userAgent: isAntigravity ? "antigravity" : "fitclaw-coding-agent",
+		requestId: `${isAntigravity ? "agent" : "fitclaw"}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
 	};
 }
 

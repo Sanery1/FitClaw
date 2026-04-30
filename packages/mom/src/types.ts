@@ -29,7 +29,8 @@ export interface BotContext {
 	channelName?: string;
 	channels: BotChannel[];
 	users: BotUser[];
-	respond: (text: string) => Promise<void>;
+	respond: (text: string, shouldLog?: boolean) => Promise<void>;
+	replaceMessage: (text: string) => Promise<void>;
 	respondInThread: (text: string) => Promise<void>;
 	setTyping: (isTyping: boolean) => Promise<void>;
 	uploadFile: (filePath: string, title?: string) => Promise<void>;

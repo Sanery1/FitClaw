@@ -106,7 +106,7 @@ function getState(channelId: string, userId?: string): ChannelState {
 		state = {
 			running: false,
 			runner: getOrCreateRunner(sandbox, stateKey, channelDir),
-			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN }),
+			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN ?? "" }),
 			stopRequested: false,
 		};
 		channelStates.set(stateKey, state);
@@ -376,7 +376,7 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 			? [{ id: event.user.openId, userName: event.user.name, displayName: event.user.name }]
 			: [],
 
-		respond: async (text: string) => {
+		respond: async (text: string, _shouldLog?: boolean) => {
 			updatePromise = updatePromise.then(async () => {
 				accumulatedText = accumulatedText ? `${accumulatedText}\n${text}` : text;
 
