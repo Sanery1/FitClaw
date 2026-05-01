@@ -31,7 +31,7 @@
 | `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件 |
 | `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
 
-详细架构 → [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)
+架构学习 → [docs/LEARNING_GUIDE.md](./docs/LEARNING_GUIDE.md)
 
 ## 已完成的改造
 

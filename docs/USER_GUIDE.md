@@ -938,4 +938,4 @@ fitclaw --help
 
 ---
 
-> 更多技术细节见 [LEARNING_GUIDE.md](./LEARNING_GUIDE.md)（学习路径）和 [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)（架构文档）。
+> 更多技术细节见 [LEARNING_GUIDE.md](./LEARNING_GUIDE.md)（学习路径与架构文档）。
