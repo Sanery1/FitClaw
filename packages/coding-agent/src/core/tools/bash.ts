@@ -162,6 +162,39 @@ export interface BashToolOptions {
 
 const BASH_PREVIEW_LINES = 5;
 
+/**
+ * Dangerous bash command patterns that should be blocked.
+ * These patterns can cause data loss, system damage, or security compromise.
+ */
+const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+	{ pattern: /\brm\s+-rf\s+\/(\s|$|;|&)/i, reason: "rm -rf / destroys the filesystem" },
+	{ pattern: /\brm\s+-rf\s+\/\*/i, reason: "rm -rf /* destroys the filesystem" },
+	{ pattern: /\bdd\s+.*of=\/dev\/(sda|sdb|nvme|hd|xvd|vd)/i, reason: "dd to block devices overwrites disk" },
+	{ pattern: /\bmkfs\./i, reason: "mkfs formats filesystems destructively" },
+	{ pattern: /\bchmod\s+-R\s+777\s+\/(\s|$|;|&)/i, reason: "chmod 777 / breaks system permissions" },
+	{ pattern: /\bchmod\s+-R\s+000\s+\/(\s|$|;|&)/i, reason: "chmod 000 / locks out the system" },
+	{ pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/i, reason: "fork bomb crashes the system" },
+	{ pattern: /\bmv\s+.*\/\s+\/dev\/null/i, reason: "moving root to /dev/null destroys data" },
+	{ pattern: />\s*\/dev\/sda/i, reason: "redirecting to block device destroys disk" },
+	{
+		pattern: />\s*\/dev\/null.*\b(\/etc|\/usr|\/var|\/home|\/bin|\/sbin|\/lib)/i,
+		reason: "redirecting system paths to null destroys data",
+	},
+	{ pattern: /\bwget\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
+	{ pattern: /\bcurl\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
+];
+
+function validateCommand(command: string): void {
+	const normalized = command.replace(/\\\n/g, " ");
+	for (const { pattern, reason } of DANGEROUS_PATTERNS) {
+		if (pattern.test(normalized)) {
+			throw new Error(
+				`SECURITY_BLOCKED: This command was blocked because it matches a dangerous pattern (${reason}). If you believe this is a false positive, restructure the command to avoid the pattern.`,
+			);
+		}
+	}
+}
+
 type BashRenderState = {
 	startedAt: number | undefined;
 	endedAt: number | undefined;
@@ -291,6 +324,7 @@ export function createBashToolDefinition(
 			_ctx?,
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			validateCommand(resolvedCommand);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			if (onUpdate) {
 				onUpdate({ content: [], details: undefined });

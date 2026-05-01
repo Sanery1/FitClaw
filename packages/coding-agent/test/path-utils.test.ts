@@ -25,12 +25,26 @@ describe("path-utils", () => {
 	});
 
 	describe("resolveToCwd", () => {
-		it("should resolve absolute paths as-is", () => {
-			const result = resolveToCwd("/absolute/path/file.txt", "/some/cwd");
-			expect(result).toBe("/absolute/path/file.txt");
+		it("should allow absolute paths within home directory", () => {
+			const homeDir = require("node:os").homedir();
+			const homePath = resolve(homeDir, ".fitclaw/settings.json");
+			const result = resolveToCwd(homePath, "/some/cwd");
+			expect(result).toBe(homePath);
 		});
 
-		it("should resolve relative paths against cwd", () => {
+		it("should reject absolute paths outside cwd and home", () => {
+			expect(() => resolveToCwd("/absolute/path/file.txt", "/some/cwd")).toThrow("SECURITY_BLOCKED");
+		});
+
+		it("should reject paths with parent directory traversal (..)", () => {
+			expect(() => resolveToCwd("../etc/passwd", "/some/cwd")).toThrow("SECURITY_BLOCKED");
+		});
+
+		it("should reject paths whose resolved form escapes cwd", () => {
+			expect(() => resolveToCwd("/etc/passwd", "/some/cwd")).toThrow("SECURITY_BLOCKED");
+		});
+
+		it("should resolve relative paths within cwd", () => {
 			const result = resolveToCwd("relative/file.txt", "/some/cwd");
 			expect(result).toBe(resolve("/some/cwd", "relative/file.txt"));
 		});
