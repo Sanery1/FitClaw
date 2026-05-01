@@ -727,9 +727,10 @@ docker compose up -d --build    # 重建镜像并重启
 #### 修改配置
 
 ```bash
-vim .env                        # 改 key 或切换模型
-docker compose restart          # 重启即生效，不需要 rebuild
+vim .env                             # 改 key 或切换模型
+docker compose down && docker compose up -d  # 重建容器使配置生效
 ```
+> 注意：`docker compose restart` 不会重新生成配置文件。必须 `down && up -d` 才能让 entrypoint.sh 重新运行。
 
 #### 数据在哪
 

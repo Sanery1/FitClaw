@@ -52,9 +52,13 @@ RUN npm install --omit=dev /tmp/packs/*.tgz && rm -rf /tmp/packs
 # Copy knowledge base
 COPY .fitclaw/ /opt/fitclaw/.fitclaw/
 
+# Copy entrypoint script
+COPY docker/entrypoint.sh /opt/fitclaw/docker/entrypoint.sh
+RUN chmod +x /opt/fitclaw/docker/entrypoint.sh
+
 # Create workspace mount point
 RUN mkdir -p /opt/fitclaw/feishu-workspace && chown -R fitclaw:fitclaw /opt/fitclaw
 
 USER fitclaw
-ENTRYPOINT ["node", "/opt/fitclaw/node_modules/@fitclaw/mom/dist/main.js"]
+ENTRYPOINT ["/opt/fitclaw/docker/entrypoint.sh"]
 CMD ["/opt/fitclaw/feishu-workspace"]
