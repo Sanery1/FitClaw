@@ -327,18 +327,12 @@ AgentRunner → AgentSession.prompt()
 ### 6.2 启动 Bot（推荐：Docker）
 
 ```bash
-# 准备配置（改 .env 一处，全局生效）
-cp .env.example .env
-# 编辑 .env 填入真实 key
-
-# 启动
-docker compose up -d
-
-# 查看日志
-docker compose logs -f
+cp .env.example .env        # 填 key
+docker compose up -d --build # 构建+启动
+docker compose logs -f       # 查看日志
 ```
 
-Docker 部署细节 → [12.4 飞书群聊 Bot](#124-飞书群聊-botdocker-部署)
+完整步骤（验证、更新、排错）→ [12.4 飞书群聊 Bot（Docker 部署）](#124-飞书群聊-botdocker-部署)
 
 ### 6.3 启动 Bot（裸机）
 
@@ -664,20 +658,101 @@ fitclaw --fitness "查看我的训练进度"
 
 ### 12.4 飞书群聊 Bot（Docker 部署）
 
+#### 前置条件
+
+- 安装 Docker Desktop 或 Docker Engine
+- 已在飞书开放平台创建应用，获取 App ID 和 App Secret
+
+#### 第一步：配置
+
+所有配置统一到 `.env` 一个文件：
+
 ```bash
-# 准备配置（改一处，全局生效）
 cp .env.example .env
-# 编辑 .env 填入 MOM_FEISHU_APP_ID 和 MOM_FEISHU_APP_SECRET
+```
 
-# 启动
-docker compose up -d
+编辑 `.env`，填入真实值：
 
-# 查看日志
+```ini
+# 必填 — 飞书
+MOM_FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
+MOM_FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# 必填 — LLM
+MOM_LLM_PROVIDER=deepseek
+MOM_LLM_MODEL=deepseek-v3
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+#### 第二步：构建并启动
+
+```bash
+# 构建镜像 + 后台启动
+docker compose up -d --build
+
+# 首次构建约 5-10 分钟（npm install + 编译），后续更新会利用缓存更快
+```
+
+#### 第三步：验证
+
+```bash
+# 查看启动日志
 docker compose logs -f
 
-# 重启/停止
-docker compose restart
-docker compose down
+# 看到类似输出表示成功：
+#   Feishu Bot "FitCoach" starting...
+#   WebSocket connected
+
+# 去飞书群聊 @Bot 发一条消息，确认回复正常
+```
+
+#### 日常运维
+
+```bash
+docker compose logs -f          # 实时日志
+docker compose logs --tail=100  # 最近 100 行
+docker compose restart          # 重启 Bot
+docker compose stop             # 暂停（不删容器）
+docker compose down             # 停止并删除容器（数据不丢）
+```
+
+#### 更新代码
+
+```bash
+git pull
+docker compose up -d --build    # 重建镜像并重启
+# 用户数据（训练记录）在 feishu-workspace/ 不受影响
+```
+
+#### 修改配置
+
+```bash
+vim .env                        # 改 key 或切换模型
+docker compose restart          # 重启即生效，不需要 rebuild
+```
+
+#### 数据在哪
+
+```
+feishu-workspace/               ← 宿主机目录，删容器不丢
+├── <channelId>/
+│   ├── fitness-data.json       ← 用户训练记录
+│   ├── context.jsonl           ← 对话历史
+│   └── log.jsonl               ← 运行日志
+```
+
+#### 故障排查
+
+```bash
+# 构建失败？
+docker compose build --no-cache   # 强制重构建
+
+# 容器反复重启？
+docker compose logs --tail=50     # 看错误原因
+# 常见：.env 里 key 填错、飞书 app 没开机器人能力
+
+# 镜像太大？
+docker system prune -a            # 清理旧镜像和构建缓存
 ```
 
 配置全部收敛到 `.env` 一个文件——无论是 Docker、PM2 还是手动启动，都读同一个 `.env`。
