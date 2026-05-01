@@ -25,6 +25,7 @@
 	},
 	"files": [
 		"dist",
+		"data",
 		"docs",
 		"examples",
 		"CHANGELOG.md"

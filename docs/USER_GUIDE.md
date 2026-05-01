@@ -324,7 +324,23 @@ AgentRunner → AgentSession.prompt()
 通过 BotContext 返回回复
 ```
 
-### 6.2 启动 Bot
+### 6.2 启动 Bot（推荐：Docker）
+
+```bash
+# 准备配置（改 .env 一处，全局生效）
+cp .env.example .env
+# 编辑 .env 填入真实 key
+
+# 启动
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+Docker 部署细节 → [12.4 飞书群聊 Bot](#124-飞书群聊-botdocker-部署)
+
+### 6.3 启动 Bot（裸机）
 
 ```bash
 # 飞书 Bot
@@ -341,7 +357,7 @@ node packages/mom/dist/main.js ./slack-workspace
 node packages/mom/dist/main.js --sandbox=docker:sandbox-name ./workspace
 ```
 
-### 6.3 PM2 持久化部署
+### 6.4 PM2 持久化部署
 
 ```bash
 pm2 start ecosystem.config.cjs
@@ -349,7 +365,7 @@ pm2 logs --lines 50
 pm2 save
 ```
 
-### 6.4 飞书配置
+### 6.5 飞书配置
 
 1. 创建飞书企业自建应用
 2. 获取 App ID 和 App Secret
@@ -360,7 +376,7 @@ pm2 save
    - `MOM_FEISHU_APP_SECRET` — 飞书应用密钥
    - `MOM_FEISHU_BOT_NAME` — Bot 显示名称（默认 "FitCoach"）
 
-### 6.5 Slack 配置
+### 6.6 Slack 配置
 
 1. 创建 Slack App（Socket Mode）
 2. 获取 App-Level Token（`xapp-`）
@@ -369,7 +385,7 @@ pm2 save
    - `MOM_SLACK_APP_TOKEN`
    - `MOM_SLACK_BOT_TOKEN`
 
-### 6.6 用户隔离
+### 6.7 用户隔离
 
 - 单聊：按 `channelId` 隔离
 - 群聊 @ 提及：按 `channelId/userId` 隔离
@@ -646,25 +662,45 @@ fitclaw --fitness "今天练了深蹲 3x10 60kg"
 fitclaw --fitness "查看我的训练进度"
 ```
 
-### 12.4 飞书群聊 Bot
+### 12.4 飞书群聊 Bot（Docker 部署）
+
+```bash
+# 准备配置（改一处，全局生效）
+cp .env.example .env
+# 编辑 .env 填入 MOM_FEISHU_APP_ID 和 MOM_FEISHU_APP_SECRET
+
+# 启动
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+
+# 重启/停止
+docker compose restart
+docker compose down
+```
+
+配置全部收敛到 `.env` 一个文件——无论是 Docker、PM2 还是手动启动，都读同一个 `.env`。
+
+### 12.5 飞书群聊 Bot（裸机部署）
 
 ```bash
 # 第一次启动
-MOM_FEISHU_APP_ID="cli_xxxx" MOM_FEISHU_APP_SECRET="xxxx" \
-  nohup node packages/mom/dist/main.js ./feishu-workspace &
+source .env
+node packages/mom/dist/main.js ./feishu-workspace &
 
-# 使用 PM2 持久化
+# 使用 PM2 持久化（继承当前 shell 环境）
 pm2 start ecosystem.config.cjs
 ```
 
-### 12.5 CI/CD 代码分析
+### 12.6 CI/CD 代码分析
 
 ```bash
 fitclaw --mode json --model sonnet:high -p \
   "Analyze this PR diff for breaking changes" @diff.txt
 ```
 
-### 12.6 限制工具的安全模式
+### 12.7 限制工具的安全模式
 
 ```bash
 # 只允许只读操作
