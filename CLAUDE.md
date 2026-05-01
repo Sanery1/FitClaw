@@ -4,17 +4,17 @@
 
 ## 一句话定位
 
-**FitClaw = AI 健身私教 + 智能编程助手**，基于 [pi-mono](https://github.com/badlogic/pi-mono) Fork 的全栈 AI Agent 平台。
+**FitClaw = AI 健身私教 + 智能编程助手**，全栈 AI Agent 平台。
 
 ## 项目来历
 
 | 时间 | 事件 |
 |------|------|
-| 2026-04 | 从 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw) Fork，原始作者 Mario Zechner |
-| 2026-04 | 全部 7 个包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*` |
+| 2026-04 | 项目初始化，基于 TypeScript monorepo 架构 |
+| 2026-04 | 全部 7 个包统一使用 `@fitclaw/*` 命名空间 |
 | 2026-04 | 新增健身私教功能（11 个 Agent 工具 + 动作数据库 + 知识库） |
-| 2026-04 | 新增飞书 Bot 适配器占位 |
-| 2026-04 | 配置系统从 `.pi/` 迁移到 `.fitclaw/` |
+| 2026-04 | 新增飞书 Bot 适配器 |
+| 2026-04 | 配置系统统一到 `.fitclaw/` |
 | 2026-04 | 推送到 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw) |
 
 ## 架构概览
@@ -57,7 +57,7 @@
 
 | 计划文件 | 说明 |
 |----------|------|
-| `~/.claude/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策） |
+| `~/.claude/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策，历史记录） |
 | `~/.claude/plans/plan-tranquil-kahn.md` | CLI 品牌重构 + 启动简化（已部分完成） |
 
 ## 待完成 / 待完善

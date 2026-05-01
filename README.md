@@ -2,7 +2,7 @@
 
 > AI 健身私教 + 智能编程助手 — 基于 Claude Code 生态的全栈 AI Agent 平台
 
-FitClaw 是一个多模态 AI Agent 平台，将**全流程健身私教**与**智能编程助手**结合为一体。项目 Fork 自 [pi-mono](https://github.com/Sanery1/FitClaw)，在原有编程代理能力之上，增加了完整的健身教练功能：
+FitClaw 是一个多模态 AI Agent 平台，将**全流程健身私教**与**智能编程助手**结合为一体：
 
 - **个性化训练计划生成**：基于用户经验、目标、器械自动设计分化训练方案
 - **动作数据库**：50+ 动作的详细教学（中文/英文），含标准动作要领、常见错误、变式
@@ -77,17 +77,13 @@ npm run test         # 运行所有测试
 npm run dev          # 并行 watch 所有包
 ```
 
-## Fork 说明
+## 主要特性
 
-本项目 Fork 自 [badlogic/pi-mono](https://github.com/badlogic/pi-mono)，原始版权归 Mario Zechner 所有。
-
-主要改动：
-- 所有包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*`
-- 新增 11 个健身 Agent 工具 + 动作数据库（50+ 动作）
-- 新增分层知识库系统（`.fitclaw/prompts/` + `fitclaw.md`）
-- 新增飞书 Bot 完整适配器（WebSocket 长连接模式）
-- 新增 Slack Bot 适配器
-- 配置目录从 `~/.pi/` 迁移到 `~/.fitclaw/`
+- 11 个健身 Agent 工具 + 动作数据库（50+ 动作）
+- 分层知识库系统（`.fitclaw/prompts/` + `.fitclaw/skills/`）
+- 飞书 Bot 完整适配器（WebSocket 长连接模式）
+- Slack Bot 适配器
+- 统一配置系统（`.fitclaw/`）
 
 完整使用指南 → [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 学习路径 → [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md)
@@ -95,4 +91,4 @@ npm run dev          # 并行 watch 所有包
 
 ## 许可证
 
-MIT — 沿用原始项目协议
+MIT

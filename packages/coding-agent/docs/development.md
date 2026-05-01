@@ -5,8 +5,8 @@ See [AGENTS.md](../../../AGENTS.md) for additional guidelines.
 ## Setup
 
 ```bash
-git clone https://github.com/badlogic/pi-mono
-cd pi-mono
+git clone https://github.com/Sanery1/FitClaw
+cd FitClaw
 npm install
 npm run build
 ```
@@ -18,21 +18,6 @@ Run from source:
 ```
 
 The script can be run from any directory. Pi keeps the caller's current working directory.
-
-## Forking / Rebranding
-
-Configure via `package.json`:
-
-```json
-{
-  "piConfig": {
-    "name": "pi",
-    "configDir": ".pi"
-  }
-}
-```
-
-Change `name`, `configDir`, and `bin` field for your fork. Affects CLI banner, config paths, and environment variable names.
 
 ## Path Resolution
 

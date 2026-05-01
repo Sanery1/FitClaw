@@ -1,4 +1,4 @@
-# FitClaw (pi-mono) 项目完整文档
+# FitClaw 项目完整文档
 
 > **说明**：本文档基于对项目源代码的完整阅读与理解编写，供其他 Agent 复现项目结构与逻辑。以下内容已排除与 GitHub 平台相关的文件（如 `.github/` 目录、CI 工作流、Issue/PR 模板、贡献者门禁等），仅保留项目业务代码与开发运行相关的核心信息。
 
@@ -6,7 +6,7 @@
 
 ## 一、项目概述
 
-**FitClaw**（内部代号 `pi-mono`）是一个用于构建 AI Agent 和管理 LLM 部署的 TypeScript monorepo。项目作者为 Mario Zechner，采用 MIT 许可证。
+**FitClaw** 是一个用于构建 AI Agent 和管理 LLM 部署的 TypeScript monorepo，采用 MIT 许可证。
 
 项目的核心产品是一个名为 **pi** 的交互式编码 Agent CLI，具备以下能力：
 - 多 LLM 提供商统一接入（OpenAI、Anthropic、Google、Mistral、Azure、Bedrock、Cloudflare 等）
@@ -32,7 +32,7 @@
 ### 2.1 包依赖关系
 
 ```
-pi-monorepo (root)
+FitClaw monorepo (root)
 │
 ├── packages/ai          (@fitclaw/ai)
 │   └── 被 agent、tui、web-ui、coding-agent、mom、pods 依赖
@@ -1160,4 +1160,4 @@ AGENTS.md 中 GitHub 相关段落  # Issue/PR 操作、GitHub Actions 引用
 ---
 
 *文档生成时间：2026-04-28*
-*基于 FitClaw (pi-mono) 项目源代码完整阅读*
+*基于 FitClaw 项目源代码完整阅读*
