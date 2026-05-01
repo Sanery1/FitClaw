@@ -15,21 +15,21 @@
 | **影响** | 单一类承担 10+ 职责（提示词、工具注册、模型管理、会话持久化、压缩、重试、Bash、扩展系统、树导航）。修改任何功能都可能引入副作用，测试覆盖困难，新人理解成本极高 |
 | **修复建议** | 拆分为 5-6 个协作类：`PromptManager`、`ToolRegistry`、`SessionPersistence`、`CompactionService`、`RetryService`、`BashExecutor`。AgentSession 仅保留事件协调和状态访问 |
 
-### 2. Bash 工具默认无沙箱（安全）
+### 2. Bash 工具默认无沙箱（安全） ✅ 已修复 (2026-05-01)
 
 | 项目 | 内容 |
 |------|------|
 | **位置** | `packages/coding-agent/src/core/tools/bash.ts` |
 | **影响** | LLM 调用的 bash 命令直接在 host 执行任意代码。虽然 `--sandbox=docker` 可选，但默认不开启。恶意 prompt 可导致数据删除、信息泄露、安装后门 |
-| **修复建议** | 默认启用受限 shell（如 `deno` 或 `firejail`）；或首次执行敏感命令前要求用户确认；至少对 `rm -rf /` 等危险命令做前缀拦截 |
+| **修复** | 新增 `validateCommand()` 拦截 12 种危险命令模式（rm -rf /、dd 写磁盘、fork bomb、curl\|sh 等），在 `execute()` 方法中调用。Commit: `f09e06cd` |
 
-### 3. 文件工具无路径遍历防护（安全）
+### 3. 文件工具无路径遍历防护（安全） ✅ 已修复 (2026-05-01)
 
 | 项目 | 内容 |
 |------|------|
 | **位置** | `packages/coding-agent/src/core/tools/read.ts`、`edit.ts`、`write.ts` |
 | **影响** | 工具接收的 path 参数可包含 `../` 或绝对路径，访问 cwd 以外的文件。LLM 可能被诱导读取 `/etc/passwd`、`.env`、SSH 私钥等敏感文件 |
-| **修复建议** | 在工具入口处对 path 做校验：`resolve(cwd, path).startsWith(cwd)`；拒绝 `..` 和绝对路径；维护一个可访问路径白名单 |
+| **修复** | 在 `resolveToCwd()` 中新增 `validatePathBoundary()` 检查：拒绝包含 `..` 的路径，拒绝解析后超出 cwd 或 home 目录的绝对路径。所有文件工具（read/edit/write）共用此检查。Commit: `f09e06cd` |
 
 ### 4. 扩展系统执行任意代码无签名验证（安全）
 
@@ -140,18 +140,20 @@
 
 ## 风险分布统计
 
-| 级别 | 数量 | 分类 |
-|------|------|------|
-| 🔴 CRITICAL | 4 | 架构 ×1、安全 ×3 |
-| 🟡 HIGH | 11 | 架构 ×3、代码质量 ×4、安全 ×2、质量 ×2、性能 ×1 |
-| **合计** | **15** | — |
+| 级别 | 数量 | 分类 | 状态 |
+|------|------|------|------|
+| 🔴 CRITICAL | 4 | 架构 ×1、安全 ×3 | 2/4 已修复 |
+| 🟡 HIGH | 11 | 架构 ×3、代码质量 ×4、安全 ×2、质量 ×2、性能 ×1 | 0/11 |
+| **合计** | **15** | — | 2 已修复 |
 
 ## 修复优先级建议
 
 ```
+✅ P0（已完成 2026-05-01）:
+  - #2 Bash 无沙箱 → validateCommand() 拦截危险命令 (f09e06cd)
+  - #3 文件路径无校验 → validatePathBoundary() 路径边界检查 (f09e06cd)
+
 P0（本周）:
-  - #2 Bash 无沙箱 → 添加危险命令拦截
-  - #3 文件路径无校验 → 添加路径边界检查
   - #12 飞书无签名验证 → 添加签名校验
 
 P1（本月）:

@@ -4,7 +4,7 @@
 
 ## 一句话定位
 
-**FitClaw = AI 健身私教 + 智能编程助手**，基于 [pi-mono](https://github.com/Sanery1/FitClaw) Fork 的全栈 AI Agent 平台。
+**FitClaw = AI 健身私教 + 智能编程助手**，基于 [pi-mono](https://github.com/badlogic/pi-mono) Fork 的全栈 AI Agent 平台。
 
 ## 项目来历
 
@@ -48,21 +48,26 @@
 - ✅ System prompt 工具描述加入触发词（P1）
 - ✅ 健身数据 JSON 文件持久化，按 channel 隔离（P0）
 - ✅ Bot 加载 `.fitclaw/prompts/` 知识库（P2）
+- ✅ 使用指南: `docs/USER_GUIDE.md` (2026-05-01)
+- ✅ 安全修复: Bash 危险命令拦截 + 路径遍历防护 (2026-05-01, f09e06cd)
+- ✅ 风险清单: `docs/RISK_ISSUES.md`（#2 #3 已修复）
 
 ## 技术记录（Plan 文件）
 
 | 计划文件 | 说明 |
 |----------|------|
 | `~/.claude/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策） |
-| `~/.claude/plans/plan-tranquil-kahn.md` | **当前待执行**：CLI 品牌重构 + 启动简化 |
+| `~/.claude/plans/plan-tranquil-kahn.md` | CLI 品牌重构 + 启动简化（已部分完成） |
 
 ## 待完成 / 待完善
 
-### ✅ 已完成 (2026-04-30)
+### ✅ 已完成 (截至 2026-05-01)
 
 1. **CLI 品牌重构** — PiManifest → FitClawManifest 类型重命名，pi→fitclaw 字符串替换 (d743e3bc)
 2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + `.fitclaw/prompts/` 知识库加载 (1277ef74)
 3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE/.pi/prompts 全部更新 (c1d52c3d)
+4. **安全修复 #2** — Bash 危险命令拦截 (f09e06cd)
+5. **安全修复 #3** — 文件工具路径遍历防护 (f09e06cd)
 
 ### 🟢 低优先级（择机执行）
 
@@ -124,13 +129,19 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 
 配置方式 → 参考早前对话或查看 `packages/coding-agent/src/config.ts`
 
-## Commit 历史（当前 main 分支）
+## Commit 历史（当前 main 分支，最近 10 个）
 
 ```
-da408f41 fix(mom): remove thinking content from Feishu main messages
-bc4945f4 chore: update auto-generated models list from build
-d00a2c14 fix: 更改项目名称并改善兼容性
-3e345608 feat: FitClaw — AI健身私教 + 智能编程助手 全栈平台
+b89d5cec docs: add comprehensive USER_GUIDE.md with usage instructions
+f09e06cd fix: add bash dangerous command interception and path traversal protection
+6c14b148 docs: add LEARNING_GUIDE.md and RISK_ISSUES.md
+024702f4 style(mom): use template literals in card-renderer tests
+ad3f2e56 chore: update package-lock.json for mom vitest devDependency
+31d75d65 test(mom): add unit tests for types and card-renderer modules
+4a9b5d03 feat: implement minimal Feishu card renderer
+f195e99e fix: replace pi branding in system prompt with FitClaw
+69861542 feat: rename package.json bin from pi to fitclaw with backward compat
+9c3055d9 feat: add FITCLAW_ env var prefix support with PI_ fallback
 ```
 
 ## AI Agent 工作规则

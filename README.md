@@ -60,14 +60,19 @@ npm run dev          # 并行 watch 所有包
 
 ## Fork 说明
 
-本项目 Fork 自 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw)，原始版权归 Mario Zechner 所有。
+本项目 Fork 自 [badlogic/pi-mono](https://github.com/badlogic/pi-mono)，原始版权归 Mario Zechner 所有。
 
 主要改动：
 - 所有包从 `@mariozechner/pi-*` 重命名为 `@fitclaw/*`
-- 新增 11 个健身 Agent 工具 + 动作数据库
+- 新增 11 个健身 Agent 工具 + 动作数据库（50+ 动作）
 - 新增分层知识库系统（`.fitclaw/prompts/` + `fitclaw.md`）
-- 新增飞书 Bot 适配器接口预留
-- 新增知识库校验脚本
+- 新增飞书 Bot 完整适配器（WebSocket 长连接模式）
+- 新增 Slack Bot 适配器
+- 配置目录从 `~/.pi/` 迁移到 `~/.fitclaw/`
+
+完整使用指南 → [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+学习路径 → [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md)
+风险清单 → [docs/RISK_ISSUES.md](docs/RISK_ISSUES.md)
 
 ## 许可证
 
