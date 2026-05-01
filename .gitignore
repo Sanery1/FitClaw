@@ -56,6 +56,14 @@ collect.sh
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 
+# ── Agent 运行时数据（本地开发产生）──
+.agents/
+**/.agents/
+skills-lock.json
+**/skills-lock.json
+packages/coding-agent/.pi/
+packages/coding-agent/skills/
+
 # ── 运行时数据 ──
 feishu-workspace/
 

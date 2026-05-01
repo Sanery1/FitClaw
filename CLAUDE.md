@@ -52,6 +52,7 @@
 - ✅ 安全修复: Bash 危险命令拦截 + 路径遍历防护 (2026-05-01, f09e06cd)
 - ✅ 风险清单: `docs/RISK_ISSUES.md`（#2 #3 已修复）
 - ✅ Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
+- ✅ pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
 
 ## 技术记录（Plan 文件）
 
@@ -66,15 +67,16 @@
 
 1. **CLI 品牌重构** — PiManifest → FitClawManifest 类型重命名，pi→fitclaw 字符串替换 (d743e3bc)
 2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + `.fitclaw/prompts/` 知识库加载 (1277ef74)
-3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE/.pi/prompts 全部更新 (c1d52c3d)
+3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE 全部更新 (c1d52c3d)
 4. **安全修复 #2** — Bash 危险命令拦截 (f09e06cd)
 5. **安全修复 #3** — 文件工具路径遍历防护 (f09e06cd)
+6. **pi-mono/fork 引用清理** — 文档去 fork 化 + 源 URL 更新 + 根 .pi/ 删除 (be21ba30)
 
 ### 🟢 低优先级（择机执行）
 
-4. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
-5. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
-6. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
+1. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
+2. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
+3. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
 
 ## 健身数据架构
 
@@ -114,7 +116,11 @@ PM2 日志中查看：
 ```bash
 npm install
 npm run build                          # 构建全部包
-node packages/coding-agent/dist/cli.js # 启动 CLI
+
+# CLI 启动（开发模式）
+node packages/coding-agent/dist/cli.js
+# 或使用启动脚本（从 ~/.claude/settings.json 读取环境变量）
+./start.sh
 
 # Bot 部署（推荐 Docker，生产环境）
 cp .env.example .env && docker compose up -d
@@ -138,16 +144,17 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 ## Commit 历史（当前 main 分支，最近 10 个）
 
 ```
+be21ba30 docs: remove pi-mono fork references and legacy .pi/ config directory
+ef12fef2 feat: single-file config — entrypoint generates auth.json + models.json from .env
+c37af31e fix: align Docker LLM config with CLI and mount config directory
+d2d72c67 docs: add complete Docker deployment workflow to USER_GUIDE
+6399136e docs: sync CLAUDE.md and README with Docker deployment info
 f42f70d2 feat: add Docker containerization for Bot deployment
 f4e43657 docs: clarify FitClaw has two independent programs (CLI + Bot)
 4732ae70 docs: remove obsolete Feishu integration planning documents
 aa0b66b7 docs: sync knowledge base — fix stale references, mark resolved risks
 b89d5cec docs: add comprehensive USER_GUIDE.md with usage instructions
 f09e06cd fix: add bash dangerous command interception and path traversal protection
-6c14b148 docs: add LEARNING_GUIDE.md and RISK_ISSUES.md
-024702f4 style(mom): use template literals in card-renderer tests
-ad3f2e56 chore: update package-lock.json for mom vitest devDependency
-31d75d65 test(mom): add unit tests for types and card-renderer modules
 ```
 
 ## AI Agent 工作规则

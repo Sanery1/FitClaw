@@ -48,7 +48,7 @@ FitClaw 有两个独立入口：
 | `docker compose up -d` | 飞书/Slack Bot（Docker，推荐） |
 | `pm2 start ecosystem.config.cjs` | 飞书/Slack Bot（裸机） |
 
-两个程序共享底层 Agent 引擎，互不依赖。配置统一到 `.env` 一个文件。
+两个程序共享底层 Agent 引擎，互不依赖。Bot 配置统一到 `.env` 一个文件，CLI 配置在 `~/.fitclaw/agent/`。
 
 ## 健身私教功能
 
