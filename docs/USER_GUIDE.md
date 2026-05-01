@@ -4,6 +4,23 @@
 
 ---
 
+## 两个入口，两套程序
+
+FitClaw 包含 **两个独立的可执行程序**，共享底层 Agent 引擎但用途不同：
+
+| | `fitclaw`（CLI） | `mom`（Bot） |
+|------|----------|--------|
+| **启动命令** | `fitclaw` 或 `node packages/coding-agent/dist/cli.js` | `mom <workspace>` 或 `node packages/mom/dist/main.js <workspace>` |
+| **做什么** | 终端里的交互式 AI 编程助手 | 后台服务，把 Agent 接入飞书 / Slack 群聊 |
+| **谁用** | 开发者直接在终端里用 | 终端用户通过飞书/Slack 群聊用 |
+| **运行方式** | 前台交互式 TUI | 后台守护进程（通常用 PM2） |
+| **健身能力** | `--fitness` flag 开启 | 始终开启（自带健身工具） |
+| **npm 包** | `@fitclaw/claw` | `@fitclaw/mom` |
+
+**输入 `fitclaw` 不会启动飞书 Bot。** 它们是两个命令，互不依赖。
+
+---
+
 ## 目录
 
 1. [快速开始](#1-快速开始)

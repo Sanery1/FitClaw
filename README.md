@@ -31,6 +31,18 @@ npm run check        # Lint + 格式化 + 类型检查
 npm run test         # 运行测试
 ```
 
+### 启动方式
+
+FitClaw 有两个独立入口：
+
+| 命令 | 用途 |
+|------|------|
+| `node packages/coding-agent/dist/cli.js` | 终端交互式 AI 编程助手 |
+| `node packages/coding-agent/dist/cli.js --fitness` | 终端健身私教模式 |
+| `node packages/mom/dist/main.js <workspace>` | 飞书/Slack 后台 Bot 服务 |
+
+两个程序共享底层 Agent 引擎，但互不依赖。
+
 ## 健身私教功能
 
 启动 Coding Agent 后，使用以下工具完成健身教练全流程：
