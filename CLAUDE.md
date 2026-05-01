@@ -51,6 +51,7 @@
 - ✅ 使用指南: `docs/USER_GUIDE.md` (2026-05-01)
 - ✅ 安全修复: Bash 危险命令拦截 + 路径遍历防护 (2026-05-01, f09e06cd)
 - ✅ 风险清单: `docs/RISK_ISSUES.md`（#2 #3 已修复）
+- ✅ Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
 
 ## 技术记录（Plan 文件）
 
@@ -114,7 +115,12 @@ PM2 日志中查看：
 npm install
 npm run build                          # 构建全部包
 node packages/coding-agent/dist/cli.js # 启动 CLI
-pm2 start ecosystem.config.cjs         # 启动飞书 Bot（需 PM2）
+
+# Bot 部署（推荐 Docker，生产环境）
+cp .env.example .env && docker compose up -d
+
+# Bot 部署（裸机）
+pm2 start ecosystem.config.cjs         # 需 PM2
 ```
 
 ## 配置系统
@@ -132,16 +138,16 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 ## Commit 历史（当前 main 分支，最近 10 个）
 
 ```
+f42f70d2 feat: add Docker containerization for Bot deployment
+f4e43657 docs: clarify FitClaw has two independent programs (CLI + Bot)
+4732ae70 docs: remove obsolete Feishu integration planning documents
+aa0b66b7 docs: sync knowledge base — fix stale references, mark resolved risks
 b89d5cec docs: add comprehensive USER_GUIDE.md with usage instructions
 f09e06cd fix: add bash dangerous command interception and path traversal protection
 6c14b148 docs: add LEARNING_GUIDE.md and RISK_ISSUES.md
 024702f4 style(mom): use template literals in card-renderer tests
 ad3f2e56 chore: update package-lock.json for mom vitest devDependency
 31d75d65 test(mom): add unit tests for types and card-renderer modules
-4a9b5d03 feat: implement minimal Feishu card renderer
-f195e99e fix: replace pi branding in system prompt with FitClaw
-69861542 feat: rename package.json bin from pi to fitclaw with backward compat
-9c3055d9 feat: add FITCLAW_ env var prefix support with PI_ fallback
 ```
 
 ## AI Agent 工作规则
