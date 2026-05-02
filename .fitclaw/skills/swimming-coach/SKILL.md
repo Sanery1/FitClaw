@@ -1,6 +1,10 @@
 ---
 name: swimming-coach
 description: 全流程 AI 游泳私教技能。提供游泳训练指导、泳姿教学、训练计划生成、成绩追踪。触发场景：用户想要游泳指导、泳姿纠正、训练计划、"教我怎么游自由泳"、"蝶泳怎么练"、"游泳减肥计划"、游泳相关问题。
+data:
+  user_profile: {}
+  training_log: {type: array}
+  pace_records: {type: array}
 ---
 
 # Swimming Coach Skill
@@ -14,10 +18,20 @@ description: 全流程 AI 游泳私教技能。提供游泳训练指导、泳姿
 - 蛙泳 (Breaststroke)
 - 蝶泳 (Butterfly)
 
+## 数据持久化
+
+你拥有以下持久化工具：
+- `data:swimming-coach:read("namespace")` — 读取已保存的数据
+- `data:swimming-coach:write("namespace", data, mode?)` — 保存数据，mode 为 "replace"（默认，用于 object）或 "append"（用于 array）
+
+可用的 namespace：`user_profile`（object）、`training_log`（array）、`pace_records`（array）。
+
+**重要**：收集到用户信息后立即调用 write 保存到对应 namespace，不要仅保留在内存中。
+
 ## 引导流程
 
-1. 了解用户游泳经验和目标
-2. 评估当前水平（初学者/中级/进阶）
+1. 了解用户游泳经验和目标 → 完成后保存到 user_profile
+2. 评估当前水平（初学者/中级/进阶）→ 更新 user_profile
 3. 设计针对性训练计划
 
 ## 参考资源（按需读取）

@@ -5,6 +5,9 @@ import {
 	AuthStorage,
 	convertToLlm,
 	createExtensionRuntime,
+	createSkillDataReadTool,
+	createSkillDataWriteTool,
+	FileSportDataStore,
 	formatSkillsForPrompt,
 	loadSkillsFromDir,
 	ModelRegistry,
@@ -12,7 +15,7 @@ import {
 	SessionManager,
 	type Skill,
 } from "@fitclaw/claw";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -123,28 +126,9 @@ function loadMomSkills(channelDir: string, workspacePath: string): Skill[] {
 	return Array.from(skillMap.values());
 }
 
-function loadFitClawKnowledge(workspacePath: string): string {
-	try {
-		const referencesDir = join(workspacePath, "..", ".fitclaw", "skills", "fitness-coach", "references");
-		if (!existsSync(referencesDir)) return "";
-
-		const files = readdirSync(referencesDir)
-			.filter((f) => f.endsWith(".md"))
-			.sort();
-		if (files.length === 0) return "";
-
-		return (
-			"The following reference files are available. " +
-			"Use the read tool to load a specific file when the conversation topic matches:\n" +
-			files.map((f) => `- ${f}`).join("\n")
-		);
-	} catch {
-		return "";
-	}
-}
-
 function buildSystemPrompt(workspacePath: string, channelId: string, memory: string, skills: Skill[]): string {
 	const channelPath = `${workspacePath}/${channelId}`;
+	const skillsSection = formatSkillsForPrompt(skills);
 	return `You are FitCoach, an AI fitness personal trainer powered by FitClaw. Be concise, professional, and encouraging. No emojis.
 
 ## Your Role
@@ -152,16 +136,13 @@ You are FitCoach (FitClaw AI), a fitness personal trainer. Keep responses SHORT 
 
 Maintain a fitness-coach tone: motivating, knowledgeable, and supportive.
 
-## FitClaw Knowledge Base
-Use these professional fitness references to inform your answers:
-${loadFitClawKnowledge(workspacePath)}
-
 ## Context
 - Current date: use the \`date\` bash command if needed.
 - You have access to previous conversation context including tool results from prior turns.
 
 ## Formatting
 Use plain text with clear structure and line breaks. Avoid complex formatting.
+${skillsSection}
 
 ## Memory
 Write to MEMORY.md to remember user preferences, injuries, and goals across conversations.
@@ -219,7 +200,7 @@ function extractToolResultText(result: unknown): string {
 	return JSON.stringify(result);
 }
 
-function formatToolArgsForSlack(_toolName: string, args: Record<string, unknown>): string {
+function formatToolArgs(_toolName: string, args: Record<string, unknown>): string {
 	const lines: string[] = [];
 
 	for (const [key, value] of Object.entries(args)) {
@@ -273,12 +254,25 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const workspacePath = executor.getWorkspacePath(join(channelDir, ".."));
 
 	// Create tools
-	const tools = createMomTools(executor, channelDir);
+	const tools = createMomTools(executor);
 
 	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
 	const memory = getMemory(channelDir);
 	const skills = loadMomSkills(channelDir, workspacePath);
 	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
+
+	// Model B: auto-register data persistence tools for skills with data: declarations
+	const sportDataDir = join(channelDir, "sport-data");
+	process.env.FITCLAW_DATA_DIR = sportDataDir;
+	for (const skill of skills) {
+		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
+			const skillStore = new FileSportDataStore(channelDir);
+			tools.push(
+				createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces),
+				createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces),
+			);
+		}
+	}
 
 	// Create session manager and settings manager
 	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
@@ -359,7 +353,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Mutable per-run state - event handler references this
 	const runState = {
 		ctx: null as BotContext | null,
-		logCtx: null as { channelId: string; userName?: string; channelName?: string } | null,
+		logCtx: null as { channelId: string; userName?: string } | null,
 		queue: null as {
 			enqueue(fn: () => Promise<void>, errorContext: string): void;
 			enqueueMessage(text: string, target: "main" | "thread", errorContext: string, doLog?: boolean): void;
@@ -413,7 +407,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// Post args + result to thread
 			const label = pending?.args ? (pending.args as { label?: string }).label : undefined;
 			const argsFormatted = pending
-				? formatToolArgsForSlack(agentEvent.toolName, pending.args as Record<string, unknown>)
+				? formatToolArgs(agentEvent.toolName, pending.args as Record<string, unknown>)
 				: "(args not found)";
 			const duration = (durationMs / 1000).toFixed(1);
 			let threadMessage = `*${agentEvent.isError ? "✗" : "✓"} ${agentEvent.toolName}*`;
@@ -499,16 +493,15 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		}
 	});
 
-	// Slack message limit
-	const SLACK_MAX_LENGTH = 40000;
-	const splitForSlack = (text: string): string[] => {
-		if (text.length <= SLACK_MAX_LENGTH) return [text];
+	const MAX_MESSAGE_LENGTH = 30000;
+	const splitMessage = (text: string): string[] => {
+		if (text.length <= MAX_MESSAGE_LENGTH) return [text];
 		const parts: string[] = [];
 		let remaining = text;
 		let partNum = 1;
 		while (remaining.length > 0) {
-			const chunk = remaining.substring(0, SLACK_MAX_LENGTH - 50);
-			remaining = remaining.substring(SLACK_MAX_LENGTH - 50);
+			const chunk = remaining.substring(0, MAX_MESSAGE_LENGTH - 50);
+			remaining = remaining.substring(MAX_MESSAGE_LENGTH - 50);
 			const suffix = remaining.length > 0 ? `\n_(continued ${partNum}...)_` : "";
 			parts.push(chunk + suffix);
 			partNum++;
@@ -557,7 +550,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			runState.logCtx = {
 				channelId: ctx.message.channel,
 				userName: ctx.message.userName,
-				channelName: ctx.channelName,
 			};
 			runState.pendingTools.clear();
 			runState.totalUsage = {
@@ -579,7 +571,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 							await fn();
 						} catch (err) {
 							const errMsg = err instanceof Error ? err.message : String(err);
-							log.logWarning(`Slack API error (${errorContext})`, errMsg);
+							log.logWarning(`Bot API error (${errorContext})`, errMsg);
 							try {
 								await ctx.respondInThread(`_Error: ${errMsg}_`);
 							} catch {
@@ -589,7 +581,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 					});
 				},
 				enqueueMessage(text: string, target: "main" | "thread", errorContext: string, doLog = true): void {
-					const parts = splitForSlack(text);
+					const parts = splitMessage(text);
 					for (const part of parts) {
 						this.enqueue(
 							() => (target === "main" ? ctx.respond(part, doLog) : ctx.respondInThread(part)),
@@ -638,7 +630,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			}
 
 			if (nonImagePaths.length > 0) {
-				userMessage += `\n\n<slack_attachments>\n${nonImagePaths.join("\n")}\n</slack_attachments>`;
+				userMessage += `\n\n<attachments>\n${nonImagePaths.join("\n")}\n</attachments>`;
 			}
 
 			// Debug: write context to last_prompt.jsonl
@@ -686,8 +678,8 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				} else if (finalText.trim()) {
 					try {
 						const mainText =
-							finalText.length > SLACK_MAX_LENGTH
-								? `${finalText.substring(0, SLACK_MAX_LENGTH - 50)}\n\n_(see thread for full response)_`
+							finalText.length > MAX_MESSAGE_LENGTH
+								? `${finalText.substring(0, MAX_MESSAGE_LENGTH - 50)}\n\n_(see thread for full response)_`
 								: finalText;
 						await ctx.replaceMessage(mainText);
 					} catch (err) {

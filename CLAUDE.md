@@ -1,6 +1,7 @@
 # CLAUDE.md — FitClaw 项目指南
 
-> 供后续 AI Agent 快速理解项目来龙去脉、当前状态和待办事项。
+> **Claude Code 专属入口** — 项目上下文、架构、配置、文件速查。
+> 通用开发规则（所有 AI Agent 共享）→ [AGENTS.md](./AGENTS.md)
 
 ## 一句话定位
 
@@ -13,6 +14,7 @@
 | 2026-04 | 项目初始化，基于 TypeScript monorepo 架构 |
 | 2026-04 | 全部 7 个包统一使用 `@fitclaw/*` 命名空间 |
 | 2026-04 | 新增健身私教功能（11 个 Agent 工具 + 动作数据库 + 知识库） |
+| 2026-05 | bodybuilding Skill 集成（800+ 动作），fitness-coach 删除，全面迁移到 Model B 纯 Skill 架构 |
 | 2026-04 | 新增飞书 Bot 适配器 |
 | 2026-04 | 配置系统统一到 `.fitclaw/` |
 | 2026-04 | 推送到 [Sanery1/FitClaw](https://github.com/Sanery1/FitClaw) |
@@ -27,105 +29,99 @@
 | `packages/agent` | `@fitclaw/agent-core` | Agent 运行时：工具调用、状态管理 |
 | `packages/coding-agent` | `@fitclaw/claw` | **主 CLI 应用**（交互式 TUI） |
 | `packages/tui` | `@fitclaw/tui` | 终端 UI 组件库 |
-| `packages/mom` | `@fitclaw/mom` | Slack/飞书 Bot |
+| `packages/mom` | `@fitclaw/mom` | 飞书 Bot |
 | `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件 |
 | `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
 
 架构学习 → [docs/LEARNING_GUIDE.md](./docs/LEARNING_GUIDE.md)
 
-## 已完成的改造
+## 近期完成
 
-- ✅ 包重命名：200+ 源文件 import 路径、tsconfig、vitest 别名全部更新
-- ✅ 11 个健身 Agent 工具（动作数据库 / 训练记录 / 体测 / 训练计划 / 进度分析）
-- ✅ 50 个动作的完整数据库 `.fitclaw/skills/fitness-coach/assets/exercises.json`（中英文），源码保留在 `packages/coding-agent/data/exercises.json`
-- ✅ 知识库系统 `.fitclaw/skills/`（渐进式索引 references/ + SKILL.md）
-- ✅ 飞书 Bot 完整实现 `packages/mom/src/feishu.ts`（WebSocket 长连接模式）
-- ✅ `.gitignore` 更新、`README.md` 完整重写
-- ✅ 配置目录从 `~/.pi/` 迁移到 `~/.fitclaw/`
-- ✅ 代码推送到 GitHub
-- ✅ 文档归档到 `docs/` 目录
-- ✅ 健身工具集成到 Bot（`createMomTools` 包含 `createAllFitnessTools()`）
-- ✅ System prompt 工具描述加入触发词（P1）
-- ✅ 健身数据 JSON 文件持久化，按 channel 隔离（P0）
-- ✅ Bot 加载知识库（2026-05-01 改为 `.fitclaw/skills/fitness-coach/references/` 渐进式索引）
-- ✅ 使用指南: `docs/USER_GUIDE.md` (2026-05-01)
-- ✅ 安全修复: Bash 危险命令拦截 + 路径遍历防护 (2026-05-01, f09e06cd)
-- ✅ 风险清单: `docs/RISK_ISSUES.md`（#2 #3 已修复）
-- ✅ Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
-- ✅ pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
-- ✅ Sport Skill Pack 架构 (2026-05-01): Skill 支持 tools.ts、渐进式知识加载、SportDataStore 泛型存储、CLI/Bot 共享路径
-- ✅ PI_ 向后兼容彻底移除 (2026-05-02, c7d6ba52): 26 个源文件中所有 `process.env.PI_*` fallback 全部移除，"pi" bin 别名删除，`~/.pi/` 路径全部迁移到 `~/.fitclaw/`
-- ✅ jiti 动态加载 Skill 工具 (2026-05-02, 1487b2aa): `sdk.ts` 通过 `jiti.import("scripts/tools.ts")` 动态加载，支持工具名前缀 + 热插拔新运动 skill
+- Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
+- pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
+- PI_ 向后兼容彻底移除 (2026-05-02, c7d6ba52): 26 个源文件中所有 `process.env.PI_*` fallback 全部移除
+- Slack 代码全部删除 (2026-05-02): mom 包纯飞书化，删除 slack.ts/download.ts/events.ts，移除 `@slack/*` 依赖
+- **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data:{skill}:read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
+
+完整历史记录 → [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 
 ## 技术记录（Plan 文件）
 
 | 计划文件 | 说明 |
 |----------|------|
-| `~/.claude/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策，历史记录） |
-| `~/.claude/plans/plan-tranquil-kahn.md` | CLI 品牌重构 + 启动简化（已部分完成） |
+| `docs/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策，历史记录） |
+| `docs/plans/plan-tranquil-kahn.md` | CLI 品牌重构 + 启动简化（已部分完成） |
 
-## 待完成 / 待完善
+## 待完成
 
-### ✅ 已完成 (截至 2026-05-01)
+1. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
+2. **动作图片资源** — bodybuilding 数据库含图片路径但图片文件待下载
 
-1. **CLI 品牌重构** — PiManifest → FitClawManifest 类型重命名，pi→fitclaw 字符串替换 (d743e3bc)
-2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + 渐进式知识索引 (1277ef74, 2026-05-01 改造)
-3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE 全部更新 (c1d52c3d)
-4. **安全修复 #2** — Bash 危险命令拦截 (f09e06cd)
-5. **安全修复 #3** — 文件工具路径遍历防护 (f09e06cd)
-6. **pi-mono/fork 引用清理** — 文档去 fork 化 + 源 URL 更新 + 根 .pi/ 删除 (be21ba30)
+## 健身数据架构（Model B 纯 Skill）
 
-### 🟢 低优先级（择机执行）
+### 设计原则
 
-1. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token。jiti 动态加载已接上（1487b2aa），工具代码仍在 `fitness/` 子目录但已支持动态激活
-2. ~~P3：jiti 动态加载 Skill 工具~~ ✅ 已实施 (2026-05-02, 1487b2aa) — `sdk.ts` 现在通过 `jiti.import("scripts/tools.ts")` 动态加载 skill 工具，支持命名空间前缀和热插拔
-3. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
-4. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
-
-## 健身数据架构
+Skill 作者**不接触任何框架类型**。Skill = SKILL.md + references/ + scripts/ + assets/。
+框架通过 `data:` frontmatter 声明自动提供持久化能力。
 
 ### 数据存储位置
 
 | 数据类型 | 来源 | 存储 |
 |---------|------|------|
-| 动作数据库 | `packages/coding-agent/data/exercises.json`（静态文件） | 磁盘，永久 |
-| 训练记录 / 体测 / 计划 / 超负荷 | 用户通过 Bot 输入 | `<channelDir>/sport-data/fitness.json`（通过 FileSportDataStore） |
+| 动作数据库 | `free-exercise-db/` (bodybuilding skill 内嵌) | 磁盘，永久（800+ 动作 JSON + 图片） |
+| 用户画像 / 训练记录 / 计划 | LLM 通过 `data:{skill}:read/write` 工具 | `<dataDir>/sport-data/{skillName}/{namespace}.json` |
 | 对话历史 | 消息记录 | `<channelDir>/context.jsonl` + `log.jsonl` |
 
-### 数据写入流程
+### 数据写入流程 (Model B)
 
 ```
-用户消息 → LLM 决定调用工具 → tool.execute()
-  → loadFitnessData(dataDir)  // 首次从磁盘加载
-  → getWorkouts(dataDir) 等    // 读写内存
-  → persist(dataDir)           // 立即 flush 到磁盘
+用户消息 → LLM 结合 SKILL.md 指令决策
+  → LLM 调用 data:bodybuilding:write("training_log", {...}, "append")
+    → FileSportDataStore.save("bodybuilding/training_log", data)
+      → {dataDir}/sport-data/bodybuilding/training_log.json
 ```
 
-### 工具调用检测
+### Skill 系统（2026-05-02 Model B 改造后）
 
-PM2 日志中查看：
-- `↳ toolName` — 工具开始执行
-- `✓ toolName (Xs)` — 工具成功完成
-- `💬 Response` 但没有 `↳` — LLM 纯文本回答，未调工具
-
-### System Prompt 版本
-
-| 组件 | 文件 | 健身相关 |
-|------|------|---------|
-| Bot system prompt | `packages/mom/src/agent.ts` `buildSystemPrompt()` | 有：渐进式知识索引 + 精简工具引用 |
-| CLI system prompt | `packages/coding-agent/src/core/system-prompt.ts` `buildSystemPrompt()` | 有：fitnessMode 分支注入 FitCoach 人格；知识索引来自 skill 的 `references/` |
-
-### Skill 系统（2026-05-01 改造后）
-
-Skills 现在支持**可选工具**。一个 skill 目录可以包含：
-- `SKILL.md` — 必须，frontmatter + 正文
-- `scripts/tools.ts` — 可选，`createTools(store): AgentTool[]`
+Skill 目录结构：
+- `SKILL.md` — 必须，frontmatter + 正文（可含 `data:` 声明）
 - `references/*.md` — 可选，渐进式知识库
+- `scripts/*` — 可选，任意语言脚本（Python/bash/Node），LLM 通过 bash 调用
 - `assets/*` — 可选，静态数据
 
 **安装位置**：`~/.fitclaw/agent/skills/`（用户级）或 `.fitclaw/skills/`（项目级）
 
-**知识库位置变更**：`.fitclaw/prompts/` → `.fitclaw/skills/fitness-coach/references/`（对齐标准化 Skills 格式）
+### `data:` 声明（Model B 持久化）
+
+在 SKILL.md frontmatter 中声明 namespace，框架自动注册 `data:{skillName}:read` 和 `data:{skillName}:write` Agent Tool：
+
+```yaml
+---
+name: bodybuilding
+data:
+  user_profile: {}             # object 类型，write 默认 replace
+  training_log: {type: array}  # array 类型，write 默认 append
+---
+```
+
+框架自动行为：
+1. 初始化 namespace JSON 文件（`{dataDir}/sport-data/{skillName}/{namespace}.json`）
+2. 注册 `data:{skillName}:read` / `data:{skillName}:write` Agent Tool
+3. 设置 `FITCLAW_DATA_DIR` 环境变量 → `{dataDir}/sport-data`
+
+### 已安装 Skill
+
+| Skill | 位置 | 工具 | 数据 |
+|-------|------|------|------|
+| bodybuilding | `.fitclaw/skills/bodybuilding/` | `data:bodybuilding:read/write` | 6 个 namespace + 800+ 动作数据库 |
+| swimming-coach | `.fitclaw/skills/swimming-coach/` | `data:swimming-coach:read/write` | 3 个 namespace |
+
+### 添加新 Skill 的步骤
+
+1. 在 `.fitclaw/skills/<name>/` 创建目录
+2. 编写 `SKILL.md`（含 `data:` 声明）
+3. 可选：添加 `references/`、`scripts/`、`assets/`
+4. 框架自动发现并注册 data 工具
 
 ## 如何启动
 
@@ -157,44 +153,18 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 
 配置方式 → 参考早前对话或查看 `packages/coding-agent/src/config.ts`
 
-## Commit 历史（当前 main 分支，最近 15 个）
-
-```
-5dfa30ed docs: mark jiti dynamic loading as completed
-1487b2aa feat: connect jiti dynamic loading for skill scripts/tools.ts
-c7d6ba52 refactor: remove all PI_ env var backward compatibility
-35884fe3 fix(mom): add Feishu event input validation and document WebSocket security model
-20e7a960 docs: fix stale .fitclaw/prompts/ references and resolve doc contradictions
-70dfd51f fix: replace .pi/ branding residue in source comments and UI strings
-3766c16d feat: Sport Skill Pack architecture — skills support tools.ts + progressive knowledge loading
-34850c19 docs: remove outdated PROJECT_DOCUMENTATION.md
-a5ba4c1f docs: sync knowledge base after pi/fork cleanup and config clarification
-be21ba30 docs: remove pi-mono fork references and legacy .pi/ config directory
-ef12fef2 feat: single-file config — entrypoint generates auth.json + models.json from .env
-c37af31e fix: align Docker LLM config with CLI and mount config directory
-d2d72c67 docs: add complete Docker deployment workflow to USER_GUIDE
-6399136e docs: sync CLAUDE.md and README with Docker deployment info
-f42f70d2 feat: add Docker containerization for Bot deployment
-```
-
-## AI Agent 工作规则
-
-1. **每次功能修复完成后必须 push 到 GitHub** — `git push origin main`
-2. **Bug 修复记录在 git commit history 中** — 每次修复一个独立 commit，message 遵循 conventional commits 格式
-3. **项目文档统一放在 `docs/` 目录** — 不散落在根目录
-
 ## 关键文件速查
 
 | 需求 | 路径 |
 |------|------|
-| 健身工具实现 | `packages/coding-agent/src/core/tools/fitness/` |
-| 健身数据 Schema | `packages/coding-agent/src/core/fitness/schemas.ts` |
+| Skill data 工具实现 | `packages/coding-agent/src/core/tools/skill-data-tools.ts` |
 | SportDataStore 接口 | `packages/coding-agent/src/core/tools/fitness/sport-data-store.ts` |
-| 动作数据库 | `.fitclaw/skills/fitness-coach/assets/exercises.json` |
-| 知识库（渐进式） | `.fitclaw/skills/fitness-coach/references/` |
-| Skill 标准 | `docs/LEARNING_GUIDE.md` 附录 C + Skill 安装指南 |
-| 健身教练 Skill | `.fitclaw/skills/fitness-coach/SKILL.md` + `scripts/tools.ts` |
-| 游泳教练 Skill（示例） | `.fitclaw/skills/swimming-coach/SKILL.md` |
+| bodybuilding Skill | `.fitclaw/skills/bodybuilding/` (SKILL.md + 800+ 动作数据库 + 9 份 references) |
+| swimming-coach Skill | `.fitclaw/skills/swimming-coach/` (SKILL.md + 3 份 references) |
+| Skill 加载与解析 | `packages/coding-agent/src/core/skills.ts` |
+| data 工具注册 | `packages/coding-agent/src/core/sdk.ts` `createAgentSession()` |
+| fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
+| MOM Bot 工具注册 | `packages/mom/src/agent.ts` `createRunner()` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
 | 启动界面 | `packages/coding-agent/src/modes/interactive/interactive-mode.ts` |
 | 配置文件 | `packages/coding-agent/src/config.ts` |

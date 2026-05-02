@@ -65,10 +65,16 @@ function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
 	}
 }
 
+export interface SkillDataDeclaration {
+	type?: "object" | "array";
+}
+
 export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
+	/** Data namespaces for persistence (Model B). key → { type: "object" | "array" } */
+	data?: Record<string, SkillDataDeclaration>;
 	[key: string]: unknown;
 }
 
@@ -92,6 +98,8 @@ export interface Skill {
 	toolsPath?: string;
 	/** Knowledge index entries from references/ directory */
 	knowledgeEntries?: KnowledgeEntryMeta[];
+	/** Data namespaces declared in SKILL.md frontmatter (Model B persistence) */
+	dataNamespaces?: Map<string, SkillDataDeclaration>;
 }
 
 export interface LoadSkillsResult {
@@ -361,6 +369,26 @@ function loadSkillFromFile(
 		// Build knowledge index from references/ directory
 		const knowledgeEntries = buildKnowledgeEntries(skillDir);
 
+		// Parse data: declarations (Model B persistence namespaces)
+		let dataNamespaces: Map<string, SkillDataDeclaration> | undefined;
+		if (frontmatter.data && typeof frontmatter.data === "object") {
+			dataNamespaces = new Map();
+			for (const [key, decl] of Object.entries(frontmatter.data)) {
+				if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+					diagnostics.push({
+						type: "warning",
+						message: `data namespace key "${key}" must match [a-z][a-z0-9_]*`,
+						path: filePath,
+					});
+					continue;
+				}
+				if (decl && typeof decl === "object") {
+					const type = (decl as any).type === "array" ? "array" : "object";
+					dataNamespaces.set(key, { type });
+				}
+			}
+		}
+
 		return {
 			skill: {
 				name,
@@ -372,6 +400,7 @@ function loadSkillFromFile(
 				hasTools,
 				toolsPath: hasTools ? toolsPath : undefined,
 				knowledgeEntries: knowledgeEntries.length > 0 ? knowledgeEntries : undefined,
+				dataNamespaces: dataNamespaces && dataNamespaces.size > 0 ? dataNamespaces : undefined,
 			},
 			diagnostics,
 		};

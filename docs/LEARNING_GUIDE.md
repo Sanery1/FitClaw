@@ -1,5 +1,7 @@
 # FitClaw 项目学习指南
 
+> **注意 (2026-05-02)**：本文档中的 Model A 描述（fitness-coach、AgentTool、jiti 动态加载、fitnessMode 标志）已过时。项目已迁移到 **Model B 纯 Skill 架构**，详见 [CLAUDE.md](../CLAUDE.md) 和 [CHANGELOG.md](./CHANGELOG.md)。本文档待全面更新。
+
 > 本文档指导开发者从 0 到 1 理解 FitClaw 项目架构。按阶段阅读，每个阶段有明确的目标、阅读清单和动手任务。
 
 ---
@@ -16,7 +18,7 @@
 | `packages/agent` | `@fitclaw/agent-core` | Agent 运行时：状态机、事件流、工具循环 |
 | `packages/coding-agent` | `@fitclaw/claw` | **主 CLI 应用**（交互式 TUI） |
 | `packages/tui` | `@fitclaw/tui` | 终端 UI 组件库（差分渲染） |
-| `packages/mom` | `@fitclaw/mom` | Slack / 飞书 Bot 适配器 |
+| `packages/mom` | `@fitclaw/mom` | 飞书 Bot 适配器 |
 | `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件（Lit） |
 | `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
 
@@ -210,8 +212,7 @@ FitClaw 的所有架构决策遵循一条主线原则：
 ```
 
 **为什么**：
-- 核心的 `AgentRunner`（Agent 编排逻辑）对 Slack 和飞书完全相同。单独开包会导致这段逻辑重复维护。
-- `BotAdapter` 接口解耦 IM 层与 Agent 编排层：`AgentRunner` 不感知底层是 Slack 还是飞书。
+- 核心的 `AgentRunner`（Agent 编排逻辑）通过 `BotContext` 接口与 IM 层解耦：`AgentRunner` 不感知底层平台细节。
 - Placeholder 方法体留空，不阻塞主流程编译运行。飞书 API 就绪后只需填充 `adapters/feishu/` 下的 `listener.ts` + `renderer.ts`，不动上层代码。
 
 **你可以验证**：看 `packages/mom/src/types.ts` 的 `BotContext` 接口 — 这是 IM 无关的抽象。
@@ -522,13 +523,13 @@ branch() 创建新分支（切换 parentId）
 packages/mom/src/main.ts          (双平台入口)
 packages/mom/src/agent.ts         (AgentRunner 封装)
 packages/mom/src/feishu.ts        (飞书适配器)
-packages/mom/src/slack.ts         (Slack 适配器，选读)
+packages/mom/src/feishu.ts        (飞书适配器)
 ```
 
 ### Bot 架构
 
 ```
-用户消息（Slack/飞书）
+用户消息（飞书）
     ↓
 Bot 接收事件 → 创建 BotContext
     ↓
@@ -543,7 +544,7 @@ AgentRunner.run(ctx, store)
 
 ### BotContext 接口
 
-| 方法 | Slack 实现 | 飞书实现 |
+| 方法 | 说明 |
 |------|-----------|----------|
 | respond() | 更新/发送消息 | 累加文本 |
 | replaceMessage() | 替换消息 | 替换累加文本 |

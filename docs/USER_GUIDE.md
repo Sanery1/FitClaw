@@ -11,10 +11,10 @@ FitClaw 包含 **两个独立的可执行程序**，共享底层 Agent 引擎但
 | | `fitclaw`（CLI） | `mom`（Bot） |
 |------|----------|--------|
 | **启动命令** | `fitclaw` 或 `node packages/coding-agent/dist/cli.js` | `mom <workspace>` 或 `node packages/mom/dist/main.js <workspace>` |
-| **做什么** | 终端里的交互式 AI 编程助手 | 后台服务，把 Agent 接入飞书 / Slack 群聊 |
-| **谁用** | 开发者直接在终端里用 | 终端用户通过飞书/Slack 群聊用 |
+| **做什么** | 终端里的交互式 AI 编程助手 | 后台服务，把 Agent 接入飞书群聊 |
+| **谁用** | 开发者直接在终端里用 | 终端用户通过飞书群聊用 |
 | **运行方式** | 前台交互式 TUI | 后台守护进程（通常用 PM2） |
-| **健身能力** | `--fitness` flag 开启 | 始终开启（自带健身工具） |
+| **健身能力** | 通过已安装的 skill 使用 | 始终开启（加载 skill 的数据工具） |
 | **npm 包** | `@fitclaw/claw` | `@fitclaw/mom` |
 
 **输入 `fitclaw` 不会启动飞书 Bot。** 它们是两个命令，互不依赖。
@@ -28,7 +28,7 @@ FitClaw 包含 **两个独立的可执行程序**，共享底层 Agent 引擎但
 3. [CLI 命令行使用](#3-cli-命令行使用)
 4. [交互模式操作](#4-交互模式操作)
 5. [健身私教模式](#5-健身私教模式)
-6. [Bot 部署（Slack / 飞书）](#6-bot-部署slack--飞书)
+6. [Bot 部署（飞书）](#6-bot-部署飞书)
 7. [配置系统](#7-配置系统)
 8. [LLM Provider 配置](#8-llm-provider-配置)
 9. [知识库 & 技能系统](#9-知识库--技能系统)
@@ -51,11 +51,8 @@ npm install
 # 构建全部包
 npm run build
 
-# 启动交互式 CLI（编程助手）
+# 启动交互式 CLI（编程助手 + 健身私教）
 node packages/coding-agent/dist/cli.js
-
-# 启动健身私教模式
-node packages/coding-agent/dist/cli.js --fitness
 ```
 
 首次运行需要配置 API Key（见 [LLM Provider 配置](#8-llm-provider-配置)）。
@@ -259,65 +256,64 @@ fitclaw --export session.jsonl output.html
 
 ---
 
-## 5. 健身私教模式
+## 5. 健身私教模式（Model B 纯 Skill）
 
-### 5.1 启动健身模式
+### 5.1 架构
+
+健身功能不再需要 `--fitness` flag。框架自动加载 `.fitclaw/skills/` 中的 skill。每个 skill 声明 `data:` namespaces，框架自动注册 `data:{skill}:read` / `data:{skill}:write` 工具。
+
+### 5.2 已安装的健身 Skill
+
+| Skill | 动作数据库 | 工具 | 功能 |
+|-------|-----------|------|------|
+| bodybuilding | 800+ 动作（free-exercise-db） | `data:bodybuilding:read/write` | 用户画像 → 训练计划 → 动作教学 → 渐进超负荷 |
+| swimming-coach | 泳姿教学 | `data:swimming-coach:read/write` | 泳姿纠正、训练计划、配速追踪 |
+
+### 5.3 使用方式
+
+在 CLI 或 Bot 中自然对话即可。Agent 会自动调用 bodybuilding skill 的 Python 查询脚本和数据持久化工具。
 
 ```bash
-# CLI 启动
-fitclaw --fitness
+# 查询动作（Agent 自动调用 scripts/query_exercises.py）
+"有哪些哑铃胸部的动作？"
+"给我设计一个新手全身训练计划"
 
-# Bot 模式自动包含（见第 6 节）
+# 数据自动持久化到 sport-data/bodybuilding/
+"我今天练了卧推 60kg 3x10"
+"查看我的训练进度"
 ```
 
-`--fitness` 会：
-- 切换到 "FitCoach" 身份（system prompt 注入健身角色）
-- 加载 `.fitclaw/skills/fitness-coach/references/` 中的渐进式知识索引
-- 注册 11 个健身相关 Agent 工具
+### 5.4 数据存储
 
-### 5.2 11 个健身工具
+用户数据通过 `data:{skill}:write` 持久化：
+- **CLI**：`~/.fitclaw/agent/sessions/<session-id>/sport-data/{skillName}/{namespace}.json`
+- **Bot**：`<workingDir>/<channelId>/sport-data/{skillName}/{namespace}.json`
 
-| 工具 | 类别 | 功能 |
-|------|------|------|
-| `query_exercises` | 动作库 | 按肌肉群/器械/难度搜索动作 |
-| `get_exercise_detail` | 动作库 | 获取单个动作的详细教学 |
-| `log_workout` | 训练 | 记录一次训练（动作+组数+重量） |
-| `get_workout_history` | 训练 | 查询历史训练记录 |
-| `log_body_metrics` | 体测 | 记录体重/体脂/围度等数据 |
-| `get_body_metrics_history` | 体测 | 查询历史体测数据 |
-| `create_training_plan` | 计划 | 生成/更新个性化训练计划 |
-| `get_current_plan` | 计划 | 查看当前训练计划 |
-| `get_today_workout` | 计划 | 获取今日训练安排 |
-| `get_progress_summary` | 分析 | 生成阶段性进展报告 |
-| `log_progressive_overload` | 进阶 | 记录渐进超负荷数据 |
+### 5.5 动作查询脚本
 
-### 5.3 动作数据库
+bodybuilding skill 自带 Python 查询脚本：
 
-动作数据库位于 `.fitclaw/skills/fitness-coach/assets/exercises.json`（源码中保留于 `packages/coding-agent/data/exercises.json`），包含 50+ 标准动作，每条记录包含：
-- 中英文名称
-- 目标肌肉群
-- 所需器械
-- 动作难度
-- 动作描述与要点
+```bash
+# 按肌群查询
+python .fitclaw/skills/bodybuilding/scripts/query_exercises.py --muscle chest --equipment dumbbell
 
-### 5.4 健身数据存储
+# 查询单个动作详情
+python .fitclaw/skills/bodybuilding/scripts/query_exercises.py --id "Incline_Dumbbell_Press" --detailed
 
-健身数据（训练记录、体测、计划）持久化在：
-- **CLI 模式**：`~/.fitclaw/agent/sessions/<session-id>/sport-data/fitness.json`
-- **Bot 模式**：`<workingDir>/<channelId>/sport-data/fitness.json`（按用户/频道隔离）
-
-数据通过泛型 `SportDataStore` 接口管理，每个运动 skill 有独立命名空间（`sport-data/{skill-name}.json`）。
+# 列出所有可用肌群
+python .fitclaw/skills/bodybuilding/scripts/query_exercises.py --list-muscles
+```
 
 ---
 
-## 6. Bot 部署（Slack / 飞书）
+## 6. Bot 部署（飞书）
 
 ### 6.1 架构概述
 
 ```
-用户消息（Slack / 飞书）
+用户消息（飞书）
     ↓
-Bot 适配器接收 → 创建 BotContext
+Bot 适配器（FeishuBot）接收 → 创建 BotContext
     ↓
 获取/创建 ChannelState（按 channel 隔离）
     ↓
@@ -344,11 +340,6 @@ MOM_FEISHU_APP_ID="cli_xxxx" \
 MOM_FEISHU_APP_SECRET="xxxx" \
 node packages/mom/dist/main.js ./feishu-workspace
 
-# Slack Bot
-MOM_SLACK_APP_TOKEN="xapp-xxxx" \
-MOM_SLACK_BOT_TOKEN="xoxb-xxxx" \
-node packages/mom/dist/main.js ./slack-workspace
-
 # 带 sandbox
 node packages/mom/dist/main.js --sandbox=docker:sandbox-name ./workspace
 ```
@@ -372,16 +363,7 @@ pm2 save
    - `MOM_FEISHU_APP_SECRET` — 飞书应用密钥
    - `MOM_FEISHU_BOT_NAME` — Bot 显示名称（默认 "FitCoach"）
 
-### 6.6 Slack 配置
-
-1. 创建 Slack App（Socket Mode）
-2. 获取 App-Level Token（`xapp-`）
-3. 获取 Bot Token（`xoxb-`）
-4. 设置环境变量：
-   - `MOM_SLACK_APP_TOKEN`
-   - `MOM_SLACK_BOT_TOKEN`
-
-### 6.7 用户隔离
+### 6.6 用户隔离
 
 - 单聊：按 `channelId` 隔离
 - 群聊 @ 提及：按 `channelId/userId` 隔离
@@ -404,10 +386,9 @@ pm2 save
 ├── sessions/         # 会话文件
 │   ├── abc123/
 │   │   ├── session.jsonl         # 会话消息
-│   │   └── sport-data/            # 运动数据
-│   │       └── fitness.json       # 健身记录
+│   │   └── sport-data/            # 运动数据（按 skill/namespace 分文件）
 │   └── ...
-├── prompts/          # 自定义提示模板（注：健身知识库已迁移到 skills/fitness-coach/references/）
+├── prompts/          # 自定义提示模板
 ├── themes/           # 自定义主题
 ├── skills/           # 自定义技能
 ├── tools/            # 工具配置
@@ -549,7 +530,7 @@ Skills 定义专门的能力领域。自动渐进式加载：
 
 知识库采用**渐进式披露**模式：system prompt 只注入文件名索引（~100 tokens），LLM 在需要具体知识时通过 `read` 工具按需加载对应文件。
 
-旧的知识库位置（`.fitclaw/prompts/`）已废弃，内容已迁移到 `.fitclaw/skills/fitness-coach/references/`。
+旧的知识库位置（`.fitclaw/prompts/`）已废弃，内容已迁移到 `.fitclaw/skills/<skill-name>/references/`。
 
 ### 9.4 CLAUDE.md / AGENTS.md
 
@@ -651,9 +632,9 @@ echo "List all TODO comments in src/" | npx fitclaw -p
 ### 12.3 健身私教（CLI）
 
 ```bash
-fitclaw --fitness "我想开始健身，帮我设计一个新手训练计划"
-fitclaw --fitness "今天练了深蹲 3x10 60kg"
-fitclaw --fitness "查看我的训练进度"
+fitclaw "我想开始健身，帮我设计一个新手训练计划"
+fitclaw "今天练了深蹲 3x10 60kg"
+fitclaw "查看我的训练进度"
 ```
 
 ### 12.4 飞书群聊 Bot（Docker 部署）
@@ -815,9 +796,6 @@ fitclaw --tools read,grep,find,ls -p "Explore the codebase structure"
 | `MOM_FEISHU_APP_ID` | 飞书应用 ID |
 | `MOM_FEISHU_APP_SECRET` | 飞书应用密钥 |
 | `MOM_FEISHU_BOT_NAME` | 飞书 Bot 显示名 |
-| `MOM_SLACK_APP_TOKEN` | Slack App Token |
-| `MOM_SLACK_BOT_TOKEN` | Slack Bot Token |
-
 ### 13.3 FitClaw 通用
 
 | 变量 | 说明 |

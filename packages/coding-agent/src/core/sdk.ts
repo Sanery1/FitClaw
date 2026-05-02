@@ -1,8 +1,7 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@fitclaw/agent-core";
+import { Agent, type AgentMessage, type ThinkingLevel } from "@fitclaw/agent-core";
 import { type Message, type Model, streamSimple } from "@fitclaw/ai";
-import { createJiti } from "@mariozechner/jiti";
-import { APP_NAME, getAgentDir, isBunBinary } from "../config.js";
+import { APP_NAME, getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -17,7 +16,7 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
-import { createAllFitnessTools, createFitnessStore, createFitnessTools } from "./tools/fitness/index.js";
+import { FileSportDataStore } from "./tools/fitness/sport-data-store.js";
 import {
 	createBashTool,
 	createCodingTools,
@@ -31,36 +30,8 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.js";
+import { createSkillDataReadTool, createSkillDataWriteTool } from "./tools/skill-data-tools.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
-
-// =============================================================================
-// jiti module resolution for skill scripts/tools.ts
-// =============================================================================
-
-// Bundled modules for Bun binary mode (virtualModules)
-import * as _bundledAgentCore from "@fitclaw/agent-core";
-
-// Skill virtual modules: subset of @fitclaw/claw exports that skill tools.ts needs.
-// createFitnessTools is already imported above; other exports are types (erased at runtime).
-const SKILL_VIRTUAL_MODULES: Record<string, unknown> = {
-	"@fitclaw/agent-core": _bundledAgentCore,
-	"@fitclaw/claw": { createFitnessTools },
-};
-
-let _skillAliases: Record<string, string> | null = null;
-
-function getSkillAliases(): Record<string, string> {
-	if (_skillAliases) return _skillAliases;
-	const __dirname = import.meta.dirname;
-	const packageIndex = join(__dirname, "..", "..", "index.js");
-	const packagesRoot = join(__dirname, "..", "..", "..", "..");
-	const agentCorePath = join(packagesRoot, "agent", "dist", "index.js");
-	_skillAliases = {
-		"@fitclaw/claw": packageIndex,
-		"@fitclaw/agent-core": agentCorePath,
-	};
-	return _skillAliases;
-}
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -98,8 +69,6 @@ export interface CreateAgentSessionOptions {
 	tools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
-	/** Enable fitness coach identity instead of coding assistant. */
-	fitnessMode?: boolean;
 
 	/** Resource loader. When omitted, DefaultResourceLoader is used. */
 	resourceLoader?: ResourceLoader;
@@ -417,28 +386,24 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	let customTools = options.customTools;
-	if (options.fitnessMode) {
-		const skillTools = resourceLoader.getSkills().skills.find((s) => s.name === "fitness-coach");
-		if (skillTools?.hasTools && skillTools.toolsPath) {
-			// Dynamic import via jiti — loads skill scripts/tools.ts at runtime
-			const jiti = createJiti(import.meta.url, {
-				moduleCache: false,
-				...(isBunBinary
-					? { virtualModules: SKILL_VIRTUAL_MODULES, tryNative: false }
-					: { alias: getSkillAliases() }),
-			});
-			const toolsModule = (await jiti.import(skillTools.toolsPath)) as {
-				createTools: (store: ReturnType<typeof createFitnessStore>) => AgentTool[];
-			};
-			const store = createFitnessStore(sessionManager.getSessionDir());
-			const fitnessTools = toolsModule.createTools(store);
-			const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
-			customTools = [...(customTools ?? []), ...fitnessDefinitions];
-		} else {
-			// Fallback: skill not yet migrated to tools.ts format
-			const fitnessTools = createAllFitnessTools(sessionManager.getSessionDir());
-			const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
-			customTools = [...(customTools ?? []), ...fitnessDefinitions];
+
+	// Model B: auto-register data persistence tools for skills with data: declarations
+	const sportDataDir = join(sessionManager.getSessionDir(), "sport-data");
+	process.env.FITCLAW_DATA_DIR = sportDataDir;
+	for (const skill of resourceLoader.getSkills().skills) {
+		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
+			const skillStore = new FileSportDataStore(sessionManager.getSessionDir());
+			for (const [key, decl] of skill.dataNamespaces) {
+				const ns = `${skill.name}/${key}`;
+				if ((await skillStore.load(ns)) === null) {
+					await skillStore.save(ns, decl.type === "array" ? [] : {});
+				}
+			}
+			customTools = [
+				...(customTools ?? []),
+				createToolDefinitionFromAgentTool(createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces)),
+				createToolDefinitionFromAgentTool(createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces)),
+			];
 		}
 	}
 
@@ -455,7 +420,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
-		fitnessMode: options.fitnessMode,
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 

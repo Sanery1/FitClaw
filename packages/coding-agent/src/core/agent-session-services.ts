@@ -55,7 +55,6 @@ export interface CreateAgentSessionFromServicesOptions {
 	tools?: string[];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
-	fitnessMode?: boolean;
 }
 
 /**
@@ -195,6 +194,5 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
-		fitnessMode: options.fitnessMode,
 	});
 }

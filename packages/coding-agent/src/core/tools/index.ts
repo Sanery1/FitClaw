@@ -195,26 +195,11 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 	};
 }
 
-// ── Fitness tools ──
+// ── Skill data persistence tools (Model B) ──
 
-export type { FitnessData, SportDataStore } from "./fitness/index.js";
-export {
-	createAllFitnessTools,
-	createFitnessStore,
-	createFitnessTools,
-	createGetBodyMetricsHistoryTool,
-	createGetCurrentPlanTool,
-	createGetExerciseDetailTool,
-	createGetProgressSummaryTool,
-	createGetTodayWorkoutTool,
-	createGetWorkoutHistoryTool,
-	createLogBodyMetricsTool,
-	createLogProgressiveOverloadTool,
-	createLogWorkoutTool,
-	createQueryExercisesTool,
-	createTrainingPlanTool,
-	emptyFitnessData,
-	FileSportDataStore,
-	loadFitnessData,
-	persist,
-} from "./fitness/index.js";
+export { createSkillDataReadTool, createSkillDataWriteTool } from "./skill-data-tools.js";
+
+// ── Generic data persistence (used by Model B skill data tools) ──
+
+export type { SportDataStore } from "./fitness/sport-data-store.js";
+export { FileSportDataStore } from "./fitness/sport-data-store.js";
