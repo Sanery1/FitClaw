@@ -80,7 +80,7 @@ npm run dev          # 并行 watch 所有包
 ## 主要特性
 
 - 11 个健身 Agent 工具 + 动作数据库（50+ 动作）
-- 分层知识库系统（`.fitclaw/prompts/` + `.fitclaw/skills/`）
+- 分层知识库系统（`.fitclaw/skills/` 渐进式索引）
 - 飞书 Bot 完整适配器（WebSocket 长连接模式）
 - Slack Bot 适配器
 - 统一配置系统（`.fitclaw/`）

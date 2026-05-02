@@ -37,8 +37,8 @@
 
 - ✅ 包重命名：200+ 源文件 import 路径、tsconfig、vitest 别名全部更新
 - ✅ 11 个健身 Agent 工具（动作数据库 / 训练记录 / 体测 / 训练计划 / 进度分析）
-- ✅ 50 个动作的完整数据库 `packages/coding-agent/data/exercises.json`（中英文）
-- ✅ 知识库系统 `.fitclaw/`（skills / prompts）
+- ✅ 50 个动作的完整数据库 `.fitclaw/skills/fitness-coach/assets/exercises.json`（中英文），源码保留在 `packages/coding-agent/data/exercises.json`
+- ✅ 知识库系统 `.fitclaw/skills/`（渐进式索引 references/ + SKILL.md）
 - ✅ 飞书 Bot 完整实现 `packages/mom/src/feishu.ts`（WebSocket 长连接模式）
 - ✅ `.gitignore` 更新、`README.md` 完整重写
 - ✅ 配置目录从 `~/.pi/` 迁移到 `~/.fitclaw/`

@@ -119,7 +119,7 @@ FitClaw 的所有架构决策遵循一条主线原则：
 - 域文件按需加载，Token 消耗最小化。
 - 校验脚本保证多人在多时间维护知识库时不会引入不一致。
 
-**你可以验证**：看 `.fitclaw/prompts/` 下的域文件和 `packages/mom/src/agent.ts` 中 `loadFitClawKnowledge()` 的加载逻辑。
+**你可以验证**：看 `.fitclaw/skills/fitness-coach/references/` 下的域文件和 `packages/mom/src/agent.ts` 中 `loadFitClawKnowledge()` 的加载逻辑。
 
 ---
 
@@ -631,7 +631,7 @@ buildSystemPrompt({
 buildSystemPrompt(workspacePath, channelId, memory, skills)
 
 → 返回一个硬编码模板，插入以下动态部分：
-  1. loadFitClawKnowledge() — .fitclaw/prompts/*.md 全文拼接
+  1. loadFitClawKnowledge() — .fitclaw/skills/fitness-coach/references/*.md 渐进式索引
   2. memory — workspace + channel 的 MEMORY.md 内容
   3. formatSkillsForPrompt(skills) — 技能列表格式化
 ```
@@ -641,7 +641,7 @@ buildSystemPrompt(workspacePath, channelId, memory, skills)
 ```
 You are FitCoach, ...
   ├── ## Your Role           — 身份 + 回复风格（1-3句简短）
-  ├── ## FitClaw Knowledge   — .fitclaw/prompts/ 全部健身知识
+  ├── ## FitClaw Knowledge   — .fitclaw/skills/fitness-coach/references/ 渐进式知识索引
   ├── ## Context             — 日期 + 对话历史
   ├── ## Formatting          — 纯文本格式要求
   ├── ## Memory              — MEMORY.md 读写指引
@@ -907,11 +907,11 @@ discoverAppendSystemPromptFile()
 
 #### Bot 为什么不加载这些文件？
 
-Bot 的设计哲学是**自包含**。它的运行环境是后台守护进程，不存在 "cwd 项目上下文" 的概念。所有行为规则直接写在 `buildSystemPrompt()` 函数里，所有知识放在 `.fitclaw/prompts/` 下。这样设计的好处是：
+Bot 的设计哲学是**自包含**。它的运行环境是后台守护进程，不存在 "cwd 项目上下文" 的概念。所有行为规则直接写在 `buildSystemPrompt()` 函数里，所有知识放在 `skills/*/references/` 下。这样设计的好处是：
 
 - 行为可预测（不依赖文件系统上的外部文件）
 - 部署简单（不需要在每个 workspace 配置 AGENTS.md）
-- 健身知识通过 `.fitclaw/prompts/` 统一管理
+- 健身知识通过 `skills/fitness-coach/references/` 统一管理
 
 ### 动手实验
 
@@ -1023,7 +1023,7 @@ cat ~/.fitclaw/agent/sessions/<session-id>.jsonl | head -20
 旧的健身工具硬编码在 `packages/coding-agent/src/core/tools/fitness/` 中，存在三个问题：
 
 1. **不可插拔**：加一个游泳教练需要改 5 个文件（args.ts、sdk.ts、system-prompt.ts、agent.ts、tools/index.ts）
-2. **System prompt 膨胀**：`.fitclaw/prompts/` 下的 5 个知识库文件（~4,781 bytes ≈ 1,200 tokens）**全文拼接**进每次 LLM 请求的 system prompt，无论用户问什么
+2. **System prompt 膨胀**：原先 5 个知识库文件（~4,781 bytes ≈ 1,200 tokens）**全文拼接**进每次 LLM 请求的 system prompt，无论用户问什么。现改为渐进式索引：仅加载标题+首段摘要（~100 tokens），在 SKILL.md 正文中完整注入时才加载全文
 3. **CLI/Bot 严重分化**：Bot 自建 ResourceLoader stub、自建 skill 加载、自建 system prompt 构建，与 CLI 共享 0% 代码
 
 ### 核心设计：Skill = prompt + knowledge + tools
@@ -1304,7 +1304,7 @@ node -e "require('@mariozechner/jiti').createJiti(import.meta.url).import('./scr
 |------|------|
 | 修改文件数 | 18 个 |
 | 新增文件数 | 3 个（`sport-data-store.ts`、`swimming-coach/SKILL.md`、`swimming-coach/scripts/tools.ts`） |
-| 删除文件数 | 0（仅删除了空的 `.fitclaw/prompts/` 目录） |
-| 删除目录数 | 1（`.fitclaw/prompts/`，内容已迁移到 `references/`） |
+| 删除文件数 | 5（`.fitclaw/prompts/` 下知识文件，内容已迁移到 `skills/fitness-coach/references/`） |
+| 删除目录数 | 1（`.fitclaw/prompts/`） |
 | 向后兼容 | 完全兼容，`createAllFitnessTools(dataDir)` 保留 |
 | 测试通过 | 28/28 skills 测试 |
