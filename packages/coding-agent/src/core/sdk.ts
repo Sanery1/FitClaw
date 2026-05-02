@@ -1,7 +1,8 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type ThinkingLevel } from "@fitclaw/agent-core";
+import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@fitclaw/agent-core";
 import { type Message, type Model, streamSimple } from "@fitclaw/ai";
-import { APP_NAME, getAgentDir } from "../config.js";
+import { createJiti } from "@mariozechner/jiti";
+import { APP_NAME, getAgentDir, isBunBinary } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -31,6 +32,35 @@ import {
 	withFileMutationQueue,
 } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
+
+// =============================================================================
+// jiti module resolution for skill scripts/tools.ts
+// =============================================================================
+
+// Bundled modules for Bun binary mode (virtualModules)
+import * as _bundledAgentCore from "@fitclaw/agent-core";
+
+// Skill virtual modules: subset of @fitclaw/claw exports that skill tools.ts needs.
+// createFitnessTools is already imported above; other exports are types (erased at runtime).
+const SKILL_VIRTUAL_MODULES: Record<string, unknown> = {
+	"@fitclaw/agent-core": _bundledAgentCore,
+	"@fitclaw/claw": { createFitnessTools },
+};
+
+let _skillAliases: Record<string, string> | null = null;
+
+function getSkillAliases(): Record<string, string> {
+	if (_skillAliases) return _skillAliases;
+	const __dirname = import.meta.dirname;
+	const packageIndex = join(__dirname, "..", "..", "index.js");
+	const packagesRoot = join(__dirname, "..", "..", "..", "..");
+	const agentCorePath = join(packagesRoot, "agent", "dist", "index.js");
+	_skillAliases = {
+		"@fitclaw/claw": packageIndex,
+		"@fitclaw/agent-core": agentCorePath,
+	};
+	return _skillAliases;
+}
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -389,9 +419,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let customTools = options.customTools;
 	if (options.fitnessMode) {
 		const skillTools = resourceLoader.getSkills().skills.find((s) => s.name === "fitness-coach");
-		if (skillTools?.hasTools) {
+		if (skillTools?.hasTools && skillTools.toolsPath) {
+			// Dynamic import via jiti — loads skill scripts/tools.ts at runtime
+			const jiti = createJiti(import.meta.url, {
+				moduleCache: false,
+				...(isBunBinary
+					? { virtualModules: SKILL_VIRTUAL_MODULES, tryNative: false }
+					: { alias: getSkillAliases() }),
+			});
+			const toolsModule = (await jiti.import(skillTools.toolsPath)) as {
+				createTools: (store: ReturnType<typeof createFitnessStore>) => AgentTool[];
+			};
 			const store = createFitnessStore(sessionManager.getSessionDir());
-			const fitnessTools = createFitnessTools(store);
+			const fitnessTools = toolsModule.createTools(store);
 			const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
 			customTools = [...(customTools ?? []), ...fitnessDefinitions];
 		} else {
