@@ -16,7 +16,7 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
-import { createAllFitnessTools } from "./tools/fitness/index.js";
+import { createAllFitnessTools, createFitnessStore, createFitnessTools } from "./tools/fitness/index.js";
 import {
 	createBashTool,
 	createCodingTools,
@@ -388,9 +388,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	let customTools = options.customTools;
 	if (options.fitnessMode) {
-		const fitnessTools = createAllFitnessTools(sessionManager.getSessionDir());
-		const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
-		customTools = [...(customTools ?? []), ...fitnessDefinitions];
+		const skillTools = resourceLoader.getSkills().skills.find((s) => s.name === "fitness-coach");
+		if (skillTools?.hasTools) {
+			const store = createFitnessStore(sessionManager.getSessionDir());
+			const fitnessTools = createFitnessTools(store);
+			const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
+			customTools = [...(customTools ?? []), ...fitnessDefinitions];
+		} else {
+			// Fallback: skill not yet migrated to tools.ts format
+			const fitnessTools = createAllFitnessTools(sessionManager.getSessionDir());
+			const fitnessDefinitions = fitnessTools.map(createToolDefinitionFromAgentTool);
+			customTools = [...(customTools ?? []), ...fitnessDefinitions];
+		}
 	}
 
 	const session = new AgentSession({

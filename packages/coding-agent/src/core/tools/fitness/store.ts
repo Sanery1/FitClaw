@@ -5,6 +5,7 @@ import type {
 	TrainingPlan,
 	WorkoutRecord,
 } from "../../fitness/schemas.js";
+import { FileSportDataStore, type SportDataStore } from "./sport-data-store.js";
 
 export interface FitnessData {
 	workouts: WorkoutRecord[];
@@ -14,7 +15,7 @@ export interface FitnessData {
 	personalRecords: PersonalRecord[];
 }
 
-function emptyData(): FitnessData {
+export function emptyFitnessData(): FitnessData {
 	return {
 		workouts: [],
 		metrics: [],
@@ -22,6 +23,10 @@ function emptyData(): FitnessData {
 		progressiveOverloads: [],
 		personalRecords: [],
 	};
+}
+
+function emptyData(): FitnessData {
+	return emptyFitnessData();
 }
 
 const stores = new Map<string, FitnessData>();
@@ -79,7 +84,12 @@ export async function persist(dataDir: string): Promise<void> {
 	await saveFitnessData(dataDir);
 }
 
-// ── Typed accessors ──
+/** Create a SportDataStore for fitness data, using the new interface. */
+export function createFitnessStore(dataDir: string): SportDataStore {
+	return new FileSportDataStore(dataDir);
+}
+
+// ── Typed accessors (legacy, use SportDataStore for new code) ──
 
 export function getWorkouts(dataDir: string): WorkoutRecord[] {
 	return getStore(dataDir).workouts;

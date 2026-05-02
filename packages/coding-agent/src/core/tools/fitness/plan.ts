@@ -1,13 +1,8 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { PlanExercise, TrainingPlan } from "../../fitness/schemas.js";
-import { getPlan, loadFitnessData, persist, setPlan } from "./store.js";
-
-const DEFAULT = "";
-
-export function getCurrentPlanState(dataDir: string = DEFAULT): TrainingPlan | null {
-	return getPlan(dataDir);
-}
+import type { SportDataStore } from "./sport-data-store.js";
+import { emptyFitnessData, type FitnessData } from "./store.js";
 
 const planExerciseSchema = Type.Object({
 	exerciseId: Type.String(),
@@ -53,15 +48,11 @@ const getTodayWorkoutSchema = Type.Object({
 	dayOfWeek: Type.Optional(Type.Number({ description: "Day of week (1=Mon, 7=Sun). Default: today's day" })),
 });
 
-async function ensureLoaded(dataDir: string): Promise<void> {
-	if (dataDir) await loadFitnessData(dataDir);
+async function loadData(store: SportDataStore): Promise<FitnessData> {
+	return (await store.load<FitnessData>("fitness")) ?? emptyFitnessData();
 }
 
-async function maybeSave(dataDir: string): Promise<void> {
-	if (dataDir) await persist(dataDir);
-}
-
-export function createTrainingPlanTool(dataDir: string = DEFAULT): AgentTool<typeof createTrainingPlanSchema> {
+export function createTrainingPlanTool(store?: SportDataStore): AgentTool<typeof createTrainingPlanSchema> {
 	return {
 		name: "create_training_plan",
 		label: "Create Training Plan",
@@ -69,9 +60,12 @@ export function createTrainingPlanTool(dataDir: string = DEFAULT): AgentTool<typ
 			"Create or overwrite the user's training plan. The plan defines weekly schedule, exercises, sets/reps, and progression strategy. Use after collecting user preferences and consulting the exercise database.",
 		parameters: createTrainingPlanSchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
-			const existing = getPlan(dataDir);
 			const now = new Date().toISOString();
+			let existing: TrainingPlan | null = null;
+			if (store) {
+				const data = await loadData(store);
+				existing = data.plan;
+			}
 
 			const plan: TrainingPlan = {
 				createdAt: existing?.createdAt ?? now,
@@ -101,8 +95,11 @@ export function createTrainingPlanTool(dataDir: string = DEFAULT): AgentTool<typ
 				})),
 			};
 
-			setPlan(dataDir, plan);
-			await maybeSave(dataDir);
+			if (store) {
+				const data = await loadData(store);
+				data.plan = plan;
+				await store.save("fitness", data);
+			}
 
 			const totalExercises = params.weeks.reduce(
 				(sum, w) => sum + w.days.reduce((dSum, d) => dSum + d.exercises.length, 0),
@@ -128,7 +125,7 @@ export function createTrainingPlanTool(dataDir: string = DEFAULT): AgentTool<typ
 	};
 }
 
-export function createGetCurrentPlanTool(dataDir: string = DEFAULT): AgentTool<typeof getCurrentPlanSchema> {
+export function createGetCurrentPlanTool(store?: SportDataStore): AgentTool<typeof getCurrentPlanSchema> {
 	return {
 		name: "get_current_plan",
 		label: "Get Current Plan",
@@ -136,8 +133,7 @@ export function createGetCurrentPlanTool(dataDir: string = DEFAULT): AgentTool<t
 			"Get the active training plan. Use when the user asks about their current plan or before making adjustments.",
 		parameters: getCurrentPlanSchema,
 		async execute() {
-			await ensureLoaded(dataDir);
-			const plan = getPlan(dataDir);
+			const plan = store ? (await loadData(store)).plan : null;
 
 			if (!plan) {
 				return {
@@ -159,7 +155,7 @@ export function createGetCurrentPlanTool(dataDir: string = DEFAULT): AgentTool<t
 	};
 }
 
-export function createGetTodayWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeof getTodayWorkoutSchema> {
+export function createGetTodayWorkoutTool(store?: SportDataStore): AgentTool<typeof getTodayWorkoutSchema> {
 	return {
 		name: "get_today_workout",
 		label: "Get Today's Workout",
@@ -167,8 +163,7 @@ export function createGetTodayWorkoutTool(dataDir: string = DEFAULT): AgentTool<
 			"Get the planned workout for today (or specified day). Returns exercises, sets, reps, and notes for that day.",
 		parameters: getTodayWorkoutSchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
-			const plan = getPlan(dataDir);
+			const plan = store ? (await loadData(store)).plan : null;
 			const day = (params.dayOfWeek ?? new Date().getDay()) || 7;
 
 			if (!plan) {

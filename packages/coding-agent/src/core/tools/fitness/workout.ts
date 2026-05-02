@@ -1,9 +1,8 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { WorkoutRecord } from "../../fitness/schemas.js";
-import { getWorkouts, loadFitnessData, persist } from "./store.js";
-
-const DEFAULT = "";
+import type { SportDataStore } from "./sport-data-store.js";
+import { emptyFitnessData, type FitnessData } from "./store.js";
 
 const logWorkoutSchema = Type.Object({
 	date: Type.Optional(Type.String({ description: "Workout date in YYYY-MM-DD format (default: today)" })),
@@ -30,14 +29,11 @@ const getWorkoutHistorySchema = Type.Object({
 	toDate: Type.Optional(Type.String({ description: "End date YYYY-MM-DD" })),
 });
 
-async function ensureLoaded(dataDir: string): Promise<void> {
-	if (dataDir) await loadFitnessData(dataDir);
-}
-async function maybeSave(dataDir: string): Promise<void> {
-	if (dataDir) await persist(dataDir);
+async function loadData(store: SportDataStore): Promise<FitnessData> {
+	return (await store.load<FitnessData>("fitness")) ?? emptyFitnessData();
 }
 
-export function createLogWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeof logWorkoutSchema> {
+export function createLogWorkoutTool(store?: SportDataStore): AgentTool<typeof logWorkoutSchema> {
 	return {
 		name: "log_workout",
 		label: "Log Workout",
@@ -45,9 +41,6 @@ export function createLogWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeo
 			"Record a completed workout session. Stores exercises performed, sets, reps, weights, duration, and notes. Call after user confirms a workout is complete.",
 		parameters: logWorkoutSchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
-			const workouts = getWorkouts(dataDir);
-
 			const record: WorkoutRecord = {
 				date: params.date ?? new Date().toISOString().slice(0, 10),
 				exercises: params.exercises.map((ex) => ({
@@ -59,8 +52,11 @@ export function createLogWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeo
 				notes: params.notes,
 			};
 
-			workouts.push(record);
-			await maybeSave(dataDir);
+			if (store) {
+				const data = await loadData(store);
+				data.workouts.push(record);
+				await store.save("fitness", data);
+			}
 
 			const totalSets = record.exercises.reduce((sum, ex) => sum + ex.sets.length, 0);
 
@@ -83,7 +79,7 @@ export function createLogWorkoutTool(dataDir: string = DEFAULT): AgentTool<typeo
 	};
 }
 
-export function createGetWorkoutHistoryTool(dataDir: string = DEFAULT): AgentTool<typeof getWorkoutHistorySchema> {
+export function createGetWorkoutHistoryTool(store?: SportDataStore): AgentTool<typeof getWorkoutHistorySchema> {
 	return {
 		name: "get_workout_history",
 		label: "Get Workout History",
@@ -91,8 +87,8 @@ export function createGetWorkoutHistoryTool(dataDir: string = DEFAULT): AgentToo
 			"Retrieve past workout records. Use to review training consistency, track progress, or inform training plan adjustments.",
 		parameters: getWorkoutHistorySchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
-			let results = [...getWorkouts(dataDir)];
+			const workouts = store ? (await loadData(store)).workouts : [];
+			let results = [...workouts];
 
 			if (params.fromDate) {
 				results = results.filter((w) => w.date >= params.fromDate!);

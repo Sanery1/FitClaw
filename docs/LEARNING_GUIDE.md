@@ -1007,3 +1007,304 @@ cd packages/coding-agent && npx tsx src/cli.ts --fitness
 # 查看会话文件
 cat ~/.fitclaw/agent/sessions/<session-id>.jsonl | head -20
 ```
+
+---
+
+## 决策 13（2026-05-01）：Sport Skill Pack 架构 — Skills-First 设计
+
+```
+方案 A: npm package 形式的技能包                           ← 被否决
+方案 B: 纯文件系统 .ts 动态加载                              ← 被否决
+方案 C: 标准 Skill 目录 + scripts/tools.ts ✅                ← 选定（2026-05-01 实施）
+```
+
+### 为什么现在改？
+
+旧的健身工具硬编码在 `packages/coding-agent/src/core/tools/fitness/` 中，存在三个问题：
+
+1. **不可插拔**：加一个游泳教练需要改 5 个文件（args.ts、sdk.ts、system-prompt.ts、agent.ts、tools/index.ts）
+2. **System prompt 膨胀**：`.fitclaw/prompts/` 下的 5 个知识库文件（~4,781 bytes ≈ 1,200 tokens）**全文拼接**进每次 LLM 请求的 system prompt，无论用户问什么
+3. **CLI/Bot 严重分化**：Bot 自建 ResourceLoader stub、自建 skill 加载、自建 system prompt 构建，与 CLI 共享 0% 代码
+
+### 核心设计：Skill = prompt + knowledge + tools
+
+**完全对齐标准化 Skills 格式**，不新增目录规范。运动技能只是利用了标准中已有的三个可选目录：
+
+```
+.fitclaw/skills/fitness-coach/
+├── SKILL.md              ← Layer 1+2: name+description (始终加载) + 教练正文 (<5000 tokens)
+├── scripts/
+│   └── tools.ts          ← Layer 3: AgentTool 定义，jiti 运行时加载
+├── references/           ← Layer 3: 知识库文件，LLM 按需 read
+│   ├── exercise_technique.md
+│   ├── training_methods.md
+│   ├── nutrition.md
+│   ├── recovery.md
+│   └── safety.md
+└── assets/
+    └── exercises.json    ← Layer 3: 静态参考数据
+```
+
+渐进式加载链（对齐标准化三层模型）：
+
+```
+Layer 1 (始终在 prompt, ~100 tokens):  name + description
+    ↓ skill 激活时
+Layer 2 (激活后加载, <5000 tokens):    SKILL.md 正文
+    ↓ skill 激活时 (jiti)
+Layer 3 (激活时加载):                  scripts/tools.ts → AgentTool
+    ↓ LLM 判断需要时
+Layer 3 (按需 read):                  references/*.md, assets/*.json
+```
+
+### Skill 接口扩展（`skills.ts`）
+
+```typescript
+interface Skill {
+  name: string;
+  description: string;
+  // ... 原有字段 ...
+  hasTools: boolean;                           // scripts/tools.ts 存在时为 true
+  toolsPath?: string;                          // scripts/tools.ts 绝对路径
+  knowledgeEntries?: KnowledgeEntryMeta[];     // references/ 下 .md 文件索引
+}
+```
+
+`loadSkillFromFile()` 在解析 SKILL.md 后自动检测 `scripts/tools.ts` 和扫描 `references/` 目录，零用户配置。
+
+### tools.ts 签名
+
+```typescript
+// .fitclaw/skills/fitness-coach/scripts/tools.ts
+export function createTools(store: SportDataStore): AgentTool<any>[] {
+  // 工具名强制 "{skill-name}:" 前缀，防止多 skill 工具名冲突
+  return [
+    { name: "fitness:log_workout", ... },
+    { name: "fitness:query_exercises", ... },
+    // ...
+  ];
+}
+```
+
+### SportDataStore — 泛型数据存储（替换全局 Map）
+
+```typescript
+interface SportDataStore {
+  readonly dataDir: string;
+  load<T>(namespace: string): Promise<T | null>;
+  save<T>(namespace: string, data: T): Promise<void>;
+}
+```
+
+**为什么这样设计**：旧的 `Map<string, FitnessData>` 全局单例导致：
+- FitnessData 类型硬编码，游泳/滑雪需要不同 schema
+- 无命名空间隔离，多 sport 数据混在一起
+- 测试困难（全局状态污染）
+
+新的 `FileSportDataStore` 实现：
+- 泛型 `<T>`，每个 skill 自管 schema
+- 数据文件：`{dataDir}/sport-data/{skill-name}.json`，自动命名空间隔离
+- 同一个类，CLI 传 session dir，Bot 传 channel dir
+
+### 渐进式知识加载
+
+| | 改造前 | 改造后 |
+|---|---|---|
+| System prompt 知识部分 | ~1,200 tokens（5 个 .md 全文拼接） | **~100 tokens**（文件名索引 + 使用指令） |
+| Bot 工具列表 | ~27 行硬编码（每个工具 + 触发词） | **~3 行**（概括性指令） |
+| 加载方式 | 每次请求完整携带 | LLM 按需 read 具体文件 |
+
+---
+
+## 决策 14（2026-05-01）：CLI/Bot 关系 — Bot 为主体，CLI 为管理 + 开发工具
+
+```
+方案 A: CLI 和 Bot 完全独立，各自维护             ← 被否决（当前状态，维护成本高）
+方案 B: CLI 包含 Bot，Bot 是 CLI 的子集             ← 被否决（架构倒置）
+方案 C: Bot 为主体（生产），CLI 为管理 + 开发 ✅     ← 选定（2026-05-01 实施）
+```
+
+### 当前 CLI/Bot 关系
+
+| | Bot | CLI |
+|---|---|---|
+| **定位** | 生产服务（Docker/PM2 常驻） | 开发 + 管理工具 |
+| **启动方式** | 7x24 监听消息 | `fitclaw` 或 `fitclaw --fitness` |
+| **技能加载** | 自动发现 workspace + channel 的 skills | 按需激活（通过 resource loader） |
+| **数据位置** | `workspace/<channel>/<user>/sport-data/` | `~/.fitclaw/sessions/<id>/sport-data/` |
+| **用户隔离** | 按 channel + user 目录自动隔离 | 单用户，session 目录 |
+| **管理能力** | 无（被动响应消息） | 直接查看/操作数据 |
+
+### Skill 在 CLI 和 Bot 之间是否通用？
+
+**是，完全通用。** 同一个 `.fitclaw/skills/fitness-coach/` 目录被 CLI 和 Bot 共同加载：
+
+```
+                         .fitclaw/skills/fitness-coach/
+                        /        |         \
+                  SKILL.md  scripts/tools.ts  references/*.md
+                    │              │                │
+         ┌──────────┴──────────────┴────────────────┴──────────┐
+         │                  Skill Loader                        │
+         │  (packages/coding-agent/src/core/skills.ts)         │
+         └──────────┬─────────────────────────────┬────────────┘
+                    │                             │
+              ┌─────▼─────┐                 ┌─────▼─────┐
+              │    CLI    │                 │    Bot    │
+              │  sdk.ts   │                 │ agent.ts  │
+              │           │                 │           │
+              │ dataDir = │                 │ dataDir = │
+              │ session/  │                 │ channel/  │
+              └───────────┘                 └───────────┘
+```
+
+**唯一差异是 `dataDir`**：CLI 传 session 路径，Bot 传 channel 路径。`FileSportDataStore` 的实现完全相同，只是构造参数不同。
+
+类似 VS Code 和 VS Code Server 加载同一个扩展，数据存的位置不同而已。
+
+---
+
+## Skills 安装与开发指南
+
+### 如何安装一个 Skill？
+
+Skill 是**标准化的目录**，放在三个位置之一即可被自动发现：
+
+| 位置 | 用途 | 示例 |
+|------|------|------|
+| `~/.fitclaw/agent/skills/` | 用户全局 skills | 个人常用的健身教练 |
+| `<cwd>/.fitclaw/skills/` | 项目 skills | 团队共享的泳姿教学 |
+| `workspace/skills/` | Bot workspace skills | Bot 所有 channel 共用 |
+| `workspace/<channel>/skills/` | Bot channel skills | 特定频道专用 |
+
+安装步骤（以健身教练为例）：
+
+```bash
+# 1. 创建 skill 目录（目录名必须与 SKILL.md 中 name 字段一致）
+mkdir -p .fitclaw/skills/fitness-coach/{scripts,references,assets}
+
+# 2. 编写 SKILL.md（必须有 name + description frontmatter）
+cat > .fitclaw/skills/fitness-coach/SKILL.md << 'EOF'
+---
+name: fitness-coach
+description: >
+  全流程 AI 健身私教技能。提供健身教练体验：训练计划、动作教学、进度追踪。
+  触发场景："给我设计训练计划"、"怎么练胸肌"、"帮我记录训练"。
+---
+
+# Fitness Coach Skill
+
+你是用户的私人健身教练...
+
+## 参考资源（按需读取）
+- 动作技术要点 → 读取 `references/exercise_technique.md`
+- 训练方法论 → 读取 `references/training_methods.md`
+EOF
+
+# 3. (可选) 添加知识库文件到 references/
+cp ~/my-knowledge/safety.md .fitclaw/skills/fitness-coach/references/
+
+# 4. (可选) 添加工具代码到 scripts/
+cat > .fitclaw/skills/fitness-coach/scripts/tools.ts << 'EOF'
+export function createTools(store) {
+  // 返回 AgentTool[]
+}
+EOF
+
+# 5. 重启 Bot 或重新启动 CLI — skill 自动被加载
+```
+
+### 如何开发一个新 Sport Skill？
+
+**零框架代码改动**即可接入新运动。以游泳教练为例：
+
+```bash
+# 1. 创建标准目录结构
+mkdir -p .fitclaw/skills/swimming-coach/{scripts,references,assets}
+
+# 2. 编写 SKILL.md（最少只需要这个文件）
+cat > .fitclaw/skills/swimming-coach/SKILL.md << 'EOF'
+---
+name: swimming-coach
+description: >
+  AI 游泳私教。提供泳姿教学、训练计划、成绩追踪。
+  触发场景："教我怎么游自由泳"、"蝶泳怎么练"、"游泳减肥计划"。
+---
+
+# Swimming Coach Skill
+
+你是用户的私人游泳教练...
+EOF
+
+# 3. (可选) 添加知识库
+cat > .fitclaw/skills/swimming-coach/references/stroke_technique.md << 'EOF'
+# 泳姿技术要点
+## 自由泳：身体保持水平，手臂入水时指尖先入水...
+EOF
+
+# 4. (可选) 添加工具
+cat > .fitclaw/skills/swimming-coach/scripts/tools.ts << 'EOFUNKNOWN'
+export function createTools(store) {
+  return [
+    // swimming-specific tools: lap_logger, pace_tracker, stroke_analyzer...
+  ];
+}
+EOFUNKNOWN
+
+# 5. 完成 — CLI 和 Bot 都会自动发现这个 skill
+```
+
+### Sport Skill 目录标准
+
+| 文件/目录 | 必选 | 用途 | 加载时机 |
+|-----------|------|------|----------|
+| `SKILL.md` | **必须** | name + description frontmatter + 教练正文 | Layer 1-2（技能匹配时） |
+| `scripts/tools.ts` | 可选 | 导出 `createTools(store): AgentTool[]` | Layer 3（技能激活时，jiti） |
+| `references/*.md` | 可选 | 知识库文件，LLM 按需 read | Layer 3（LLM 判断需要时） |
+| `assets/*` | 可选 | 静态数据（JSON、图片等） | Layer 3（工具代码引用） |
+
+### 验证你的 Skill
+
+```bash
+# 检查 skill 是否被 loader 发现
+# 启动 CLI 后，在 system prompt 中应该能看到你的 skill 的 name + description
+
+# 验证 tools.ts 语法（jiti 兼容性）
+node -e "require('@mariozechner/jiti').createJiti(import.meta.url).import('./scripts/tools.ts')"
+
+# 验证 SKILL.md frontmatter
+# name 必须: 小写 a-z 0-9 连字符，与目录名一致，≤64 字符，无连续/头尾连字符
+# description 必须: 非空，≤1024 字符，包含"做什么"和"何时触发"
+```
+
+---
+
+## 附录 C：2026-05-01 架构改造数据
+
+### Token 优化
+
+| 指标 | 改造前 | 改造后 | 减少 |
+|------|--------|--------|------|
+| System prompt 知识库 | ~1,200 tokens（5 文件全文） | ~100 tokens（文件名索引） | **-91.7%** |
+| Bot 工具描述 | ~27 行硬编码 | ~3 行概括指令 | **-88.9%** |
+| 每次 CLI 请求（健身模式） | 知识全文始终携带 | 知识按需 read 加载 | **~1,100 tokens/请求** |
+
+### 数据存储变化
+
+| 项目 | 改造前 | 改造后 |
+|------|--------|--------|
+| 数据位置 | `<dataDir>/fitness-data.json` | `<dataDir>/sport-data/fitness.json` |
+| 内存模型 | `Map<string, FitnessData>`（全局单例） | `FileSportDataStore` 实例（每 dataDir 独立） |
+| Schema | `FitnessData` 硬编码 | 泛型 `<T>`，skill 自管 |
+| 多运动支持 | 不支持（类型不兼容） | 自动命名空间隔离 |
+
+### 改动规模
+
+| 指标 | 数值 |
+|------|------|
+| 修改文件数 | 18 个 |
+| 新增文件数 | 3 个（`sport-data-store.ts`、`swimming-coach/SKILL.md`、`swimming-coach/scripts/tools.ts`） |
+| 删除文件数 | 0（仅删除了空的 `.fitclaw/prompts/` 目录） |
+| 删除目录数 | 1（`.fitclaw/prompts/`，内容已迁移到 `references/`） |
+| 向后兼容 | 完全兼容，`createAllFitnessTools(dataDir)` 保留 |
+| 测试通过 | 28/28 skills 测试 |

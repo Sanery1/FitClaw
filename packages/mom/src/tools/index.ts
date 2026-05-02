@@ -1,5 +1,5 @@
 import type { AgentTool } from "@fitclaw/agent-core";
-import { createAllFitnessTools } from "@fitclaw/claw";
+import { createFitnessStore, createFitnessTools } from "@fitclaw/claw";
 import type { Executor } from "../sandbox.js";
 import { attachTool } from "./attach.js";
 import { createBashTool } from "./bash.js";
@@ -10,12 +10,13 @@ import { createWriteTool } from "./write.js";
 export { setUploadFunction } from "./attach.js";
 
 export function createMomTools(executor: Executor, dataDir?: string): AgentTool<any>[] {
+	const store = dataDir ? createFitnessStore(dataDir) : undefined;
 	return [
 		createReadTool(executor),
 		createBashTool(executor),
 		createEditTool(executor),
 		createWriteTool(executor),
 		attachTool,
-		...createAllFitnessTools(dataDir),
+		...createFitnessTools(store),
 	];
 }

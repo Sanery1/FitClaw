@@ -197,8 +197,11 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 
 // ── Fitness tools ──
 
+export type { FitnessData, SportDataStore } from "./fitness/index.js";
 export {
 	createAllFitnessTools,
+	createFitnessStore,
+	createFitnessTools,
 	createGetBodyMetricsHistoryTool,
 	createGetCurrentPlanTool,
 	createGetExerciseDetailTool,
@@ -210,4 +213,8 @@ export {
 	createLogWorkoutTool,
 	createQueryExercisesTool,
 	createTrainingPlanTool,
+	emptyFitnessData,
+	FileSportDataStore,
+	loadFitnessData,
+	persist,
 } from "./fitness/index.js";

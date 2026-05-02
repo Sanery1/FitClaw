@@ -79,7 +79,7 @@ tui → ai → agent-core → claw → mom → web-ui → pods
 #### 3.1.2 数据持久化（`store.ts`）
 
 - **内存存储**：`Map<string, FitnessData>`，以 `dataDir` 为 key
-- **磁盘存储**：`<dataDir>/fitness-data.json`，每次 mutation 后 `persist()` 立即 flush
+- **磁盘存储**：`<dataDir>/sport-data/fitness.json`（通过 `FileSportDataStore`），每次 mutation 后 `store.save()` 立即 flush
 - **Bot 场景**：`dataDir = <channelDir>`，即每个 channel 有独立的健身数据文件
 - **CLI 场景**：`dataDir` 默认空字符串（不持久化），未来可绑定 session 目录
 
@@ -90,21 +90,21 @@ tui → ai → agent-core → claw → mom → web-ui → pods
 - **Schema**：`Exercise` 接口，包含 id/name/nameZh/primaryMuscle/equipment/difficulty/instructions/tips/cautions/variations
 - **加载方式**：运行时动态 `readFile`，首次加载后缓存到 `exerciseCache`
 
-#### 3.1.4 知识库系统
+#### 3.1.4 知识库系统（2026-05-01 改造）
 
-**分层结构**：
+**分层结构**（对齐标准化 Skills 格式）：
 - **核心层**：`fitclaw.md`（根目录，~300-500 tokens），安全红线 + 行为准则
-- **域文件层**：`.fitclaw/prompts/*.md`（按需加载）
-  - `training_methods.md` — 训练方法论
-  - `exercise_technique.md` — 动作技术
-  - `safety.md` — 安全准则
-  - `nutrition.md` — 营养指导
-  - `recovery.md` — 恢复策略
-- **Skill 层**：`.fitclaw/skills/fitness-coach/SKILL.md` + onboarding/plan-design/progression
+- **Skill 正文**：`.fitclaw/skills/fitness-coach/SKILL.md`（>5000 tokens），教练方法论 + 决策树 + 引导话术
+- **渐进式知识库**：`.fitclaw/skills/fitness-coach/references/*.md`（LLM 按需 read）
+  - `exercise_technique.md` / `training_methods.md` / `safety.md` / `nutrition.md` / `recovery.md`
+  - `onboarding.md` / `plan-design.md` / `progression.md`
+- **工具定义**：`.fitclaw/skills/fitness-coach/scripts/tools.ts`（jiti 运行时加载）
+- **静态数据**：`.fitclaw/skills/fitness-coach/assets/exercises.json`
 
 **加载机制**：
-- CLI `--fitness` 模式：将 `.fitclaw/prompts/*.md` 拼接为 `fitnessPromptText`，通过 `appendSystemPrompt` 注入
-- Bot（mom）：`buildSystemPrompt()` 直接读取 `.fitclaw/prompts/` 并内联到 system prompt
+- CLI `--fitness` 模式：检测 fitness-coach skill 的 `hasTools`，激活后注入渐进式知识索引（~100 tokens），LLM 按需 read 具体文件
+- Bot（mom）：`buildSystemPrompt()` 注入知识索引（替代旧的全量拼接）。旧位置 `.fitclaw/prompts/` 已废弃删除
+- 多运动支持：在 `.fitclaw/skills/` 下新增 skill 目录即可，零框架代码改动
 
 ### 3.2 CLI 应用（`@fitclaw/claw`）
 
@@ -118,15 +118,15 @@ tui → ai → agent-core → claw → mom → web-ui → pods
 | RPC | `--mode rpc` | JSON-RPC 协议，供 IDE 扩展使用 |
 | Fitness | `--fitness` | 健身私教身份 + 加载知识库 |
 
-#### 3.2.2 健身模式实现
+#### 3.2.2 健身模式实现（2026-05-01 改造）
 
 ```
-args.ts 解析 --fitness → main.ts 加载 .fitclaw/prompts/*.md
-→ agent-session-services.ts 传入 fitnessMode: true
+args.ts 解析 --fitness → main.ts 加载渐进式知识索引
+→ sdk.ts 检测 fitness-coach skill 的 hasTools → 创建 FileSportDataStore
 → system-prompt.ts buildSystemPrompt() 切换身份描述
 ```
 
-**注意**：当前 CLI 健身模式**不注册健身工具**（`main.ts` 没有调用 `createAllFitnessTools`），仅切换身份和加载知识库。健身工具只在 Bot（mom）中注册。
+**已修复**：CLI 健身模式现在通过 skill 检测自动注册健身工具（`createFitnessTools(store)` + `createFitnessStore(sessionDir)`）。知识库从全文拼接改为渐进式索引（~100 tokens）。
 
 #### 3.2.3 配置系统
 
@@ -201,7 +201,7 @@ const tools = createMomTools(executor, channelDir);
 
 fitness 模式（--fitness）：
   "You are FitCoach, an AI fitness coach..."
-  + .fitclaw/prompts/*.md 知识库内容
+  + .fitclaw/skills/fitness-coach/references/ 渐进式知识索引
 ```
 
 **问题**：非 fitness 模式的 system prompt 中仍包含 `"operating inside pi"` 和 `"Pi documentation"` 等遗留 branding（虽然 `pi` 是小写，但在用户可见文本中仍显突兀）。
@@ -315,13 +315,13 @@ env: {
 **问题**：知识库校验脚本存在于 `scripts/validate-knowledge.ts`，但没有在 `package.json` 中注册 script。
 **修复方向**：在根目录 `package.json` 的 `scripts` 中添加 `"validate-knowledge": "tsx scripts/validate-knowledge.ts"`。
 
-#### 15. `fitness-coach` Skill 未封装为可加载 Skill
-**问题**：`.fitclaw/skills/fitness-coach/` 目录存在，但 Skill 系统没有自动加载它。Bot 的 system prompt 是硬编码的，没有走 Skill 的 `@skill-name` 动态加载机制。
-**状态**：CLAUDE.md 中标记为 P3（低优先级）。
+#### 15. `fitness-coach` Skill 封装 ✅ 已处理 (2026-05-01)
+**问题**：`.fitclaw/skills/fitness-coach/` 目录存在，但 Skill 系统没有自动加载它。
+**已实施**：Sport Skill Pack 架构（`docs/LEARNING_GUIDE.md` 决策 13）。Skill 系统扩展了 `hasTools`/`knowledgeEntries` 字段，`loadSkillFromFile()` 自动检测 `scripts/tools.ts` 和 `references/`。CLI 和 Bot 都通过 skill 检测决定工具加载。知识库从全文注入改为渐进式索引（~1,200 tokens → ~100 tokens）。
 
-#### 16. `mom` 的 `buildSystemPrompt` 函数过长（>200 行）
+#### 16. `mom` 的 `buildSystemPrompt` 函数过长（>200 行） ✅ 已改善 (2026-05-01)
 **问题**：违反 coding-style.md 的 "Functions < 50 lines" 规则。
-**修复方向**：将 system prompt 各部分拆分为独立函数（身份段、知识库段、工具段、记忆段）。
+**已实施**：Bot 的工具列表从 27 行硬编码缩减为 3 行概括指令；知识库从全文拼接改为渐进式索引。函数行数显著减少。
 
 #### 17. `package.json` 的 `dependencies` 包含 `@fitclaw/claw`
 **问题**：根目录 `package.json`:
@@ -411,7 +411,8 @@ d2698e8f feat: P0/P1/P2 — fitness tool precision, data persistence, and knowle
 8. 实现 `card-renderer.ts` 或移除 placeholder
 
 ### 长期（择机）
-9. 封装 `fitness-coach` 为真正的 Skill（动态加载/卸载）
+9. ~~封装 `fitness-coach` 为真正的 Skill~~ ✅ 已实施 (2026-05-01)
 10. Web UI 健身界面
 11. 动作图片/GIF 资源
 12. 将 `bin` 从 `"pi"` 改为 `"fitclaw"`
+13. 实现完整的 jiti 动态加载 `scripts/tools.ts`（当前走 skill 检测 + 工具代码仍留在 fitness/ 子目录）

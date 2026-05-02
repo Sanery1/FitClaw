@@ -72,6 +72,13 @@ export interface SkillFrontmatter {
 	[key: string]: unknown;
 }
 
+export interface KnowledgeEntryMeta {
+	/** Filename (e.g. "exercise_technique.md") */
+	filename: string;
+	/** Short description extracted from the file's first paragraph */
+	description: string;
+}
+
 export interface Skill {
 	name: string;
 	description: string;
@@ -79,6 +86,12 @@ export interface Skill {
 	baseDir: string;
 	sourceInfo: SourceInfo;
 	disableModelInvocation: boolean;
+	/** Whether scripts/tools.ts exists and can be loaded */
+	hasTools: boolean;
+	/** Absolute path to scripts/tools.ts (set when hasTools is true) */
+	toolsPath?: string;
+	/** Knowledge index entries from references/ directory */
+	knowledgeEntries?: KnowledgeEntryMeta[];
 }
 
 export interface LoadSkillsResult {
@@ -279,6 +292,36 @@ function loadSkillsFromDirInternal(
 	return { skills, diagnostics };
 }
 
+/**
+ * Build knowledge entry index from a skill directory's references/ subdirectory.
+ * Extracts the first paragraph of each .md file as a short description.
+ */
+function buildKnowledgeEntries(skillDir: string): KnowledgeEntryMeta[] {
+	const refsDir = join(skillDir, "references");
+	if (!existsSync(refsDir)) return [];
+	try {
+		const entries = readdirSync(refsDir, { withFileTypes: true });
+		const mdFiles = entries
+			.filter((e) => e.isFile() && e.name.endsWith(".md"))
+			.sort((a, b) => a.name.localeCompare(b.name));
+		return mdFiles.map((e) => {
+			const filePath = join(refsDir, e.name);
+			const raw = readFileSync(filePath, "utf-8");
+			const firstPara =
+				raw
+					.split(/\n\n|\r\n\r\n/)[0]
+					?.replace(/^#.*\n?/, "")
+					.trim() ?? "";
+			return {
+				filename: e.name,
+				description: firstPara.length > 200 ? `${firstPara.slice(0, 197)}...` : firstPara,
+			};
+		});
+	} catch {
+		return [];
+	}
+}
+
 function loadSkillFromFile(
 	filePath: string,
 	source: string,
@@ -311,6 +354,13 @@ function loadSkillFromFile(
 			return { skill: null, diagnostics };
 		}
 
+		// Detect optional scripts/tools.ts
+		const toolsPath = join(skillDir, "scripts", "tools.ts");
+		const hasTools = existsSync(toolsPath);
+
+		// Build knowledge index from references/ directory
+		const knowledgeEntries = buildKnowledgeEntries(skillDir);
+
 		return {
 			skill: {
 				name,
@@ -319,6 +369,9 @@ function loadSkillFromFile(
 				baseDir: skillDir,
 				sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
 				disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+				hasTools,
+				toolsPath: hasTools ? toolsPath : undefined,
+				knowledgeEntries: knowledgeEntries.length > 0 ? knowledgeEntries : undefined,
 			},
 			diagnostics,
 		};

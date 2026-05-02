@@ -51,13 +51,14 @@
 | **影响** | 两个平台的上下文创建、事件处理、启动逻辑混在一个 544 行的文件中。`createSlackContext` 返回 200+ 行匿名对象。新增平台（如 Discord/企微）时需要继续往里加分支，违背开闭原则 |
 | **修复建议** | 定义 `BotAdapter` 接口：`{ start(), stop(), sendMessage(), ... }`。SlackAdapter 和 FeishuAdapter 分别实现。main.ts 仅做工厂路由 |
 
-### 6. 健身工具侵入核心包（架构）
+### 6. 健身工具侵入核心包（架构）🔄 部分处理 (2026-05-01)
 
 | 项目 | 内容 |
 |------|------|
 | **位置** | `packages/coding-agent/src/core/tools/fitness/` |
 | **影响** | 11 个健身工具与 read/bash/edit/write 等核心工具平级存放。健身功能是垂直业务，不应与通用编程工具耦合。长期会污染核心代码，增加构建体积 |
 | **修复建议** | 将健身工具提取为独立 npm 包（如 `@fitclaw/fitness-tools`）或作为内置扩展（`extensions/fitness/`），通过扩展系统注册 |
+| **进展** | 2026-05-01 实施了 Sport Skill Pack 架构：工具已通过 `scripts/tools.ts` 接入 skill 系统，`SportDataStore` 泛型接口解耦了数据层，支持多运动 skill（健身/游泳等）。工具代码仍留在 `fitness/` 子目录但支持通过 skill 目录激活。完整拆分待后续 Phase |
 
 ### 7. 扩展系统过度复杂（架构）
 

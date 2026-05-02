@@ -125,22 +125,19 @@ function loadMomSkills(channelDir: string, workspacePath: string): Skill[] {
 
 function loadFitClawKnowledge(workspacePath: string): string {
 	try {
-		const promptsDir = join(workspacePath, "..", ".fitclaw", "prompts");
-		let knowledge = "";
+		const referencesDir = join(workspacePath, "..", ".fitclaw", "skills", "fitness-coach", "references");
+		if (!existsSync(referencesDir)) return "";
 
-		if (existsSync(promptsDir)) {
-			const files = readdirSync(promptsDir).filter((f) => f.endsWith(".md"));
-			for (const file of files) {
-				try {
-					const content = readFileSync(join(promptsDir, file), "utf-8");
-					knowledge += `## ${file}\n\n${content}\n\n`;
-				} catch {
-					/* skip unreadable */
-				}
-			}
-		}
+		const files = readdirSync(referencesDir)
+			.filter((f) => f.endsWith(".md"))
+			.sort();
+		if (files.length === 0) return "";
 
-		return knowledge;
+		return (
+			"The following reference files are available. " +
+			"Use the read tool to load a specific file when the conversation topic matches:\n" +
+			files.map((f) => `- ${f}`).join("\n")
+		);
 	} catch {
 		return "";
 	}
@@ -186,33 +183,8 @@ ${skills.length > 0 ? formatSkillsForPrompt(skills) : "(no skills installed yet)
 - attach: Share files to chat
 
 ### Fitness Tools
-Always use fitness tools for structured data — do NOT fabricate exercise IDs or workout records.
-NEVER use bash/read for fitness data queries. Use these tools FIRST:
-
-- query_exercises: Search exercise database by muscle, equipment, difficulty, or Chinese keyword.
-  Use when user asks "有什么动作"/"推荐动作"/"搜索XX动作"/"练胸肌的动作".
-- get_exercise_detail: Get instructions, tips, variations for a specific exercise.
-  Use when user asks "怎么做"/"动作要领"/"标准动作"/"需要注意什么" about an exercise.
-- log_workout: Record a completed workout with exercises, sets, reps, weight.
-  Use when user says "完成了训练"/"记录了训练"/"今天练了XX". If incomplete info, ask for missing details.
-- get_workout_history: Retrieve past workout records.
-  Use when user asks "训练记录"/"训练历史"/"最近练了什么".
-- log_body_metrics: Record body weight, body fat %, measurements.
-  Use when user says "记录体测"/"体重XX"/"体脂XX"/"围度".
-- get_body_metrics_history: Retrieve past body metric records.
-  Use when user asks "体测记录"/"体重变化"/"体测历史".
-- create_training_plan: Create a personalized weekly training plan.
-  Use when user says "制定计划"/"创建训练计划"/"帮我安排训练". First use query_exercises for real exerciseId.
-- get_current_plan: Get the user's active training plan.
-  Use when user asks "当前计划"/"我的训练计划"/"现在的计划".
-- get_today_workout: Get today's scheduled workout from the active plan.
-  Use when user asks "今天练什么"/"今天的训练"/"今日计划". Do NOT use bash to check the date.
-- get_progress_summary: Get overall progress summary (workouts, metrics, PRs).
-  Use when user asks "进度"/"总结"/"这个月练得怎么样"/"进步".
-- log_progressive_overload: Record a weight/reps progression milestone.
-  Use when user mentions "突破"/"PR"/"进步了"/"加了重量"
-
-Each tool requires a "label" parameter (shown to user).
+Use the available fitness tools to query exercises, log workouts, track body metrics,
+manage training plans, and record progress. Each tool requires a "label" parameter.
 `;
 }
 
@@ -361,7 +333,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	const resourceLoader: ResourceLoader = {
 		getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-		getSkills: () => ({ skills: [], diagnostics: [] }),
+		getSkills: () => ({ skills, diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),

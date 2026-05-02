@@ -1,9 +1,8 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
 import type { ProgressiveOverloadEvent } from "../../fitness/schemas.js";
-import { getPersonalRecords, getProgressiveOverloads, loadFitnessData, persist } from "./store.js";
-
-const DEFAULT = "";
+import type { SportDataStore } from "./sport-data-store.js";
+import { emptyFitnessData, type FitnessData } from "./store.js";
 
 const getProgressSummarySchema = Type.Object({
 	timeframe: Type.Optional(Type.String({ description: "'week', 'month', 'all' (default: 'month')" })),
@@ -20,14 +19,11 @@ const logProgressiveOverloadSchema = Type.Object({
 	}),
 });
 
-async function ensureLoaded(dataDir: string): Promise<void> {
-	if (dataDir) await loadFitnessData(dataDir);
-}
-async function maybeSave(dataDir: string): Promise<void> {
-	if (dataDir) await persist(dataDir);
+async function loadData(store: SportDataStore): Promise<FitnessData> {
+	return (await store.load<FitnessData>("fitness")) ?? emptyFitnessData();
 }
 
-export function createGetProgressSummaryTool(dataDir: string = DEFAULT): AgentTool<typeof getProgressSummarySchema> {
+export function createGetProgressSummaryTool(store?: SportDataStore): AgentTool<typeof getProgressSummarySchema> {
 	return {
 		name: "get_progress_summary",
 		label: "Get Progress Summary",
@@ -35,11 +31,21 @@ export function createGetProgressSummaryTool(dataDir: string = DEFAULT): AgentTo
 			"Get a summary of training progress including personal records, progressive overload events, and training consistency. Use for periodic reviews and plan adjustments.",
 		parameters: getProgressSummarySchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
 			const timeframe = params.timeframe ?? "month";
-			const prs = getPersonalRecords(dataDir);
-			const overloads = getProgressiveOverloads(dataDir);
 
+			if (!store) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify({ timeframe, personalRecords: [], progressiveOverloads: [] }),
+						},
+					],
+					details: { prCount: 0, poCount: 0 },
+				};
+			}
+
+			const data = await loadData(store);
 			return {
 				content: [
 					{
@@ -47,24 +53,24 @@ export function createGetProgressSummaryTool(dataDir: string = DEFAULT): AgentTo
 						text: JSON.stringify(
 							{
 								timeframe,
-								personalRecords: prs,
-								recencyProgressiveOverloads: overloads.slice(-10),
-								totalPRs: prs.length,
-								totalProgressiveOverloads: overloads.length,
+								personalRecords: data.personalRecords,
+								recencyProgressiveOverloads: data.progressiveOverloads.slice(-10),
+								totalPRs: data.personalRecords.length,
+								totalProgressiveOverloads: data.progressiveOverloads.length,
 							},
 							null,
 							2,
 						),
 					},
 				],
-				details: { prCount: prs.length, poCount: overloads.length },
+				details: { prCount: data.personalRecords.length, poCount: data.progressiveOverloads.length },
 			};
 		},
 	};
 }
 
 export function createLogProgressiveOverloadTool(
-	dataDir: string = DEFAULT,
+	store?: SportDataStore,
 ): AgentTool<typeof logProgressiveOverloadSchema> {
 	return {
 		name: "log_progressive_overload",
@@ -73,9 +79,6 @@ export function createLogProgressiveOverloadTool(
 			"Record a progressive overload event (weight increase) for an exercise. Call when user successfully progresses to a heavier weight after meeting rep targets.",
 		parameters: logProgressiveOverloadSchema,
 		async execute(_toolCallId, params) {
-			await ensureLoaded(dataDir);
-			const overloads = getProgressiveOverloads(dataDir);
-
 			const event: ProgressiveOverloadEvent = {
 				exerciseId: params.exerciseId,
 				exerciseName: params.exerciseName,
@@ -85,8 +88,11 @@ export function createLogProgressiveOverloadTool(
 				reason: params.reason,
 			};
 
-			overloads.push(event);
-			await maybeSave(dataDir);
+			if (store) {
+				const data = await loadData(store);
+				data.progressiveOverloads.push(event);
+				await store.save("fitness", data);
+			}
 
 			return {
 				content: [

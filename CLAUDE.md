@@ -47,12 +47,13 @@
 - ✅ 健身工具集成到 Bot（`createMomTools` 包含 `createAllFitnessTools()`）
 - ✅ System prompt 工具描述加入触发词（P1）
 - ✅ 健身数据 JSON 文件持久化，按 channel 隔离（P0）
-- ✅ Bot 加载 `.fitclaw/prompts/` 知识库（P2）
+- ✅ Bot 加载知识库（2026-05-01 改为 `.fitclaw/skills/fitness-coach/references/` 渐进式索引）
 - ✅ 使用指南: `docs/USER_GUIDE.md` (2026-05-01)
 - ✅ 安全修复: Bash 危险命令拦截 + 路径遍历防护 (2026-05-01, f09e06cd)
 - ✅ 风险清单: `docs/RISK_ISSUES.md`（#2 #3 已修复）
 - ✅ Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
 - ✅ pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
+- ✅ Sport Skill Pack 架构 (2026-05-01): Skill 支持 tools.ts、渐进式知识加载、SportDataStore 泛型存储、CLI/Bot 共享路径
 
 ## 技术记录（Plan 文件）
 
@@ -66,7 +67,7 @@
 ### ✅ 已完成 (截至 2026-05-01)
 
 1. **CLI 品牌重构** — PiManifest → FitClawManifest 类型重命名，pi→fitclaw 字符串替换 (d743e3bc)
-2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + `.fitclaw/prompts/` 知识库加载 (1277ef74)
+2. **CLI 健身模式** — `--fitness` flag + FitCoach 身份 + 渐进式知识索引 (1277ef74, 2026-05-01 改造)
 3. **APP_NAME / GitHub URL 替换** — 6 个 package.json + README/AGENTS/CLAUDE 全部更新 (c1d52c3d)
 4. **安全修复 #2** — Bash 危险命令拦截 (f09e06cd)
 5. **安全修复 #3** — 文件工具路径遍历防护 (f09e06cd)
@@ -75,8 +76,9 @@
 ### 🟢 低优先级（择机执行）
 
 1. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
-2. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
-3. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
+2. **P3：jiti 动态加载 Skill 工具** — `sdk.ts` 当前走 skill 检测 + 硬编码 `createFitnessTools()`，未调用 `jiti.import("scripts/tools.ts")`。等第二个运动技能（如游泳）上线时再做，改动量约 20 行，接口已就绪（`createTools(store)`）。参见 `docs/PROJECT_AUDIT.md` #13
+3. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
+4. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
 
 ## 健身数据架构
 
@@ -85,7 +87,7 @@
 | 数据类型 | 来源 | 存储 |
 |---------|------|------|
 | 动作数据库 | `packages/coding-agent/data/exercises.json`（静态文件） | 磁盘，永久 |
-| 训练记录 / 体测 / 计划 / 超负荷 | 用户通过 Bot 输入 | `<channelDir>/fitness-data.json`（JSON 文件） |
+| 训练记录 / 体测 / 计划 / 超负荷 | 用户通过 Bot 输入 | `<channelDir>/sport-data/fitness.json`（通过 FileSportDataStore） |
 | 对话历史 | 消息记录 | `<channelDir>/context.jsonl` + `log.jsonl` |
 
 ### 数据写入流程
@@ -108,8 +110,20 @@ PM2 日志中查看：
 
 | 组件 | 文件 | 健身相关 |
 |------|------|---------|
-| Bot system prompt | `packages/mom/src/agent.ts` `buildSystemPrompt()` | 有：工具描述 + 触发词 + `.fitclaw/prompts/` 知识库 |
-| CLI system prompt | `packages/coding-agent/src/core/system-prompt.ts` `buildSystemPrompt()` | 无健身人格（仅 `buildFitnessPromptHook()` 在传入 profile 时注入） |
+| Bot system prompt | `packages/mom/src/agent.ts` `buildSystemPrompt()` | 有：渐进式知识索引 + 精简工具引用 |
+| CLI system prompt | `packages/coding-agent/src/core/system-prompt.ts` `buildSystemPrompt()` | 有：fitnessMode 分支注入 FitCoach 人格；知识索引来自 skill 的 `references/` |
+
+### Skill 系统（2026-05-01 改造后）
+
+Skills 现在支持**可选工具**。一个 skill 目录可以包含：
+- `SKILL.md` — 必须，frontmatter + 正文
+- `scripts/tools.ts` — 可选，`createTools(store): AgentTool[]`
+- `references/*.md` — 可选，渐进式知识库
+- `assets/*` — 可选，静态数据
+
+**安装位置**：`~/.fitclaw/agent/skills/`（用户级）或 `.fitclaw/skills/`（项目级）
+
+**知识库位置变更**：`.fitclaw/prompts/` → `.fitclaw/skills/fitness-coach/references/`（对齐标准化 Skills 格式）
 
 ## 如何启动
 
@@ -169,8 +183,12 @@ f09e06cd fix: add bash dangerous command interception and path traversal protect
 |------|------|
 | 健身工具实现 | `packages/coding-agent/src/core/tools/fitness/` |
 | 健身数据 Schema | `packages/coding-agent/src/core/fitness/schemas.ts` |
-| 动作数据库 | `packages/coding-agent/data/exercises.json` |
-| 知识库 | `.fitclaw/skills/` + `.fitclaw/prompts/` |
+| SportDataStore 接口 | `packages/coding-agent/src/core/tools/fitness/sport-data-store.ts` |
+| 动作数据库 | `.fitclaw/skills/fitness-coach/assets/exercises.json` |
+| 知识库（渐进式） | `.fitclaw/skills/fitness-coach/references/` |
+| Skill 标准 | `docs/LEARNING_GUIDE.md` 附录 C + Skill 安装指南 |
+| 健身教练 Skill | `.fitclaw/skills/fitness-coach/SKILL.md` + `scripts/tools.ts` |
+| 游泳教练 Skill（示例） | `.fitclaw/skills/swimming-coach/SKILL.md` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
 | 启动界面 | `packages/coding-agent/src/modes/interactive/interactive-mode.ts` |
 | 配置文件 | `packages/coding-agent/src/config.ts` |

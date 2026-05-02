@@ -526,14 +526,29 @@ export async function main(args: string[], options?: MainOptions) {
 	let fitnessPromptText: string | undefined;
 	if (parsed.fitness) {
 		try {
-			const promptsDir = join(cwd, ".fitclaw", "prompts");
+			const promptsDir = join(cwd, ".fitclaw", "skills", "fitness-coach", "references");
 			const entries = await readdir(promptsDir);
 			const mdFiles = entries.filter((e) => e.endsWith(".md")).sort();
 			if (mdFiles.length > 0) {
-				const contents = await Promise.all(mdFiles.map((f) => readFile(join(promptsDir, f), "utf-8")));
+				// Build knowledge index (metadata only, not full content)
+				const knowledgeEntries = await Promise.all(
+					mdFiles.map(async (f) => {
+						const raw = await readFile(join(promptsDir, f), "utf-8");
+						const firstPara =
+							raw
+								.split(/\n\n|\r\n\r\n/)[0]
+								?.replace(/^#.*\n?/, "")
+								.trim() ?? "";
+						const desc = firstPara.length > 120 ? `${firstPara.slice(0, 117)}...` : firstPara;
+						return { filename: f, description: desc };
+					}),
+				);
 				fitnessPromptText =
 					"# Fitness Knowledge Base\n\n" +
-					mdFiles.map((f, i) => `## ${f.replace(".md", "")}\n\n${contents[i]}`).join("\n\n");
+					"The following reference files are available. " +
+					"Use the read tool to load a specific file " +
+					"when the conversation topic matches its description.\n\n" +
+					knowledgeEntries.map((e) => `- **${e.filename}**: ${e.description}`).join("\n");
 			}
 		} catch {
 			/* prompts dir may not exist */

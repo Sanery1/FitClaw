@@ -272,7 +272,7 @@ fitclaw --fitness
 
 `--fitness` 会：
 - 切换到 "FitCoach" 身份（system prompt 注入健身角色）
-- 加载 `.fitclaw/prompts/` 中的健身知识库
+- 加载 `.fitclaw/skills/fitness-coach/references/` 中的渐进式知识索引
 - 注册 11 个健身相关 Agent 工具
 
 ### 5.2 11 个健身工具
@@ -285,7 +285,7 @@ fitclaw --fitness
 | `get_workout_history` | 训练 | 查询历史训练记录 |
 | `log_body_metrics` | 体测 | 记录体重/体脂/围度等数据 |
 | `get_body_metrics_history` | 体测 | 查询历史体测数据 |
-| `training_plan` | 计划 | 生成/更新个性化训练计划 |
+| `create_training_plan` | 计划 | 生成/更新个性化训练计划 |
 | `get_current_plan` | 计划 | 查看当前训练计划 |
 | `get_today_workout` | 计划 | 获取今日训练安排 |
 | `get_progress_summary` | 分析 | 生成阶段性进展报告 |
@@ -293,7 +293,7 @@ fitclaw --fitness
 
 ### 5.3 动作数据库
 
-动作数据库位于 `packages/coding-agent/data/exercises.json`，包含 50+ 标准动作，每条记录包含：
+动作数据库位于 `.fitclaw/skills/fitness-coach/assets/exercises.json`（源码中保留于 `packages/coding-agent/data/exercises.json`），包含 50+ 标准动作，每条记录包含：
 - 中英文名称
 - 目标肌肉群
 - 所需器械
@@ -303,8 +303,10 @@ fitclaw --fitness
 ### 5.4 健身数据存储
 
 健身数据（训练记录、体测、计划）持久化在：
-- **CLI 模式**：`~/.fitclaw/agent/sessions/<session-id>/fitness-data.json`
-- **Bot 模式**：`<workingDir>/<channelId>/fitness-data.json`（按用户/频道隔离）
+- **CLI 模式**：`~/.fitclaw/agent/sessions/<session-id>/sport-data/fitness.json`
+- **Bot 模式**：`<workingDir>/<channelId>/sport-data/fitness.json`（按用户/频道隔离）
+
+数据通过泛型 `SportDataStore` 接口管理，每个运动 skill 有独立命名空间（`sport-data/{skill-name}.json`）。
 
 ---
 
@@ -401,10 +403,11 @@ pm2 save
 ├── models.json       # 自定义模型列表
 ├── sessions/         # 会话文件
 │   ├── abc123/
-│   │   ├── session.jsonl    # 会话消息
-│   │   └── fitness-data.json # 健身数据
+│   │   ├── session.jsonl         # 会话消息
+│   │   └── sport-data/            # 运动数据
+│   │       └── fitness.json       # 健身记录
 │   └── ...
-├── prompts/          # 自定义提示模板
+├── prompts/          # 自定义提示模板（注：健身知识库已迁移到 skills/fitness-coach/references/）
 ├── themes/           # 自定义主题
 ├── skills/           # 自定义技能
 ├── tools/            # 工具配置
@@ -512,45 +515,41 @@ pm2 save
 
 ## 9. 知识库 & 技能系统
 
-### 9.1 目录结构
+### 9.1 技能目录结构
 
-项目知识库在 `.fitclaw/` 目录下：
+Sport Skill 遵循标准化 Skills 格式，对齐 [Agent Skills 规范](https://agentskills.io/specification)：
 
 ```
-.fitclaw/
-├── skills/         # 技能文件（Markdown）
-│   └── fitness-coach/
-│       └── SKILL.md
-├── prompts/        # 提示模板
-│   └── fitness-knowledge.md
-└── CLAUDE.md       # 项目上下文文件（AGENTS.md 也可）
+.fitclaw/skills/<skill-name>/
+├── SKILL.md          # 【必须】name + description frontmatter + 指令正文
+├── scripts/          # 【可选】可执行工具代码
+│   └── tools.ts      #   createTools(store): AgentTool[]
+├── references/       # 【可选】渐进式知识库文件
+│   └── *.md          #   LLM 按需 read，不占 system prompt
+└── assets/           # 【可选】静态数据文件
+    └── *.json        #   工具代码引用
 ```
+
+已安装的 Skill 自动被发现（通过 `~/.fitclaw/agent/skills/` 或 `.fitclaw/skills/`）。
 
 ### 9.2 Skills（技能）
 
-技能是 Markdown 文件，定义专门的能力领域。Skill 被匹配时会自动注入到 system prompt：
+Skills 定义专门的能力领域。自动渐进式加载：
 
-```markdown
-# 技能名
-简短描述
+| 层级 | 内容 | 加载时机 |
+|------|------|----------|
+| Layer 1 | name + description (~100 tokens) | 始终在 system prompt |
+| Layer 2 | SKILL.md 正文 (<5000 tokens) | Skill 激活时 |
+| Layer 3 | scripts/tools.ts | Skill 激活时（jiti 动态导入） |
+| Layer 3 | references/*.md | LLM 按需 read |
 
-## 适用场景
-- 场景 1
-- 场景 2
+可用 `/skill:name` 在交互中手动激活。
 
-## 指导原则
-...
-```
+### 9.3 知识库（渐进式加载）
 
-可用 `/skill-name` 在交互中手动激活。
+知识库采用**渐进式披露**模式：system prompt 只注入文件名索引（~100 tokens），LLM 在需要具体知识时通过 `read` 工具按需加载对应文件。
 
-### 9.3 Prompts（提示模板）
-
-提示模板是预定义的 prompt 片段，可被命令引用：
-
-```
-@prompt:template-name
-```
+旧的知识库位置（`.fitclaw/prompts/`）已废弃，内容已迁移到 `.fitclaw/skills/fitness-coach/references/`。
 
 ### 9.4 CLAUDE.md / AGENTS.md
 
@@ -599,7 +598,8 @@ sessions/
 │   ├── session.jsonl      # 主会话文件（消息 + 事件）
 │   ├── log.jsonl          # 日志
 │   ├── context.jsonl      # 上下文
-│   └── fitness-data.json  # 健身数据（仅健身模式）
+│   └── sport-data/        # 运动数据（仅健身模式）
+│       └── fitness.json
 ```
 
 ### 11.2 上下文压缩（Compaction）
@@ -737,7 +737,8 @@ docker compose down && docker compose up -d  # 重建容器使配置生效
 ```
 feishu-workspace/               ← 宿主机目录，删容器不丢
 ├── <channelId>/
-│   ├── fitness-data.json       ← 用户训练记录
+│   ├── sport-data/              ← 运动数据
+│   │   └── fitness.json         ← 用户训练记录
 │   ├── context.jsonl           ← 对话历史
 │   └── log.jsonl               ← 运行日志
 ```
@@ -930,7 +931,7 @@ fitclaw --help
 | `get_workout_history` | 训练历史 |
 | `log_body_metrics` | 体测记录 |
 | `get_body_metrics_history` | 体测历史 |
-| `training_plan` | 计划生成 |
+| `create_training_plan` | 计划生成 |
 | `get_current_plan` | 当前计划 |
 | `get_today_workout` | 今日训练 |
 | `get_progress_summary` | 进度分析 |

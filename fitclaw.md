@@ -18,10 +18,13 @@
 
 ## Available Knowledge Domains
 
-When detailed knowledge is needed, load the corresponding domain file from `.fitclaw/prompts/`:
+When detailed knowledge is needed, load the corresponding domain file from `.fitclaw/skills/fitness-coach/references/`:
 
-- `training_methods.md` — Training splits, rep ranges, intensity techniques, periodization
 - `exercise_technique.md` — Proper form, common errors, cues for major exercises
+- `training_methods.md` — Training splits, rep ranges, intensity techniques, periodization
 - `safety.md` — Contraindications, special populations, injury prevention
 - `nutrition.md` — Calorie management, macros, meal timing
 - `recovery.md` — Sleep, deloads, active recovery, injury management
+- `onboarding.md` — User onboarding script templates
+- `plan-design.md` — Training split decision tree and rep ranges
+- `progression.md` — Double progression, linear progression, deload scheduling
