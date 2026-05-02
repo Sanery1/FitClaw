@@ -163,9 +163,19 @@ export class FeishuBot {
 
 	// ========================================================================
 	// Internal: message event parsing
+	//
+	// Security model: This Bot uses Feishu WebSocket long-connection mode (not
+	// HTTP webhooks). The WebSocket is authenticated with appId + appSecret at
+	// connection time and runs over TLS. Events arriving on this channel are
+	// trusted by the SDK. Per-event X-Lark-Signature verification is only
+	// applicable to HTTP webhook mode and is not needed here.
 	// ========================================================================
 
 	private async handleMessage(data: unknown): Promise<void> {
+		if (!data || typeof data !== "object") {
+			log.logWarning("Feishu received non-object event data, ignoring");
+			return;
+		}
 		const dataObj = data as Record<string, unknown>;
 
 		// Deduplicate: Feishu WS may re-send events with same event_id
@@ -188,12 +198,18 @@ export class FeishuBot {
 
 		log.logInfo(`Feishu raw event: ${JSON.stringify(data).slice(0, 500)}`);
 
-		const msg = dataObj?.message as Record<string, unknown> | undefined;
-		const sender = dataObj?.sender as Record<string, unknown> | undefined;
-		if (!msg || !sender) {
-			log.logWarning(`Feishu event missing msg or sender, keys: ${JSON.stringify(Object.keys(dataObj || {}))}`);
+		// Validate event schema: required top-level fields
+		if (!dataObj.message || typeof dataObj.message !== "object") {
+			log.logWarning(`Feishu event missing or invalid message field`);
 			return;
 		}
+		if (!dataObj.sender || typeof dataObj.sender !== "object") {
+			log.logWarning(`Feishu event missing or invalid sender field`);
+			return;
+		}
+
+		const msg = dataObj.message as Record<string, unknown>;
+		const sender = dataObj.sender as Record<string, unknown>;
 
 		// content is a JSON string from Feishu
 		let content: Record<string, unknown> = {};

@@ -105,13 +105,14 @@
 | **影响** | `WSClient.start()` 启动后无重连逻辑。网络波动或飞书服务端重启会导致 Bot 永久离线，需人工重启进程 |
 | **修复建议** | 监听 WebSocket `close`/`error` 事件，实现指数退避重连（1s → 2s → 4s → ... → 60s）。参考 Slack Bot 的 Socket Mode 重连实现 |
 
-### 12. 飞书事件无签名验证（安全）
+### 12. 飞书事件无签名验证（安全） ✅ 已确认非风险 (2026-05-02)
 
 | 项目 | 内容 |
 |------|------|
 | **位置** | `packages/mom/src/feishu.ts` |
-| **影响** | `handleMessage()` 直接处理接收到的所有事件，未验证事件签名。攻击者若知道 appId，可伪造事件向 Bot 发送恶意消息 |
-| **修复建议** | 使用飞书 SDK 的签名验证功能，或手动验证 `X-Lark-Signature` header。参考飞书官方文档的 [事件回调安全](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-calback-security) |
+| **影响** | ~~`handleMessage()` 直接处理事件，未验证签名~~ |
+| **分析** | Bot 使用 WebSocket 长连接模式（非 HTTP webhook 模式）。WebSocket 连接时已通过 appId+appSecret 认证，且全程 TLS 加密。SDK 级别的逐事件 `X-Lark-Signature` 验证仅适用于 HTTP 回调模式，不适用于 WebSocket 模式 |
+| **改进** | 已添加 `handleMessage()` 输入类型校验（拒绝非 object 数据）+ event schema 验证（必须包含 message/sender 字段），防止畸形的 WebSocket 消息进入处理逻辑 |
 
 ### 13. 核心逻辑测试覆盖不足（质量）
 
@@ -144,8 +145,8 @@
 | 级别 | 数量 | 分类 | 状态 |
 |------|------|------|------|
 | 🔴 CRITICAL | 4 | 架构 ×1、安全 ×3 | 2/4 已修复 |
-| 🟡 HIGH | 11 | 架构 ×3、代码质量 ×4、安全 ×2、质量 ×2、性能 ×1 | 0/11 |
-| **合计** | **15** | — | 2 已修复 |
+| 🟡 HIGH | 11 | 架构 ×3、代码质量 ×4、安全 ×2、质量 ×2、性能 ×1 | 1/11 已确认非风险 |
+| **合计** | **15** | — | 2 已修复，1 已确认非风险 |
 
 ## 修复优先级建议
 
@@ -154,8 +155,8 @@
   - #2 Bash 无沙箱 → validateCommand() 拦截危险命令 (f09e06cd)
   - #3 文件路径无校验 → validatePathBoundary() 路径边界检查 (f09e06cd)
 
-P0（本周）:
-  - #12 飞书无签名验证 → 添加签名校验
+✅ P0（已确认非风险 2026-05-02）:
+  - #12 飞书无签名验证 → Bot 使用 WebSocket 模式，连接级认证 + TLS 已足够。已添加事件结构校验
 
 P1（本月）:
   - #1 AgentSession 拆分 → 分阶段提取服务类
