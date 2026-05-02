@@ -54,6 +54,8 @@
 - ✅ Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
 - ✅ pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
 - ✅ Sport Skill Pack 架构 (2026-05-01): Skill 支持 tools.ts、渐进式知识加载、SportDataStore 泛型存储、CLI/Bot 共享路径
+- ✅ PI_ 向后兼容彻底移除 (2026-05-02, c7d6ba52): 26 个源文件中所有 `process.env.PI_*` fallback 全部移除，"pi" bin 别名删除，`~/.pi/` 路径全部迁移到 `~/.fitclaw/`
+- ✅ jiti 动态加载 Skill 工具 (2026-05-02, 1487b2aa): `sdk.ts` 通过 `jiti.import("scripts/tools.ts")` 动态加载，支持工具名前缀 + 热插拔新运动 skill
 
 ## 技术记录（Plan 文件）
 
@@ -155,20 +157,24 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 
 配置方式 → 参考早前对话或查看 `packages/coding-agent/src/config.ts`
 
-## Commit 历史（当前 main 分支，最近 10 个）
+## Commit 历史（当前 main 分支，最近 15 个）
 
 ```
+5dfa30ed docs: mark jiti dynamic loading as completed
+1487b2aa feat: connect jiti dynamic loading for skill scripts/tools.ts
+c7d6ba52 refactor: remove all PI_ env var backward compatibility
+35884fe3 fix(mom): add Feishu event input validation and document WebSocket security model
+20e7a960 docs: fix stale .fitclaw/prompts/ references and resolve doc contradictions
+70dfd51f fix: replace .pi/ branding residue in source comments and UI strings
+3766c16d feat: Sport Skill Pack architecture — skills support tools.ts + progressive knowledge loading
+34850c19 docs: remove outdated PROJECT_DOCUMENTATION.md
+a5ba4c1f docs: sync knowledge base after pi/fork cleanup and config clarification
 be21ba30 docs: remove pi-mono fork references and legacy .pi/ config directory
 ef12fef2 feat: single-file config — entrypoint generates auth.json + models.json from .env
 c37af31e fix: align Docker LLM config with CLI and mount config directory
 d2d72c67 docs: add complete Docker deployment workflow to USER_GUIDE
 6399136e docs: sync CLAUDE.md and README with Docker deployment info
 f42f70d2 feat: add Docker containerization for Bot deployment
-f4e43657 docs: clarify FitClaw has two independent programs (CLI + Bot)
-4732ae70 docs: remove obsolete Feishu integration planning documents
-aa0b66b7 docs: sync knowledge base — fix stale references, mark resolved risks
-b89d5cec docs: add comprehensive USER_GUIDE.md with usage instructions
-f09e06cd fix: add bash dangerous command interception and path traversal protection
 ```
 
 ## AI Agent 工作规则
