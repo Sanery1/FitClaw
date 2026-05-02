@@ -5021,7 +5021,8 @@ export class InteractiveMode {
 
 			// Create the preview URL
 			const previewUrl = getShareViewerUrl(gistId);
-			this.showStatus(`Share URL: ${previewUrl}\nGist: ${gistUrl}`);
+			const viewerLine = previewUrl ? `\nPreview: ${previewUrl}` : "";
+			this.showStatus(`Share URL: ${gistUrl}${viewerLine}`);
 		} catch (error: unknown) {
 			if (!loader.signal.aborted) {
 				restoreEditor();

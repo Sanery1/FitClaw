@@ -333,19 +333,19 @@ export const VERSION: string = pkg.version || "0.0.0";
 // e.g., FITCLAW_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 
-const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
+const DEFAULT_SHARE_VIEWER_URL = ""; // No default; set FITCLAW_SHARE_VIEWER_URL env var
 
-/** Get the share viewer URL for a gist ID */
+/** Get the share viewer URL for a gist ID. Returns empty string if no viewer is configured. */
 export function getShareViewerUrl(gistId: string): string {
 	const baseUrl = process.env.FITCLAW_SHARE_VIEWER_URL || DEFAULT_SHARE_VIEWER_URL;
-	return `${baseUrl}#${gistId}`;
+	return baseUrl ? `${baseUrl}#${gistId}` : "";
 }
 
 // =============================================================================
-// User Config Paths (~/.pi/agent/*)
+// User Config Paths (~/.fitclaw/agent/*)
 // =============================================================================
 
-/** Get the agent config directory (e.g., ~/.pi/agent/) */
+/** Get the agent config directory (e.g., ~/.fitclaw/agent/) */
 export function getAgentDir(): string {
 	const envDir = process.env[ENV_AGENT_DIR];
 	if (envDir) {
