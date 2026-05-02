@@ -333,7 +333,7 @@ try {
 					process.exit(1);
 				}
 
-				const apiKey = process.env.FITCLAW_API_KEY || process.env.PI_API_KEY;
+				const apiKey = process.env.FITCLAW_API_KEY;
 
 				// Pass all args after the model name
 				const agentArgs = args.slice(2);

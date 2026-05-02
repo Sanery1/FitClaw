@@ -783,13 +783,7 @@ export class InteractiveMode {
 	 * Check npm registry for a newer version.
 	 */
 	private async checkForNewVersion(): Promise<string | undefined> {
-		if (
-			process.env.FITCLAW_SKIP_VERSION_CHECK ||
-			process.env.PI_SKIP_VERSION_CHECK ||
-			process.env.FITCLAW_OFFLINE ||
-			process.env.PI_OFFLINE
-		)
-			return undefined;
+		if (process.env.FITCLAW_SKIP_VERSION_CHECK || process.env.FITCLAW_OFFLINE) return undefined;
 
 		try {
 			const response = await fetch("https://registry.npmjs.org/@fitclaw/claw/latest", {
@@ -811,7 +805,7 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.FITCLAW_OFFLINE || process.env.PI_OFFLINE) {
+		if (process.env.FITCLAW_OFFLINE) {
 			return [];
 		}
 
@@ -907,7 +901,7 @@ export class InteractiveMode {
 	}
 
 	private reportInstallTelemetry(version: string): void {
-		if (process.env.FITCLAW_OFFLINE || process.env.PI_OFFLINE) {
+		if (process.env.FITCLAW_OFFLINE) {
 			return;
 		}
 
@@ -3466,7 +3460,7 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
+		const tmpFile = path.join(os.tmpdir(), `fitclaw-editor-${Date.now()}.md`);
 
 		try {
 			// Write current content to temp file

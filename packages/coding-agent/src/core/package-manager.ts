@@ -324,7 +324,7 @@ function collectFiles(
 	return files;
 }
 
-type SkillDiscoveryMode = "pi" | "fitclaw" | "agents";
+type SkillDiscoveryMode = "fitclaw" | "agents";
 
 function collectSkillEntries(
 	dir: string,
@@ -370,24 +370,19 @@ function collectSkillEntries(
 
 			const fullPath = join(dir, entry.name);
 			let isDir = entry.isDirectory();
-			let isFile = entry.isFile();
+			let _isFile = entry.isFile();
 
 			if (entry.isSymbolicLink()) {
 				try {
 					const stats = statSync(fullPath);
 					isDir = stats.isDirectory();
-					isFile = stats.isFile();
+					_isFile = stats.isFile();
 				} catch {
 					continue;
 				}
 			}
 
 			const relPath = toPosixPath(relative(root, fullPath));
-			if (mode === "pi" && dir === root && isFile && entry.name.endsWith(".md") && !ig.ignores(relPath)) {
-				entries.push(fullPath);
-				continue;
-			}
-
 			if (!isDir) continue;
 			if (ig.ignores(`${relPath}/`)) continue;
 
@@ -516,8 +511,8 @@ function collectAutoThemeEntries(dir: string): string[] {
 function readFitClawManifestFile(packageJsonPath: string): FitClawManifest | null {
 	try {
 		const content = readFileSync(packageJsonPath, "utf-8");
-		const pkg = JSON.parse(content) as { pi?: FitClawManifest };
-		return pkg.pi ?? null;
+		const pkg = JSON.parse(content) as { fitclaw?: FitClawManifest };
+		return pkg.fitclaw ?? null;
 	} catch {
 		return null;
 	}
@@ -613,7 +608,7 @@ function collectAutoExtensionEntries(dir: string): string[] {
  */
 function collectResourceFiles(dir: string, resourceType: ResourceType): string[] {
 	if (resourceType === "skills") {
-		return collectSkillEntries(dir, "pi");
+		return collectSkillEntries(dir, "fitclaw");
 	}
 	if (resourceType === "extensions") {
 		return collectAutoExtensionEntries(dir);
@@ -2049,8 +2044,8 @@ export class DefaultPackageManager implements PackageManager {
 
 		try {
 			const content = readFileSync(packageJsonPath, "utf-8");
-			const pkg = JSON.parse(content) as { pi?: FitClawManifest };
-			return pkg.pi ?? null;
+			const pkg = JSON.parse(content) as { fitclaw?: FitClawManifest };
+			return pkg.fitclaw ?? null;
 		} catch {
 			return null;
 		}
@@ -2190,7 +2185,7 @@ export class DefaultPackageManager implements PackageManager {
 		addResources(
 			"skills",
 			[
-				...collectAutoSkillEntries(projectDirs.skills, "pi"),
+				...collectAutoSkillEntries(projectDirs.skills, "fitclaw"),
 				...projectAgentsSkillDirs.flatMap((dir) => collectAutoSkillEntries(dir, "agents")),
 			],
 			projectMetadata,
@@ -2221,7 +2216,10 @@ export class DefaultPackageManager implements PackageManager {
 		);
 		addResources(
 			"skills",
-			[...collectAutoSkillEntries(userDirs.skills, "pi"), ...collectAutoSkillEntries(userAgentsSkillsDir, "agents")],
+			[
+				...collectAutoSkillEntries(userDirs.skills, "fitclaw"),
+				...collectAutoSkillEntries(userAgentsSkillsDir, "agents"),
+			],
 			userMetadata,
 			userOverrides.skills,
 			globalBaseDir,

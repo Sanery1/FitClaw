@@ -81,10 +81,7 @@ const GEMINI_CLI_HEADERS = {
 const DEFAULT_ANTIGRAVITY_VERSION = "1.21.9";
 
 function getAntigravityHeaders() {
-	const version =
-		process.env.FITCLAW_AI_ANTIGRAVITY_VERSION ||
-		process.env.PI_AI_ANTIGRAVITY_VERSION ||
-		DEFAULT_ANTIGRAVITY_VERSION;
+	const version = process.env.FITCLAW_AI_ANTIGRAVITY_VERSION || DEFAULT_ANTIGRAVITY_VERSION;
 	return {
 		"User-Agent": `antigravity/${version} darwin/arm64`,
 	};

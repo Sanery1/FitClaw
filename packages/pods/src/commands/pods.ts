@@ -48,7 +48,7 @@ export const setupPod = async (
 ) => {
 	// Validate environment variables
 	const hfToken = process.env.HF_TOKEN;
-	const vllmApiKey = process.env.FITCLAW_API_KEY || process.env.PI_API_KEY;
+	const vllmApiKey = process.env.FITCLAW_API_KEY;
 
 	if (!hfToken) {
 		console.error(chalk.red("ERROR: HF_TOKEN environment variable is required"));

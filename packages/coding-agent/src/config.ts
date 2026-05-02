@@ -304,7 +304,7 @@ export function getBundledInteractiveAssetPath(name: string): string {
 }
 
 // =============================================================================
-// App Config (from package.json piConfig — reads "pi" field, legacy name)
+// App Config (from package.json fitClawConfig)
 // =============================================================================
 
 interface PackageJson {
@@ -314,15 +314,11 @@ interface PackageJson {
 		name?: string;
 		configDir?: string;
 	};
-	piConfig?: {
-		name?: string;
-		configDir?: string;
-	};
 }
 
 const pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8")) as PackageJson;
 
-const appConfig: PackageJson["fitClawConfig"] | PackageJson["piConfig"] = pkg.fitClawConfig || pkg.piConfig;
+const appConfig = pkg.fitClawConfig;
 const appConfigName: string | undefined = appConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@fitclaw/claw";
 export const APP_NAME: string = appConfigName || "fitclaw";

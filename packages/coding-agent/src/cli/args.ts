@@ -328,19 +328,19 @@ ${chalk.bold("Environment Variables:")}
   AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
   AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
   ${ENV_AGENT_DIR.padEnd(32)} - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
-  FITCLAW_PACKAGE_DIR (PI_*)       - Override package directory (for Nix/Guix store paths)
-  FITCLAW_OFFLINE (PI_*)           - Disable startup network operations when set to 1/true/yes
-  FITCLAW_TELEMETRY (PI_*)         - Override install telemetry when set to 1/true/yes or 0/false/no
-  FITCLAW_SHARE_VIEWER_URL (PI_*)  - Base URL for /share command (default: https://pi.dev/session/)
-  FITCLAW_AI_ANTIGRAVITY_VERSION (PI_*) - Override Antigravity User-Agent version (e.g., 1.23.0)
-  FITCLAW_CACHE_RETENTION (PI_*)   - Set to "long" for extended prompt cache retention
-  FITCLAW_OAUTH_CALLBACK_HOST (PI_*) - Custom host for OAuth callback server (default: 127.0.0.1)
-  FITCLAW_TIMING (PI_*)            - Set to 1 to print startup timing breakdown
-  FITCLAW_HARDWARE_CURSOR (PI_*)   - Set to 1 to enable hardware cursor
-  FITCLAW_CLEAR_ON_SHRINK (PI_*)   - Set to 1 to clear empty rows when content shrinks
-  FITCLAW_DEBUG_REDRAW (PI_*)      - Set to 1 to log full render reasons to ~/.pi/agent/pi-debug.log
-  FITCLAW_TUI_WRITE_LOG (PI_*)     - Set to a directory path to log TUI output
-  FITCLAW_TUI_DEBUG (PI_*)         - Set to 1 to dump render buffers to /tmp/tui/
+  FITCLAW_PACKAGE_DIR       - Override package directory (for Nix/Guix store paths)
+  FITCLAW_OFFLINE           - Disable startup network operations when set to 1/true/yes
+  FITCLAW_TELEMETRY         - Override install telemetry when set to 1/true/yes or 0/false/no
+  FITCLAW_SHARE_VIEWER_URL  - Base URL for /share command (default: https://pi.dev/session/)
+  FITCLAW_AI_ANTIGRAVITY_VERSION - Override Antigravity User-Agent version (e.g., 1.23.0)
+  FITCLAW_CACHE_RETENTION   - Set to "long" for extended prompt cache retention
+  FITCLAW_OAUTH_CALLBACK_HOST - Custom host for OAuth callback server (default: 127.0.0.1)
+  FITCLAW_TIMING            - Set to 1 to print startup timing breakdown
+  FITCLAW_HARDWARE_CURSOR   - Set to 1 to enable hardware cursor
+  FITCLAW_CLEAR_ON_SHRINK   - Set to 1 to clear empty rows when content shrinks
+  FITCLAW_DEBUG_REDRAW      - Set to 1 to log full render reasons to ~/.fitclaw/agent/fitclaw-debug.log
+  FITCLAW_TUI_WRITE_LOG     - Set to a directory path to log TUI output
+  FITCLAW_TUI_DEBUG         - Set to 1 to dump render buffers to /tmp/tui/
 
 ${chalk.bold("Built-in Tool Names:")}
   read   - Read file contents

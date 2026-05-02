@@ -72,10 +72,10 @@ export function migrateAuthToAuthJson(): string[] {
 }
 
 /**
- * Migrate sessions from ~/.pi/agent/*.jsonl to proper session directories.
+ * Migrate sessions from ~/.fitclaw/agent/*.jsonl to proper session directories.
  *
- * Bug in v0.30.0: Sessions were saved to ~/.pi/agent/ instead of
- * ~/.pi/agent/sessions/<encoded-cwd>/. This migration moves them
+ * Bug in v0.30.0: Sessions were saved to ~/.fitclaw/agent/ instead of
+ * ~/.fitclaw/agent/sessions/<encoded-cwd>/. This migration moves them
  * to the correct location based on the cwd in their session header.
  *
  * See: https://github.com/Sanery1/FitClaw/issues/320

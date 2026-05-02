@@ -423,15 +423,10 @@ export interface MainOptions {
 
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
-	const offlineMode =
-		args.includes("--offline") ||
-		isTruthyEnvFlag(process.env.FITCLAW_OFFLINE) ||
-		isTruthyEnvFlag(process.env.PI_OFFLINE);
+	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.FITCLAW_OFFLINE);
 	if (offlineMode) {
 		process.env.FITCLAW_OFFLINE = "1";
-		process.env.PI_OFFLINE = "1";
 		process.env.FITCLAW_SKIP_VERSION_CHECK = "1";
-		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
 	if (await handlePackageCommand(args)) {
@@ -711,12 +706,9 @@ export async function main(args: string[], options?: MainOptions) {
 		process.exit(1);
 	}
 
-	const startupBenchmark =
-		isTruthyEnvFlag(process.env.FITCLAW_STARTUP_BENCHMARK) || isTruthyEnvFlag(process.env.PI_STARTUP_BENCHMARK);
+	const startupBenchmark = isTruthyEnvFlag(process.env.FITCLAW_STARTUP_BENCHMARK);
 	if (startupBenchmark && appMode !== "interactive") {
-		console.error(
-			chalk.red("Error: FITCLAW_STARTUP_BENCHMARK / PI_STARTUP_BENCHMARK only supports interactive mode"),
-		);
+		console.error(chalk.red("Error: FITCLAW_STARTUP_BENCHMARK only supports interactive mode"));
 		process.exit(1);
 	}
 
