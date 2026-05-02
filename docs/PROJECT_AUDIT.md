@@ -415,4 +415,4 @@ d2698e8f feat: P0/P1/P2 — fitness tool precision, data persistence, and knowle
 10. Web UI 健身界面
 11. 动作图片/GIF 资源
 12. 将 `bin` 从 `"pi"` 改为 `"fitclaw"`
-13. 实现完整的 jiti 动态加载 `scripts/tools.ts`（当前走 skill 检测 + 工具代码仍留在 fitness/ 子目录）
+13. ~~实现完整的 jiti 动态加载 `scripts/tools.ts`~~ ✅ 已实施 (2026-05-02, 1487b2aa)

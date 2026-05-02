@@ -75,8 +75,8 @@
 
 ### 🟢 低优先级（择机执行）
 
-1. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token
-2. **P3：jiti 动态加载 Skill 工具** — `sdk.ts` 当前走 skill 检测 + 硬编码 `createFitnessTools()`，未调用 `jiti.import("scripts/tools.ts")`。等第二个运动技能（如游泳）上线时再做，改动量约 20 行，接口已就绪（`createTools(store)`）。参见 `docs/PROJECT_AUDIT.md` #13
+1. **P3：封装 fitness-coach Skill** — 将 11 个健身工具封装为独立 Skill，统一决策流程，减少 system prompt token。jiti 动态加载已接上（1487b2aa），工具代码仍在 `fitness/` 子目录但已支持动态激活
+2. ~~P3：jiti 动态加载 Skill 工具~~ ✅ 已实施 (2026-05-02, 1487b2aa) — `sdk.ts` 现在通过 `jiti.import("scripts/tools.ts")` 动态加载 skill 工具，支持命名空间前缀和热插拔
 3. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
 4. **动作图片资源** — 动作数据库仅有文字，可添加 GIF/图片示范
 
