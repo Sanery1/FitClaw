@@ -5,7 +5,7 @@
 
 ## 一句话定位
 
-**FitClaw = AI 健身私教 + 智能编程助手**，全栈 AI Agent 平台。
+**FitClaw = AI 运动私教 + 智能编程助手**，全栈 AI Agent 平台。
 
 ## 项目来历
 
@@ -13,7 +13,7 @@
 |------|------|
 | 2026-04 | 项目初始化，基于 TypeScript monorepo 架构 |
 | 2026-04 | 全部 7 个包统一使用 `@fitclaw/*` 命名空间 |
-| 2026-04 | 新增健身私教功能（11 个 Agent 工具 + 动作数据库 + 知识库） |
+| 2026-04 | 新增运动私教功能（11 个 Agent 工具 + 动作数据库 + 知识库） |
 | 2026-05 | bodybuilding Skill 集成（800+ 动作），fitness-coach 删除，全面迁移到 Model B 纯 Skill 架构 |
 | 2026-04 | 新增飞书 Bot 适配器 |
 | 2026-04 | 配置系统统一到 `.fitclaw/` |
@@ -33,50 +33,53 @@
 | `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件 |
 | `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
 
-架构学习 → [docs/LEARNING_GUIDE.md](./docs/LEARNING_GUIDE.md)
+AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)
+架构学习、问答与风险记录 → [docs/QNA.md](./docs/QNA.md)
 
 ## 近期完成
 
+- **Bot Skill 完整修复 (2026-05-03)**: 修复 6 个问题打通 Bot 本地数据库查询链路：
+  1. `.env.example` Provider 名 `MiniMax`→`minimax`（匹配内置 Provider）
+  2. `docker/entrypoint.sh` 中 `node -e`→`node -p`（修复 auth.json/models.json 空文件）
+  3. Skill 文件从 `.fitclaw/skills/` 同步到 `feishu-workspace/skills/`（Bot volume 可访问）
+  4. `agent.ts` `buildSystemPrompt` 重写 Fitness Tools 为 "How to Use Skills"（LLM 不再幻觉工具名）
+  5. `system-prompt.ts` 删除 custom prompt 路径中重复的 skills 嵌入
+  6. `Dockerfile` 安装 Python 3.11（支持 `scripts/query_exercises.py`）
+  7. bodybuilding SKILL.md description 添加 MUST-use 触发器
 - Docker 容器化部署 (2026-05-01, f42f70d2): Dockerfile + docker-compose.yml + .env 统一配置
 - pi-mono/fork 引用清理 (2026-05-01, be21ba30): 文档去 fork 化 + 根目录 .pi/ 删除
 - PI_ 向后兼容彻底移除 (2026-05-02, c7d6ba52): 26 个源文件中所有 `process.env.PI_*` fallback 全部移除
 - Slack 代码全部删除 (2026-05-02): mom 包纯飞书化，删除 slack.ts/download.ts/events.ts，移除 `@slack/*` 依赖
-- **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data:{skill}:read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
+- **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data_<skill>_read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
+- **Skill 数据边界加固 (2026-05-07)**: `data_<skill>_read/write` 统一拒绝未声明 namespace；`FileSportDataStore` 校验 namespace 字符集和路径边界，JSON 损坏/权限/写入失败会返回工具错误；Bot bash 增加危险命令拦截
 
-完整历史记录 → [docs/CHANGELOG.md](./docs/CHANGELOG.md)
-
-## 技术记录（Plan 文件）
-
-| 计划文件 | 说明 |
-|----------|------|
-| `docs/plans/pi-mono-fitclaw-claw-fitclaw-https-gith-keen-hammock.md` | 完整技术决策文档（12 个架构决策，历史记录） |
-| `docs/plans/plan-tranquil-kahn.md` | CLI 品牌重构 + 启动简化（已部分完成） |
+项目接手速读维护在 [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)。完整历史、技术问答与风险说明统一维护在 [docs/QNA.md](./docs/QNA.md)。
 
 ## 待完成
 
-1. **Web UI 健身界面** — `packages/web-ui` 目前只有通用聊天界面
-2. **动作图片资源** — bodybuilding 数据库含图片路径但图片文件待下载
+1. **Web UI 运动界面** — `packages/web-ui` 目前只有通用聊天界面
+2. **飞书图片上传** — `packages/mom/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
 
-## 健身数据架构（Model B 纯 Skill）
+## 运动数据架构（Model B 纯 Skill）
 
 ### 设计原则
 
 Skill 作者**不接触任何框架类型**。Skill = SKILL.md + references/ + scripts/ + assets/。
-框架通过 `data:` frontmatter 声明自动提供持久化能力。
+框架通过 `data:` frontmatter 声明自动提供持久化能力，并在工具层与存储层同时强校验 namespace。
 
 ### 数据存储位置
 
 | 数据类型 | 来源 | 存储 |
 |---------|------|------|
 | 动作数据库 | `free-exercise-db/` (bodybuilding skill 内嵌) | 磁盘，永久（800+ 动作 JSON + 图片） |
-| 用户画像 / 训练记录 / 计划 | LLM 通过 `data:{skill}:read/write` 工具 | `<dataDir>/sport-data/{skillName}/{namespace}.json` |
+| 用户画像 / 训练记录 / 计划 | LLM 通过 `data_<skill>_read/write` 工具 | `<dataDir>/sport-data/{skillName}/{namespace}.json` |
 | 对话历史 | 消息记录 | `<channelDir>/context.jsonl` + `log.jsonl` |
 
 ### 数据写入流程 (Model B)
 
 ```
 用户消息 → LLM 结合 SKILL.md 指令决策
-  → LLM 调用 data:bodybuilding:write("training_log", {...}, "append")
+  → LLM 调用 data_bodybuilding_write("training_log", {...}, "append")
     → FileSportDataStore.save("bodybuilding/training_log", data)
       → {dataDir}/sport-data/bodybuilding/training_log.json
 ```
@@ -93,7 +96,7 @@ Skill 目录结构：
 
 ### `data:` 声明（Model B 持久化）
 
-在 SKILL.md frontmatter 中声明 namespace，框架自动注册 `data:{skillName}:read` 和 `data:{skillName}:write` Agent Tool：
+在 SKILL.md frontmatter 中声明 namespace，框架自动注册 `data_<skillName>_read` 和 `data_<skillName>_write` Agent Tool：
 
 ```yaml
 ---
@@ -106,22 +109,26 @@ data:
 
 框架自动行为：
 1. 初始化 namespace JSON 文件（`{dataDir}/sport-data/{skillName}/{namespace}.json`）
-2. 注册 `data:{skillName}:read` / `data:{skillName}:write` Agent Tool
+2. 注册 `data_<skillName>_read` / `data_<skillName>_write` Agent Tool
 3. 设置 `FITCLAW_DATA_DIR` 环境变量 → `{dataDir}/sport-data`
 
 ### 已安装 Skill
 
-| Skill | 位置 | 工具 | 数据 |
-|-------|------|------|------|
-| bodybuilding | `.fitclaw/skills/bodybuilding/` | `data:bodybuilding:read/write` | 6 个 namespace + 800+ 动作数据库 |
-| swimming-coach | `.fitclaw/skills/swimming-coach/` | `data:swimming-coach:read/write` | 3 个 namespace |
+| Skill | 位置（CLI） | 位置（Bot） | 工具 | 数据 |
+|-------|------------|------------|------|------|
+| bodybuilding | `.fitclaw/skills/bodybuilding/` | `feishu-workspace/skills/bodybuilding/` | `data_bodybuilding_read/write` + bash 脚本 | 6 个 namespace + 800+ 动作数据库 |
+| swimming-coach | `.fitclaw/skills/swimming-coach/` | `feishu-workspace/skills/swimming-coach/` | `data_swimming-coach_read/write` | 3 个 namespace |
+
+> **注意**：CLI 从 `.fitclaw/skills/` 加载，Bot 从 `feishu-workspace/skills/` 加载。
+> 安装新 skill 需要同步到两个位置。`feishu-workspace/` 是 Docker volume 挂载，文件放入后立即可见。
 
 ### 添加新 Skill 的步骤
 
 1. 在 `.fitclaw/skills/<name>/` 创建目录
-2. 编写 `SKILL.md`（含 `data:` 声明）
+2. 编写 `SKILL.md`（含 `data:` 声明 + 精准 `description`，描述应包含触发场景和为什么必须用 skill）
 3. 可选：添加 `references/`、`scripts/`、`assets/`
-4. 框架自动发现并注册 data 工具
+4. **同步到 Bot**：`cp -r .fitclaw/skills/<name> feishu-workspace/skills/`（如果要让飞书 Bot 使用）
+5. 框架自动发现并注册 data 工具
 
 ## 如何启动
 
@@ -135,7 +142,7 @@ node packages/coding-agent/dist/cli.js
 ./start.sh
 
 # Bot 部署（推荐 Docker，生产环境）
-cp .env.example .env && docker compose up -d
+cp .env.example .env && docker compose up -d --build
 
 # Bot 部署（裸机）
 pm2 start ecosystem.config.cjs         # 需 PM2
@@ -165,7 +172,11 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | data 工具注册 | `packages/coding-agent/src/core/sdk.ts` `createAgentSession()` |
 | fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
 | MOM Bot 工具注册 | `packages/mom/src/agent.ts` `createRunner()` |
+| MOM Bot 系统提示词 | `packages/mom/src/agent.ts` `buildSystemPrompt()` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
+| Docker 镜像 | `Dockerfile` + `docker-compose.yml` |
+| Bot 入口脚本 | `docker/entrypoint.sh` |
+| Bot 环境配置 | `.env.example` |
 | 启动界面 | `packages/coding-agent/src/modes/interactive/interactive-mode.ts` |
 | 配置文件 | `packages/coding-agent/src/config.ts` |
 | CLI 参数解析 | `packages/coding-agent/src/cli/args.ts` |

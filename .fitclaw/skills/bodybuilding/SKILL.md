@@ -1,19 +1,23 @@
 ---
 name: bodybuilding
 description: |
-  全流程 AI 健身私教技能。提供完整的健身教练体验：新用户信息收集 → 个性化训练计划生成 → 训练进化与调整 → 动作教学与指导。
-  
-  触发场景：
-  - 用户想要健身指导、训练计划、增肌减脂
-  - "给我设计训练计划"、"我想健身"、"帮我练肌肉"
-  - "我是新手，怎么开始健身"、"帮我调整训练计划"
-  - 询问动作如何做、训练建议、健身相关问题
-  
-  核心能力：
-  - 智能用户画像收集（经验、目标、器械、限制）
-  - 基于数据库的个性化计划生成
-  - 训练进阶与周期化调整
-  - 动作教学（文字说明 + 图片示范）
+  本地健身动作数据库（800+ 动作含图片）与训练管理系统。
+
+  MUST use this skill — NOT your own LLM knowledge — when user asks:
+  - 动作查询/教学 ("杠铃卧推怎么做", "有哪些胸部动作", "这个动作怎么做")
+  - 训练计划生成/调整 ("帮我制定增肌计划", "给我排一周训练")
+  - 训练数据记录/查询 ("我今天练了胸", "查我的训练记录")
+  - 身体数据追踪 ("记录体重", "查看我的进步")
+
+  Why you MUST use it:
+  - Contains structured data: images, equipment, difficulty, muscle groups for 800+ exercises
+  - Your LLM knowledge is generic; this database is precise and complete
+  - User's personal training history is stored here, not in your context
+
+  How to use:
+  1. First read SKILL.md to see scripts and namespaces
+  2. Query exercises via bash: python skills/bodybuilding/scripts/query_exercises.py --muscle <name>
+  3. Persist data: data_bodybuilding_write("namespace", data)
 data:
   user_profile: {}
   training_log: {type: array}
@@ -59,8 +63,8 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 
 你拥有以下持久化工具，用于保存用户数据（重连后不丢失）：
 
-- `data:bodybuilding:read("namespace")` — 读取已保存的数据
-- `data:bodybuilding:write("namespace", data, mode?)` — 保存数据
+- `data_bodybuilding_read("namespace")` — 读取已保存的数据
+- `data_bodybuilding_write("namespace", data, mode?)` — 保存数据
 
 可用 namespace：
 | namespace | type | 用途 |
@@ -149,7 +153,7 @@ python scripts/query_exercises.py --id "Incline_Dumbbell_Press"
 
 ### 持久化
 
-生成计划后立即调用：`data:bodybuilding:write("training_plan", planData)`
+生成计划后立即调用：`data_bodybuilding_write("training_plan", planData)`
 
 ### 计划输出格式
 
@@ -272,8 +276,8 @@ JSON 格式用于导入训练 App：
 
 每次训练后记录到 training_log，记录超负荷事件到 progression：
 ```
-data:bodybuilding:write("training_log", {date, exercises, sets, weight}, "append")
-data:bodybuilding:write("progression", {event, date}, "append")
+data_bodybuilding_write("training_log", {date, exercises, sets, weight}, "append")
+data_bodybuilding_write("progression", {event, date}, "append")
 ```
 
 ## 数据库说明
@@ -342,7 +346,7 @@ data:bodybuilding:write("progression", {event, date}, "append")
 3. **安全第一**：有伤病或不确定时，优先保守建议
 4. **个性化**：根据用户反馈持续调整
 5. **激励为主**：正向反馈比批评更有效
-6. **持久化优先**：每次信息变更后立即调用 data:bodybuilding:write 保存
+6. **持久化优先**：每次信息变更后立即调用 data_bodybuilding_write 保存
 
 ## 参考资源（按需读取）
 

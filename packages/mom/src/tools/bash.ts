@@ -26,6 +26,35 @@ interface BashToolDetails {
 	fullOutputPath?: string;
 }
 
+const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+	{ pattern: /\brm\s+-rf\s+\/(\s|$|;|&)/i, reason: "rm -rf / destroys the filesystem" },
+	{ pattern: /\brm\s+-rf\s+\/\*/i, reason: "rm -rf /* destroys the filesystem" },
+	{ pattern: /\bdd\s+.*of=\/dev\/(sda|sdb|nvme|hd|xvd|vd)/i, reason: "dd to block devices overwrites disk" },
+	{ pattern: /\bmkfs\./i, reason: "mkfs formats filesystems destructively" },
+	{ pattern: /\bchmod\s+-R\s+777\s+\/(\s|$|;|&)/i, reason: "chmod 777 / breaks system permissions" },
+	{ pattern: /\bchmod\s+-R\s+000\s+\/(\s|$|;|&)/i, reason: "chmod 000 / locks out the system" },
+	{ pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/i, reason: "fork bomb crashes the system" },
+	{ pattern: /\bmv\s+.*\/\s+\/dev\/null/i, reason: "moving root to /dev/null destroys data" },
+	{ pattern: />\s*\/dev\/sda/i, reason: "redirecting to block device destroys disk" },
+	{
+		pattern: />\s*\/dev\/null.*\b(\/etc|\/usr|\/var|\/home|\/bin|\/sbin|\/lib)/i,
+		reason: "redirecting system paths to null destroys data",
+	},
+	{ pattern: /\bwget\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
+	{ pattern: /\bcurl\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
+];
+
+function validateCommand(command: string): void {
+	const normalized = command.replace(/\\\n/g, " ");
+	for (const { pattern, reason } of DANGEROUS_PATTERNS) {
+		if (pattern.test(normalized)) {
+			throw new Error(
+				`SECURITY_BLOCKED: This command was blocked because it matches a dangerous pattern (${reason}). If you believe this is a false positive, restructure the command to avoid the pattern.`,
+			);
+		}
+	}
+}
+
 export function createBashTool(executor: Executor): AgentTool<typeof bashSchema> {
 	return {
 		name: "bash",
@@ -41,6 +70,7 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 			let tempFilePath: string | undefined;
 			let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
 
+			validateCommand(command);
 			const result = await executor.exec(command, { timeout, signal });
 			let output = "";
 			if (result.stdout) output += result.stdout;

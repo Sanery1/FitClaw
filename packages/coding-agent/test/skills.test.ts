@@ -14,6 +14,7 @@ function createTestSkill(options: {
 	filePath: string;
 	baseDir: string;
 	disableModelInvocation?: boolean;
+	dataNamespaces?: Skill["dataNamespaces"];
 	source?: string;
 }): Skill {
 	return {
@@ -24,6 +25,7 @@ function createTestSkill(options: {
 		sourceInfo: createSyntheticSourceInfo(options.filePath, { source: options.source ?? "test" }),
 		disableModelInvocation: options.disableModelInvocation ?? false,
 		hasTools: false,
+		dataNamespaces: options.dataNamespaces,
 	};
 }
 
@@ -343,6 +345,28 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills);
 			expect(result).toBe("");
+		});
+
+		it("should include actual data tool names for skills with data namespaces", () => {
+			const skills: Skill[] = [
+				createTestSkill({
+					name: "bodybuilding",
+					description: "Fitness coaching.",
+					filePath: "/path/bodybuilding/SKILL.md",
+					baseDir: "/path/bodybuilding",
+					dataNamespaces: new Map([
+						["user_profile", { type: "object" }],
+						["training_log", { type: "array" }],
+					]),
+				}),
+			];
+
+			const result = formatSkillsForPrompt(skills);
+
+			expect(result).toContain("<data_tools>");
+			expect(result).toContain("<read>data_bodybuilding_read</read>");
+			expect(result).toContain("<write>data_bodybuilding_write</write>");
+			expect(result).toContain('<namespace name="training_log" type="array" />');
 		});
 	});
 
