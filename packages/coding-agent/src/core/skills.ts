@@ -439,6 +439,19 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
 		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
+			lines.push("    <data_tools>");
+			lines.push(`      <read>data_${escapeXml(skill.name)}_read</read>`);
+			lines.push(`      <write>data_${escapeXml(skill.name)}_write</write>`);
+			lines.push("      <namespaces>");
+			for (const [namespace, declaration] of skill.dataNamespaces) {
+				lines.push(
+					`        <namespace name="${escapeXml(namespace)}" type="${escapeXml(declaration.type ?? "object")}" />`,
+				);
+			}
+			lines.push("      </namespaces>");
+			lines.push("    </data_tools>");
+		}
 		lines.push("  </skill>");
 	}
 
