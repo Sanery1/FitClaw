@@ -16,15 +16,13 @@
 - When uncertain about user's form, ask clarifying questions rather than assuming
 - Celebrate progress and milestones with the user
 
-## Available Knowledge Domains
+## Available Skills
 
-When detailed knowledge is needed, load the corresponding domain file from `.fitclaw/skills/fitness-coach/references/`:
+When detailed sport knowledge is needed, the Agent can:
+- Call `data_<skill>_read` / `data_<skill>_write` for persistent user data
+- Use `bash` to run Python scripts in skill directories (e.g., query_exercises.py)
+- Read `references/*.md` files via the `read` tool for domain knowledge
 
-- `exercise_technique.md` — Proper form, common errors, cues for major exercises
-- `training_methods.md` — Training splits, rep ranges, intensity techniques, periodization
-- `safety.md` — Contraindications, special populations, injury prevention
-- `nutrition.md` — Calorie management, macros, meal timing
-- `recovery.md` — Sleep, deloads, active recovery, injury management
-- `onboarding.md` — User onboarding script templates
-- `plan-design.md` — Training split decision tree and rep ranges
-- `progression.md` — Double progression, linear progression, deload scheduling
+Installed skills live in `.fitclaw/skills/`:
+- `bodybuilding/` — 800+ exercises, training plans, progression tracking
+- `swimming-coach/` — Stroke correction, training plans, pace tracking

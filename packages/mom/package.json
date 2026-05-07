@@ -1,7 +1,7 @@
 {
 	"name": "@fitclaw/mom",
 	"version": "0.70.5",
-	"description": "Slack bot that delegates messages to the pi coding agent",
+	"description": "Feishu Bot that delegates messages to the FitClaw coding agent",
 	"type": "module",
 	"bin": {
 		"mom": "dist/main.js"
@@ -24,8 +24,6 @@
 		"@fitclaw/agent-core": "^0.70.5",
 		"@fitclaw/ai": "^0.70.5",
 		"@fitclaw/claw": "^0.70.5",
-		"@slack/socket-mode": "^2.0.0",
-		"@slack/web-api": "^7.0.0",
 		"chalk": "^5.6.2",
 		"croner": "^9.1.0",
 		"diff": "^8.0.2",
@@ -39,7 +37,7 @@
 		"vitest": "^3.2.4"
 	},
 	"keywords": [
-		"slack",
+		"feishu",
 		"bot",
 		"ai",
 		"agent"

@@ -12,7 +12,7 @@ AGENT_DIR="/opt/fitclaw/.fitclaw/agent"
 mkdir -p "$AGENT_DIR"
 
 # Generate auth.json using node for safe JSON output (no heredoc injection)
-node -e "
+node -p "
 JSON.stringify(
   Object.fromEntries([
     [process.env.MOM_LLM_PROVIDER, { type: 'api_key', key: process.env.MOM_LLM_API_KEY }]
@@ -22,7 +22,7 @@ JSON.stringify(
 " > "$AGENT_DIR/auth.json"
 
 # Generate models.json with provider override (baseUrl + api + models)
-node -e "
+node -p "
 JSON.stringify(
   {
     providers: {

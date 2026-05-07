@@ -5,5 +5,5 @@
  */
 
 export function renderFeishuCard(_content: string): Record<string, unknown> {
-	throw new Error("Feishu card renderer not yet implemented. Set FITCLAW_BOT_PROVIDER=slack to use Slack instead.");
+	throw new Error("Feishu card renderer not yet implemented.");
 }
