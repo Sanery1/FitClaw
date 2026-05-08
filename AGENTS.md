@@ -19,8 +19,9 @@
 - Always ask before removing functionality or code that appears to be intentional
 - Do not preserve backward compatibility unless the user explicitly asks for it
 - Never hardcode keybindings. All keybindings must be configurable. Add default to matching object (`DEFAULT_EDITOR_KEYBINDINGS` or `DEFAULT_APP_KEYBINDINGS`).
-- **Immutability (CRITICAL)**: Always create new objects, never mutate existing ones. Use immutable update patterns.
+- **Immutability**: Prefer immutable update patterns for application state, shared data structures, React/UI state, config objects, cached objects, exported constants, and values reused across async boundaries. Local, private, short-lived mutation is allowed when it is simpler and does not escape the function, such as building an array in a loop or using framework/runtime APIs that are inherently mutable. Do not mutate caller-owned objects or cross-module data unless the API explicitly documents that mutation is intended.
 - **KISS / YAGNI / DRY**: Prefer simple solutions. Don't build for hypothetical futures. Extract repeated logic into shared utilities only when repetition is real.
+- **Fix bad boundaries, don't pile on patches**: When existing code is structurally wrong, prefer fixing the boundary or replacing the flawed abstraction over adding compatibility layers. Before changing or removing intentional behavior, explain the behavior change and verify affected tests or call sites.
 - **Error handling**: Handle errors explicitly at every level. Never silently swallow errors.
 - **Input validation**: Validate all user input at system boundaries. Never trust external data (API responses, user input, file content).
 
@@ -59,13 +60,14 @@ npx tsx ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
 - If you create or modify a test file, run that file and iterate until it passes.
 - For `packages/coding-agent/test/suite/`, use the faux provider. Do not use real provider APIs, real API keys, or paid tokens.
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` and name them `<issue-number>-<short-slug>.test.ts`.
-- **NEVER commit unless user asks.**
+- After each completed feature or bug fix, run the required verification, commit only the files changed in this session, then push.
 
 ## AI Agent Work Rules
 
-1. **Pushing**: Push must be explicitly requested by user. When asked: `git push origin main`.
-2. **Commits**: Bug fixes get independent commits following conventional commits format (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`). No `--no-verify`, no `--amend` unless explicitly requested.
-3. **Documentation**: Project docs go in `docs/` directory, not scattered in root.
+1. **Commit and push after completion**: After each completed feature or bug fix, run the required tests/checks, commit only the files changed in the current session, then push. Do not leave verified feature work uncommitted.
+2. **Pushing**: Push with `git push origin main` unless the user explicitly asks for a different branch or remote workflow.
+3. **Commits**: Bug fixes get independent commits following conventional commits format (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`). No `--no-verify`, no `--amend` unless explicitly requested.
+4. **Documentation**: Project docs go in `docs/` directory, not scattered in root.
 
 ## PR Workflow
 
@@ -134,7 +136,7 @@ git add packages/ai/src/providers/transform-messages.ts
 git commit -m "fix(ai): description"
 
 # 4. Push (pull --rebase if needed)
-git pull --rebase && git push
+git pull --rebase && git push origin main
 ```
 
 ### If Rebase Conflicts Occur
