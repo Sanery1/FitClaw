@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AgentEvent } from "@fitclaw/agent-core";
+import { formatRate, summarizeEvalResults } from "./metrics.js";
 import type { EvalTrialResult } from "./types.js";
 
 export function writeTranscript(path: string, events: AgentEvent[]): void {
@@ -16,20 +17,33 @@ export function writeTranscript(path: string, events: AgentEvent[]): void {
 
 export function writeSummary(path: string, results: EvalTrialResult[]): void {
 	mkdirSync(dirname(path), { recursive: true });
-	const passed = results.filter((result) => result.passed).length;
+	const metrics = summarizeEvalResults(results);
 	const lines = [
 		"# FitClaw Eval Summary",
 		"",
-		`Passed: ${passed}/${results.length}`,
+		"## Metrics",
 		"",
-		"| Task | Suite | Passed | Tool Calls | Transcript |",
-		"| --- | --- | --- | ---: | --- |",
+		`- pass@1: ${formatRate(metrics.passAt1)}`,
+		`- pass@${metrics.runsPerTask}: ${formatRate(metrics.passAtK)}`,
+		`- pass^${metrics.runsPerTask}: ${formatRate(metrics.passAllK)}`,
+		`- trial pass rate: ${formatRate(metrics.trialPassRate)}`,
+		`- grader pass rate: ${formatRate(metrics.graderPassRate)}`,
+		`- average tool calls: ${metrics.averageToolCalls.toFixed(2)}`,
+		`- average turns: ${metrics.averageTurns.toFixed(2)}`,
+		`- average duration: ${metrics.averageDurationMs.toFixed(1)}ms`,
+		"",
+		"## Trials",
+		"",
+		"| Task | Suite | Trial | Passed | Tool Calls | Turns | Transcript |",
+		"| --- | --- | ---: | --- | ---: | ---: | --- |",
 		...results.map((result) =>
 			[
 				`| ${result.taskId}`,
 				result.suite,
+				String(result.trialIndex),
 				result.passed ? "yes" : "no",
 				String(result.metrics.toolCallCount),
+				String(result.metrics.turnCount),
 				`${result.transcriptPath} |`,
 			].join(" | "),
 		),

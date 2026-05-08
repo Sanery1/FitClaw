@@ -10,6 +10,8 @@ import type { EvalTask, EvalToolCallRecord, EvalTrialResult } from "./types.js";
 
 export type RunEvalTaskOptions = {
 	outputDir: string;
+	trialIndex?: number;
+	totalTrials?: number;
 };
 
 function resolveInside(root: string, relativePath: string): string {
@@ -72,8 +74,14 @@ function seedInitialData(workspaceDir: string, initialData: Record<string, unkno
 
 export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): Promise<EvalTrialResult> {
 	const startedAt = Date.now();
-	const workspaceDir = join(options.outputDir, "workspaces", task.id);
-	const transcriptPath = join(options.outputDir, "transcripts", `${task.id}.jsonl`);
+	const trialIndex = options.trialIndex ?? 1;
+	const isRepeated = (options.totalTrials ?? 1) > 1;
+	const workspaceDir = isRepeated
+		? join(options.outputDir, "workspaces", task.id, `trial-${trialIndex}`)
+		: join(options.outputDir, "workspaces", task.id);
+	const transcriptPath = isRepeated
+		? join(options.outputDir, "transcripts", task.id, `trial-${trialIndex}.jsonl`)
+		: join(options.outputDir, "transcripts", `${task.id}.jsonl`);
 	mkdirSync(workspaceDir, { recursive: true });
 	seedInitialData(workspaceDir, task.initialData);
 
@@ -107,6 +115,7 @@ export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): 
 	return {
 		taskId: task.id,
 		suite: task.suite,
+		trialIndex,
 		passed: graderResults.every((result) => result.passed),
 		finalAnswer,
 		toolCalls,

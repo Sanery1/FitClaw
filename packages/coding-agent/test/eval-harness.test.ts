@@ -2,8 +2,10 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { summarizeEvalResults } from "../src/evals/metrics.js";
 import { loadEvalTask } from "../src/evals/task-schema.js";
 import { runEvalTask } from "../src/evals/trial-runner.js";
+import type { EvalTrialResult } from "../src/evals/types.js";
 
 describe("eval harness", () => {
 	let tempDirs: string[] = [];
@@ -166,5 +168,58 @@ describe("eval harness", () => {
 
 		expect(result.passed).toBe(true);
 		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true]);
+	});
+
+	it("summarizes pass@1, pass@k, pass^k, and selected efficiency metrics", () => {
+		const baseResult = {
+			suite: "smoke",
+			finalAnswer: "",
+			toolCalls: [],
+			transcriptPath: "transcript.jsonl",
+		};
+		const results: EvalTrialResult[] = [
+			{
+				...baseResult,
+				taskId: "flaky",
+				trialIndex: 1,
+				passed: false,
+				graderResults: [{ name: "first", passed: false, message: "failed" }],
+				metrics: { turnCount: 2, toolCallCount: 1, durationMs: 10 },
+			},
+			{
+				...baseResult,
+				taskId: "flaky",
+				trialIndex: 2,
+				passed: true,
+				graderResults: [{ name: "second", passed: true, message: "passed" }],
+				metrics: { turnCount: 1, toolCallCount: 0, durationMs: 20 },
+			},
+			{
+				...baseResult,
+				taskId: "stable",
+				trialIndex: 1,
+				passed: true,
+				graderResults: [{ name: "first", passed: true, message: "passed" }],
+				metrics: { turnCount: 1, toolCallCount: 2, durationMs: 30 },
+			},
+			{
+				...baseResult,
+				taskId: "stable",
+				trialIndex: 2,
+				passed: true,
+				graderResults: [{ name: "second", passed: true, message: "passed" }],
+				metrics: { turnCount: 2, toolCallCount: 1, durationMs: 40 },
+			},
+		];
+
+		const summary = summarizeEvalResults(results);
+
+		expect(summary.passAt1.rate).toBe(0.5);
+		expect(summary.passAtK.rate).toBe(1);
+		expect(summary.passAllK.rate).toBe(0.5);
+		expect(summary.trialPassRate.rate).toBe(0.75);
+		expect(summary.graderPassRate.rate).toBe(0.75);
+		expect(summary.averageToolCalls).toBe(1);
+		expect(summary.averageTurns).toBe(1.5);
 	});
 });

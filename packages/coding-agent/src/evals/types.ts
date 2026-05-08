@@ -73,6 +73,7 @@ export type EvalGraderResult = {
 export type EvalTrialResult = {
 	taskId: string;
 	suite: string;
+	trialIndex: number;
 	passed: boolean;
 	finalAnswer: string;
 	toolCalls: EvalToolCallRecord[];
@@ -88,4 +89,24 @@ export type EvalTrialResult = {
 export type EvalTranscriptEvent = {
 	timestamp: string;
 	event: AgentEvent;
+};
+
+export type EvalRateMetric = {
+	passed: number;
+	total: number;
+	rate: number;
+};
+
+export type EvalSummaryMetrics = {
+	totalTasks: number;
+	totalTrials: number;
+	runsPerTask: number;
+	passAt1: EvalRateMetric;
+	passAtK: EvalRateMetric;
+	passAllK: EvalRateMetric;
+	trialPassRate: EvalRateMetric;
+	graderPassRate: EvalRateMetric;
+	averageToolCalls: number;
+	averageTurns: number;
+	averageDurationMs: number;
 };
