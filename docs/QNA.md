@@ -7,6 +7,8 @@
 
 2026-05-08 同步：新增 `fitclaw skill sync`，用于将 `.fitclaw/skills/` 同步到 `feishu-workspace/skills/`；新增 `packages/coding-agent` eval harness，使用 faux 模型和 YAML 任务验证 Skill 数据读写与 namespace 边界，运行产物位于 ignored 的 `eval-results/`。
 
+2026-05-08 追加：eval CLI 支持 `--suite` 与 `--task` 精准过滤；grader 增加 `tool_not_called` 和 `tool_sequence`，可验证“没有调用危险工具”和“工具调用顺序”。同时开始拆分臃肿核心文件：Provider 登录策略从 `interactive-mode.ts` 移到 `provider-login-policy.ts`，Skill block 解析从 `agent-session.ts` 移到 `skill-block.ts`。
+
 ---
 
 ## 一、三层架构与 ReAct 推理引擎

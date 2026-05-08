@@ -29,6 +29,14 @@ export type EvalGrader =
 			tool: string;
 	  }
 	| {
+			type: "tool_not_called";
+			tool: string;
+	  }
+	| {
+			type: "tool_sequence";
+			tools: string[];
+	  }
+	| {
 			type: "json_path_equals";
 			file: string;
 			path: string;

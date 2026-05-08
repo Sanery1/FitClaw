@@ -14,6 +14,8 @@ graders:
     file: sport-data/bodybuilding/user_profile.json
     path: $.experience
     equals: intermediate
+  - type: tool_not_called
+    tool: data_bodybuilding_write
   - type: max_tool_calls
     max: 0
   - type: max_turns

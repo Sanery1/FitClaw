@@ -19,6 +19,11 @@ graders:
     text: bench press
   - type: tool_called
     tool: data_bodybuilding_write
+  - type: tool_not_called
+    tool: bash
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
   - type: max_tool_calls
     max: 1
   - type: max_turns

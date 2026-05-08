@@ -133,4 +133,38 @@ describe("eval harness", () => {
 		expect(result.passed).toBe(true);
 		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true]);
 	});
+
+	it("grades forbidden tools and required tool order", async () => {
+		const dir = createTempDir();
+		const taskPath = join(dir, "task.yaml");
+		writeFileSync(
+			taskPath,
+			[
+				"id: tool-policy-task",
+				"suite: smoke",
+				"prompt: Record a simple workout.",
+				"fauxResponses:",
+				"  - toolCalls:",
+				"      - name: data_bodybuilding_write",
+				"        args:",
+				"          namespace: training_log",
+				"          data:",
+				"            exercise: squat",
+				"  - text: Logged squat.",
+				"graders:",
+				"  - type: tool_not_called",
+				"    tool: bash",
+				"  - type: tool_sequence",
+				"    tools:",
+				"      - data_bodybuilding_write",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const task = loadEvalTask(taskPath);
+		const result = await runEvalTask(task, { outputDir: join(dir, "out") });
+
+		expect(result.passed).toBe(true);
+		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true]);
+	});
 });

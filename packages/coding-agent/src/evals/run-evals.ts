@@ -10,27 +10,45 @@ import type { EvalTrialResult } from "./types.js";
 type EvalCliOptions = {
 	tasksDir: string;
 	outputDir: string;
+	suite?: string;
+	taskId?: string;
 };
+
+function requireFlagValue(args: string[], index: number): string {
+	const value = args[index + 1];
+	if (!value || value.startsWith("-")) {
+		throw new Error(`Missing value for ${args[index]}`);
+	}
+	return value;
+}
 
 function parseArgs(args: string[]): EvalCliOptions {
 	let tasksDir = "evals/tasks";
 	let outputDir = "eval-results";
+	let suite: string | undefined;
+	let taskId: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--tasks") {
-			tasksDir = args[index + 1] ?? tasksDir;
+			tasksDir = requireFlagValue(args, index);
 			index += 1;
 		} else if (arg === "--out") {
-			outputDir = args[index + 1] ?? outputDir;
+			outputDir = requireFlagValue(args, index);
+			index += 1;
+		} else if (arg === "--suite") {
+			suite = requireFlagValue(args, index);
+			index += 1;
+		} else if (arg === "--task") {
+			taskId = requireFlagValue(args, index);
 			index += 1;
 		} else if (arg === "--help" || arg === "-h") {
-			console.log("Usage: npm run eval -- --tasks evals/tasks --out eval-results");
+			console.log("Usage: npm run eval -- --tasks evals/tasks --out eval-results [--suite skills] [--task task-id]");
 			process.exit(0);
 		} else {
 			throw new Error(`Unknown eval argument: ${arg}`);
 		}
 	}
-	return { tasksDir: resolve(tasksDir), outputDir: resolve(outputDir) };
+	return { tasksDir: resolve(tasksDir), outputDir: resolve(outputDir), suite, taskId };
 }
 
 function collectTaskFiles(dir: string): string[] {
@@ -50,7 +68,13 @@ export async function runEvalCli(args: string[]): Promise<number> {
 		throw new Error(`Eval tasks directory does not exist: ${options.tasksDir}`);
 	}
 	mkdirSync(options.outputDir, { recursive: true });
-	const tasks = collectTaskFiles(options.tasksDir).map((path) => loadEvalTask(path));
+	const tasks = collectTaskFiles(options.tasksDir)
+		.map((path) => loadEvalTask(path))
+		.filter((task) => options.suite === undefined || task.suite === options.suite)
+		.filter((task) => options.taskId === undefined || task.id === options.taskId);
+	if (tasks.length === 0) {
+		throw new Error("No eval tasks matched the requested filters.");
+	}
 	let results: EvalTrialResult[] = [];
 	for (const task of tasks) {
 		const result = await runEvalTask(task, { outputDir: options.outputDir });

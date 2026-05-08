@@ -53,6 +53,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 - **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data_<skill>_read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
 - **Skill 数据边界加固 (2026-05-07)**: `data_<skill>_read/write` 统一拒绝未声明 namespace；`FileSportDataStore` 校验 namespace 字符集和路径边界，JSON 损坏/权限/写入失败会返回工具错误；Bot bash 增加危险命令拦截
 - **Skill 同步与 eval harness (2026-05-08)**: 新增 `fitclaw skill sync` 同步 CLI/Bot Skill；新增 `npm run eval` 运行 faux 模型 Skill 回归评估，`eval-results/` 不提交
+- **Eval 与大文件边界拆分 (2026-05-08)**: eval CLI 支持 `--suite` / `--task`，grader 支持 `tool_not_called` / `tool_sequence`；Provider 登录策略与 Skill block parser 已从大文件拆出
 
 项目接手速读维护在 [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)。完整历史、技术问答与风险说明统一维护在 [docs/QNA.md](./docs/QNA.md)。
 

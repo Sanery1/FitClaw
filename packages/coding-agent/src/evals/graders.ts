@@ -54,6 +54,27 @@ export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResu
 		};
 	}
 
+	if (grader.type === "tool_not_called") {
+		const passed = !input.toolCalls.some((call) => call.name === grader.tool);
+		return {
+			name: `tool_not_called:${grader.tool}`,
+			passed,
+			message: passed ? "Forbidden tool was not called." : `Tool "${grader.tool}" was called.`,
+		};
+	}
+
+	if (grader.type === "tool_sequence") {
+		const actual = input.toolCalls.map((call) => call.name);
+		const passed = grader.tools.every((tool, index) => actual[index] === tool);
+		return {
+			name: `tool_sequence:${grader.tools.join(",")}`,
+			passed,
+			message: passed
+				? "Tool call order matched expected prefix."
+				: `Expected tool sequence ${JSON.stringify(grader.tools)}, got ${JSON.stringify(actual)}.`,
+		};
+	}
+
 	if (grader.type === "file_exists") {
 		const filePath = join(input.workspaceDir, grader.file);
 		const passed = existsSync(filePath);

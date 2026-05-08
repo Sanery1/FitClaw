@@ -116,6 +116,7 @@ Coding Agent 的 Skill eval：
 ```bash
 cd packages/coding-agent
 npm run eval
+npm run eval -- --suite skills --task bodybuilding-log
 ```
 
 ## 主要特性
@@ -124,7 +125,7 @@ npm run eval
 - **bodybuilding Skill**：800+ 动作数据库 + Python 查询脚本 + 9 份知识库文档
 - **通用数据持久化**：`data:` frontmatter 声明 → 框架自动注册 read/write 工具，读写均限制在声明的 namespace 内
 - **Skill 同步命令**：`skill sync` 将项目 Skill 同步到飞书 Bot workspace，减少 CLI/Bot 行为漂移
-- **确定性 eval harness**：用 faux 模型验证 Skill 工作流、工具调用和安全回归
+- **确定性 eval harness**：用 faux 模型验证 Skill 工作流、工具调用顺序、危险工具禁用和安全回归
 - 飞书 Bot 完整适配器（WebSocket 长连接模式）
 - 统一配置系统（`.fitclaw/`）
 

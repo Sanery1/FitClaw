@@ -20,6 +20,13 @@ function requireNumber(value: unknown, field: string): number {
 	return value;
 }
 
+function requireStringArray(value: unknown, field: string): string[] {
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.trim() === "")) {
+		throw new Error(`Eval task field "${field}" must be an array of non-empty strings.`);
+	}
+	return value;
+}
+
 function parseToolCall(value: unknown, index: number): EvalFauxToolCall {
 	if (!isRecord(value)) {
 		throw new Error(`fauxResponses tool call ${index} must be an object.`);
@@ -58,6 +65,12 @@ function parseGrader(value: unknown, index: number): EvalGrader {
 	}
 	if (type === "tool_called") {
 		return { type, tool: requireString(value.tool, `graders[${index}].tool`) };
+	}
+	if (type === "tool_not_called") {
+		return { type, tool: requireString(value.tool, `graders[${index}].tool`) };
+	}
+	if (type === "tool_sequence") {
+		return { type, tools: requireStringArray(value.tools, `graders[${index}].tools`) };
 	}
 	if (type === "json_path_equals") {
 		return {
