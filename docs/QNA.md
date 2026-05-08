@@ -1,9 +1,11 @@
 # FitClaw 技术架构 Q&A
 
 > 基于源码与文档的详细技术问答，涵盖架构设计、实现细节与工程实践。
-> **最后更新：2026-05-07**
+> **最后更新：2026-05-08**
 
 后续 AI Agent 接手项目时，先读 [PROJECT_UNDERSTANDING.md](./PROJECT_UNDERSTANDING.md) 获取 5-10 分钟速览，再按需读本文档中的详细问答。
+
+2026-05-08 同步：新增 `fitclaw skill sync`，用于将 `.fitclaw/skills/` 同步到 `feishu-workspace/skills/`；新增 `packages/coding-agent` eval harness，使用 faux 模型和 YAML 任务验证 Skill 数据读写与 namespace 边界，运行产物位于 ignored 的 `eval-results/`。
 
 ---
 

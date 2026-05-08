@@ -1,0 +1,20 @@
+id: bodybuilding-profile-read
+suite: skills
+prompt: "What is my current training goal?"
+initialData:
+  sport-data/bodybuilding/user_profile.json:
+    goal: hypertrophy
+    experience: intermediate
+fauxResponses:
+  - text: Your current training goal is hypertrophy.
+graders:
+  - type: final_contains
+    text: hypertrophy
+  - type: json_path_equals
+    file: sport-data/bodybuilding/user_profile.json
+    path: $.experience
+    equals: intermediate
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

@@ -1,0 +1,120 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { EvalGrader, EvalGraderResult, EvalToolCallRecord } from "./types.js";
+
+export type GradeInput = {
+	workspaceDir: string;
+	finalAnswer: string;
+	toolCalls: EvalToolCallRecord[];
+	turnCount: number;
+};
+
+function readJson(path: string): unknown {
+	return JSON.parse(readFileSync(path, "utf-8")) as unknown;
+}
+
+function getJsonPathValue(root: unknown, path: string): unknown {
+	if (!path.startsWith("$")) {
+		throw new Error(`JSON path must start with "$": ${path}`);
+	}
+	const tokens = Array.from(path.matchAll(/(?:\.([A-Za-z0-9_-]+))|(?:\[(\d+)\])/g)).map((match) =>
+		match[1] === undefined ? Number(match[2]) : match[1],
+	);
+	return tokens.reduce<unknown>((current, token) => {
+		if (typeof token === "number") {
+			return Array.isArray(current) ? current[token] : undefined;
+		}
+		if (typeof current === "object" && current !== null && !Array.isArray(current)) {
+			return (current as Record<string, unknown>)[token];
+		}
+		return undefined;
+	}, root);
+}
+
+function equalsJson(left: unknown, right: unknown): boolean {
+	return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResult {
+	if (grader.type === "final_contains") {
+		const passed = input.finalAnswer.toLowerCase().includes(grader.text.toLowerCase());
+		return {
+			name: `final_contains:${grader.text}`,
+			passed,
+			message: passed ? "Final answer contains expected text." : `Final answer did not contain "${grader.text}".`,
+		};
+	}
+
+	if (grader.type === "tool_called") {
+		const passed = input.toolCalls.some((call) => call.name === grader.tool);
+		return {
+			name: `tool_called:${grader.tool}`,
+			passed,
+			message: passed ? "Expected tool was called." : `Tool "${grader.tool}" was not called.`,
+		};
+	}
+
+	if (grader.type === "file_exists") {
+		const filePath = join(input.workspaceDir, grader.file);
+		const passed = existsSync(filePath);
+		return {
+			name: `file_exists:${grader.file}`,
+			passed,
+			message: passed ? "Expected file exists." : `File "${grader.file}" does not exist.`,
+		};
+	}
+
+	if (grader.type === "file_not_exists") {
+		const filePath = join(input.workspaceDir, grader.file);
+		const passed = !existsSync(filePath);
+		return {
+			name: `file_not_exists:${grader.file}`,
+			passed,
+			message: passed ? "Unexpected file is absent." : `File "${grader.file}" exists.`,
+		};
+	}
+
+	if (grader.type === "max_tool_calls") {
+		const passed = input.toolCalls.length <= grader.max;
+		return {
+			name: `max_tool_calls:${grader.max}`,
+			passed,
+			message: passed
+				? "Tool call count is within the limit."
+				: `Expected at most ${grader.max} tool calls, got ${input.toolCalls.length}.`,
+		};
+	}
+
+	if (grader.type === "max_turns") {
+		const passed = input.turnCount <= grader.max;
+		return {
+			name: `max_turns:${grader.max}`,
+			passed,
+			message: passed
+				? "Turn count is within the limit."
+				: `Expected at most ${grader.max} turns, got ${input.turnCount}.`,
+		};
+	}
+
+	const filePath = join(input.workspaceDir, grader.file);
+	if (!existsSync(filePath)) {
+		return {
+			name: `json_path_equals:${grader.file}:${grader.path}`,
+			passed: false,
+			message: `JSON file "${grader.file}" does not exist.`,
+		};
+	}
+	const actual = getJsonPathValue(readJson(filePath), grader.path);
+	const passed = equalsJson(actual, grader.equals);
+	return {
+		name: `json_path_equals:${grader.file}:${grader.path}`,
+		passed,
+		message: passed
+			? "JSON path matched expected value."
+			: `Expected ${JSON.stringify(grader.equals)}, got ${JSON.stringify(actual)}.`,
+	};
+}
+
+export function gradeEvalTask(graders: EvalGrader[], input: GradeInput): EvalGraderResult[] {
+	return graders.map((grader) => gradeEval(grader, input));
+}
