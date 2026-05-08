@@ -20,6 +20,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { isAbsolute, join } from "path";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
+import { getMomContextWindowOptions, type MomContextWindowResult, windowMomContext } from "./context-window.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelStore } from "./store.js";
@@ -49,6 +50,13 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	gif: "image/gif",
 	webp: "image/webp",
 };
+
+function formatContextWindowStats(result: MomContextWindowResult): string {
+	if (!result.wasTrimmed) {
+		return `${result.originalCount} messages`;
+	}
+	return `${result.originalCount} messages (${result.retainedCount} retained for prompt)`;
+}
 
 function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
@@ -299,6 +307,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const contextFile = join(channelDir, "context.jsonl");
 	const sessionManager = SessionManager.open(contextFile, channelDir);
 	const settingsManager = createMomSettingsManager(join(channelDir, ".."));
+	const contextWindowOptions = getMomContextWindowOptions();
 
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
@@ -341,8 +350,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Load existing messages
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
-		agent.state.messages = loadedSession.messages;
-		log.logInfo(`[${channelId}] Loaded ${loadedSession.messages.length} messages from context.jsonl`);
+		const windowedContext = windowMomContext(loadedSession.messages, contextWindowOptions);
+		agent.state.messages = windowedContext.messages;
+		log.logInfo(`[${channelId}] Loaded ${formatContextWindowStats(windowedContext)} from context.jsonl`);
 	}
 
 	const resourceLoader: ResourceLoader = {
@@ -549,8 +559,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// This picks up any messages synced above
 			const reloadedSession = sessionManager.buildSessionContext();
 			if (reloadedSession.messages.length > 0) {
-				agent.state.messages = reloadedSession.messages;
-				log.logInfo(`[${channelId}] Reloaded ${reloadedSession.messages.length} messages from context`);
+				const windowedContext = windowMomContext(reloadedSession.messages, contextWindowOptions);
+				agent.state.messages = windowedContext.messages;
+				log.logInfo(`[${channelId}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
 			}
 
 			// Update system prompt with fresh memory, channel/user info, and skills
