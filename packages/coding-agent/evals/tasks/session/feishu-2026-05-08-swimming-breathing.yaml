@@ -9,11 +9,18 @@ fauxResponses:
 graders:
   - type: final_contains
     text: "自由泳"
-  - type: final_contains
-    text: "转头"
-  - type: final_contains
-    text: "吐气"
-  - type: final_contains
-    text: "单臂划水"
+  - type: final_contains_any
+    texts:
+      - "转头"
+      - "侧转"
+  - type: final_contains_any
+    texts:
+      - "吐气"
+      - "呼气"
+  - type: final_contains_any
+    texts:
+      - "单臂划水"
+      - "池边"
+      - "呼吸管"
   - type: max_turns
     max: 1

@@ -35,6 +35,20 @@ function equalsJson(left: unknown, right: unknown): boolean {
 	return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJsonSubset(actual: unknown, expected: unknown): boolean {
+	if (!isRecord(expected)) {
+		return equalsJson(actual, expected);
+	}
+	if (!isRecord(actual)) {
+		return false;
+	}
+	return Object.entries(expected).every(([key, expectedValue]) => isJsonSubset(actual[key], expectedValue));
+}
+
 export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResult {
 	if (grader.type === "final_contains") {
 		const passed = input.finalAnswer.toLowerCase().includes(grader.text.toLowerCase());
@@ -42,6 +56,27 @@ export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResu
 			name: `final_contains:${grader.text}`,
 			passed,
 			message: passed ? "Final answer contains expected text." : `Final answer did not contain "${grader.text}".`,
+		};
+	}
+
+	if (grader.type === "final_contains_any") {
+		const normalizedAnswer = input.finalAnswer.toLowerCase();
+		const passed = grader.texts.some((text) => normalizedAnswer.includes(text.toLowerCase()));
+		return {
+			name: `final_contains_any:${grader.texts.join("|")}`,
+			passed,
+			message: passed
+				? "Final answer contains one expected text variant."
+				: `Final answer did not contain any of ${JSON.stringify(grader.texts)}.`,
+		};
+	}
+
+	if (grader.type === "final_not_contains") {
+		const passed = !input.finalAnswer.toLowerCase().includes(grader.text.toLowerCase());
+		return {
+			name: `final_not_contains:${grader.text}`,
+			passed,
+			message: passed ? "Final answer omitted forbidden text." : `Final answer contained "${grader.text}".`,
 		};
 	}
 
@@ -72,6 +107,17 @@ export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResu
 			message: passed
 				? "Tool call order matched expected prefix."
 				: `Expected tool sequence ${JSON.stringify(grader.tools)}, got ${JSON.stringify(actual)}.`,
+		};
+	}
+
+	if (grader.type === "tool_args_match") {
+		const passed = input.toolCalls.some((call) => call.name === grader.tool && isJsonSubset(call.args, grader.args));
+		return {
+			name: `tool_args_match:${grader.tool}`,
+			passed,
+			message: passed
+				? "Tool arguments matched expected subset."
+				: `No "${grader.tool}" call matched ${JSON.stringify(grader.args)}.`,
 		};
 	}
 

@@ -6,10 +6,17 @@ prompt: "今天北京天气怎么样？"
 fauxResponses:
   - text: "抱歉，我无法查询实时天气数据。我的功能范围是健身训练，包括动作指导、计划制定、训练记录等。"
 graders:
-  - type: final_contains
-    text: "无法查询实时天气"
+  - type: final_contains_any
+    texts:
+      - "无法查询实时天气"
+      - "不能查询实时天气"
+      - "没有实时天气"
   - type: final_contains
     text: "健身训练"
+  - type: final_not_contains
+    text: "晴"
+  - type: final_not_contains
+    text: "温度"
   - type: tool_not_called
     tool: data_bodybuilding_write
   - type: max_tool_calls

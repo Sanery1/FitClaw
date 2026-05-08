@@ -63,6 +63,12 @@ function parseGrader(value: unknown, index: number): EvalGrader {
 	if (type === "final_contains") {
 		return { type, text: requireString(value.text, `graders[${index}].text`) };
 	}
+	if (type === "final_contains_any") {
+		return { type, texts: requireStringArray(value.texts, `graders[${index}].texts`) };
+	}
+	if (type === "final_not_contains") {
+		return { type, text: requireString(value.text, `graders[${index}].text`) };
+	}
 	if (type === "tool_called") {
 		return { type, tool: requireString(value.tool, `graders[${index}].tool`) };
 	}
@@ -71,6 +77,13 @@ function parseGrader(value: unknown, index: number): EvalGrader {
 	}
 	if (type === "tool_sequence") {
 		return { type, tools: requireStringArray(value.tools, `graders[${index}].tools`) };
+	}
+	if (type === "tool_args_match") {
+		const args = value.args === undefined ? {} : value.args;
+		if (!isRecord(args)) {
+			throw new Error(`Eval task field "graders[${index}].args" must be an object.`);
+		}
+		return { type, tool: requireString(value.tool, `graders[${index}].tool`), args };
 	}
 	if (type === "json_path_equals") {
 		return {

@@ -7,10 +7,15 @@ fauxResponses:
   - text: |
       肩膀不适时优先把杠铃卧推换成哑铃对握卧推、哑铃地板卧推或上斜哑铃卧推。训练中保持肩胛后缩，如果有锐痛应停止并降低负荷。
 graders:
-  - type: final_contains
-    text: "哑铃对握卧推"
-  - type: final_contains
-    text: "地板卧推"
+  - type: final_contains_any
+    texts:
+      - "哑铃对握卧推"
+      - "中立握"
+      - "掌心相对"
+  - type: final_contains_any
+    texts:
+      - "地板卧推"
+      - "Floor Press"
   - type: final_contains
     text: "肩胛"
   - type: final_contains

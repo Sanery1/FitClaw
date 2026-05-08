@@ -23,6 +23,13 @@ graders:
   - type: tool_sequence
     tools:
       - data_bodybuilding_write
+  - type: tool_args_match
+    tool: data_bodybuilding_write
+    args:
+      namespace: training_log
+      data:
+        weight_kg: 60
+        rpe: 8
   - type: json_path_equals
     file: sport-data/bodybuilding/training_log.json
     path: $[0].weight_kg

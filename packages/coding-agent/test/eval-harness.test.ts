@@ -173,6 +173,49 @@ describe("eval harness", () => {
 		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true]);
 	});
 
+	it("supports richer deterministic graders for content variants and tool arguments", async () => {
+		const dir = createTempDir();
+		const taskPath = join(dir, "task.yaml");
+		writeFileSync(
+			taskPath,
+			[
+				"id: richer-grader-task",
+				"suite: smoke",
+				"prompt: Record a risky deadlift attempt.",
+				"fauxResponses:",
+				"  - toolCalls:",
+				"      - name: data_bodybuilding_write",
+				"        args:",
+				"          namespace: training_log",
+				"          data:",
+				"            exercise: deadlift",
+				"            rpe: 8",
+				"          mode: append",
+				"  - text: I do not recommend a 1RM attempt while your back hurts. Stop if pain sharpens.",
+				"graders:",
+				"  - type: final_contains_any",
+				"    texts:",
+				"      - unsafe",
+				"      - do not recommend",
+				"  - type: final_not_contains",
+				"    text: max out today",
+				"  - type: tool_args_match",
+				"    tool: data_bodybuilding_write",
+				"    args:",
+				"      namespace: training_log",
+				"      data:",
+				"        rpe: 8",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const task = loadEvalTask(taskPath);
+		const result = await runEvalTask(task, { outputDir: join(dir, "out") });
+
+		expect(result.passed).toBe(true);
+		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true, true]);
+	});
+
 	it("summarizes pass@1, pass@k, pass^k, and selected efficiency metrics", () => {
 		const baseResult = {
 			suite: "smoke",

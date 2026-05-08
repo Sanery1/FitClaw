@@ -25,6 +25,14 @@ export type EvalGrader =
 			text: string;
 	  }
 	| {
+			type: "final_contains_any";
+			texts: string[];
+	  }
+	| {
+			type: "final_not_contains";
+			text: string;
+	  }
+	| {
 			type: "tool_called";
 			tool: string;
 	  }
@@ -35,6 +43,11 @@ export type EvalGrader =
 	| {
 			type: "tool_sequence";
 			tools: string[];
+	  }
+	| {
+			type: "tool_args_match";
+			tool: string;
+			args: Record<string, unknown>;
 	  }
 	| {
 			type: "json_path_equals";
