@@ -37,6 +37,13 @@ function resolveNamespace(skillName: string, key: string): string {
 	return `${skillName}/${key}`;
 }
 
+function validateNamespaceKey(key: string): string | null {
+	if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+		return `invalid namespace "${key}". Must match /^[a-z][a-z0-9_]*$/`;
+	}
+	return null;
+}
+
 function listDeclaredNamespaces(dataNamespaces: Map<string, SkillDataDeclaration>): string {
 	return Array.from(dataNamespaces.keys())
 		.map((k) => `"${k}"`)
@@ -53,15 +60,36 @@ export function createSkillDataReadTool(
 	dataNamespaces: Map<string, SkillDataDeclaration>,
 ): AgentTool<typeof dataReadSchema> {
 	return {
-		name: `data:${skillName}:read`,
+		name: `data_${skillName}_read`,
 		label: `Read ${skillName} Data`,
 		description: `Read persisted JSON data for the ${skillName} skill. Returns the data for the given namespace, or null if it doesn't exist yet.`,
 		parameters: dataReadSchema,
 		async execute(_toolCallId, params) {
 			const key = params.namespace;
-			const ns = resolveNamespace(skillName, key);
+			const namespaceError = validateNamespaceKey(key);
+			if (namespaceError) {
+				return {
+					content: [{ type: "text" as const, text: JSON.stringify({ error: namespaceError }) }],
+					details: { namespace: key, error: "invalid_namespace" } as unknown as Record<string, unknown>,
+				};
+			}
 
-			const isDeclared = dataNamespaces.has(key);
+			if (!dataNamespaces.has(key)) {
+				const available = listDeclaredNamespaces(dataNamespaces);
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify({
+								error: `namespace "${key}" not declared in SKILL.md data: section. Available namespaces: [${available}]`,
+							}),
+						},
+					],
+					details: { namespace: key, error: "undeclared_namespace" } as unknown as Record<string, unknown>,
+				};
+			}
+
+			const ns = resolveNamespace(skillName, key);
 
 			try {
 				const data = await store.load(ns);
@@ -72,9 +100,6 @@ export function createSkillDataReadTool(
 								type: "text" as const,
 								text: JSON.stringify({
 									data: null,
-									...(isDeclared
-										? {}
-										: { warning: `namespace "${key}" not declared in SKILL.md data: section` }),
 								}),
 							},
 						],
@@ -114,13 +139,19 @@ export function createSkillDataWriteTool(
 	dataNamespaces: Map<string, SkillDataDeclaration>,
 ): AgentTool<typeof dataWriteSchema> {
 	return {
-		name: `data:${skillName}:write`,
+		name: `data_${skillName}_write`,
 		label: `Write ${skillName} Data`,
 		description: `Persist JSON data for the ${skillName} skill. Declared namespaces: ${listDeclaredNamespaces(dataNamespaces)}. Use mode="replace" to overwrite (default for object namespaces) or mode="append" to add to an array (default for array namespaces).`,
 		parameters: dataWriteSchema,
 		async execute(_toolCallId, params) {
 			const key = params.namespace;
-			const ns = resolveNamespace(skillName, key);
+			const namespaceError = validateNamespaceKey(key);
+			if (namespaceError) {
+				return {
+					content: [{ type: "text" as const, text: JSON.stringify({ error: namespaceError }) }],
+					details: { namespace: key, error: "invalid_namespace" } as unknown as Record<string, unknown>,
+				};
+			}
 
 			// Validate namespace declaration (write is strict)
 			const decl = dataNamespaces.get(key);
@@ -138,6 +169,8 @@ export function createSkillDataWriteTool(
 					details: { namespace: key, error: "undeclared_namespace" } as unknown as Record<string, unknown>,
 				};
 			}
+
+			const ns = resolveNamespace(skillName, key);
 
 			// Determine effective mode
 			const defaultMode = decl.type === "array" ? "append" : "replace";
@@ -209,8 +242,8 @@ export function createSkillDataWriteTool(
 					};
 				}
 
-				existing.push(params.data);
-				await store.save(ns, existing);
+				const nextData = [...existing, params.data];
+				await store.save(ns, nextData);
 				return {
 					content: [
 						{
@@ -219,14 +252,14 @@ export function createSkillDataWriteTool(
 								success: true,
 								namespace: key,
 								mode: "append",
-								newLength: existing.length,
+								newLength: nextData.length,
 							}),
 						},
 					],
 					details: {
 						namespace: key,
 						mode: "append",
-						newLength: existing.length,
+						newLength: nextData.length,
 					} as unknown as Record<string, unknown>,
 				};
 			} catch (err) {

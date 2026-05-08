@@ -1,7 +1,7 @@
 // ============================================================================
 // packages/mom/src/feishu.ts
-// Feishu Bot adapter, mirrors slack.ts design.
-// SDK: @larksuiteoapi/node-sdk, using WebSocket long-connection mode.
+// Feishu Bot adapter using WebSocket long-connection mode.
+// SDK: @larksuiteoapi/node-sdk
 // ============================================================================
 
 import * as Lark from "@larksuiteoapi/node-sdk";
@@ -137,6 +137,31 @@ export class FeishuBot {
 			});
 		} catch (err) {
 			log.logWarning("Feishu sendThreadMessage error", err instanceof Error ? err.message : String(err));
+		}
+	}
+
+	async sendCardMessage(parentMessageId: string, card: Record<string, unknown>): Promise<void> {
+		try {
+			await this.client.im.message.reply({
+				path: { message_id: parentMessageId },
+				data: {
+					content: JSON.stringify(card),
+					msg_type: "interactive",
+				},
+			});
+		} catch (err) {
+			log.logWarning("Feishu sendCardMessage error", err instanceof Error ? err.message : String(err));
+		}
+	}
+
+	async updateCardMessage(messageId: string, card: Record<string, unknown>): Promise<void> {
+		try {
+			await this.client.im.v1.message.patch({
+				path: { message_id: messageId },
+				data: { content: JSON.stringify(card) },
+			});
+		} catch (err) {
+			log.logWarning("Feishu updateCardMessage error", err instanceof Error ? err.message : String(err));
 		}
 	}
 

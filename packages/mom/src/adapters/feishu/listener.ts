@@ -8,5 +8,5 @@
 import type { FeishuBotAdapter, FeishuConfig } from "./types.js";
 
 export function createFeishuListener(_config: FeishuConfig): FeishuBotAdapter {
-	throw new Error("Feishu Bot adapter not yet implemented. Set FITCLAW_BOT_PROVIDER=slack to use Slack instead.");
+	throw new Error("Feishu Bot adapter not yet implemented. Use the FeishuBot class from feishu.ts directly.");
 }

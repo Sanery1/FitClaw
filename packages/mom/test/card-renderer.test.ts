@@ -34,16 +34,34 @@ describe("renderFeishuCard", () => {
 		expect(result.elements![0].text?.content.length).toBe(2000);
 	});
 
-	it("uses code block lines as body, not header", () => {
+	it("renders code block content as lark_md, stripping box art", () => {
 		const result = renderFeishuCard("```typescript\nconst x = 1;\n```");
 		expect(result.header?.title?.content).toBeUndefined();
-		expect(result.elements).toHaveLength(3);
-		expect(result.elements![0].text?.content).toBe("```typescript");
-		expect(result.elements![1].text?.content).toBe("const x = 1;");
-		expect(result.elements![2].text?.content).toBe("```");
+		expect(result.elements).toHaveLength(1);
+		expect(result.elements![0].text?.content).toBe("const x = 1;");
 	});
 
-	it("produces empty elements for empty input", () => {
+	it("strips ASCII box-art lines from code blocks", () => {
+		const input = "```\n╔══════════╗\n║  Header  ║\n╚══════════╝\n实际内容\n```";
+		const result = renderFeishuCard(input);
+		expect(result.elements).toHaveLength(1);
+		expect(result.elements![0].text?.content).toBe("实际内容");
+	});
+
+	it("converts --- and *** to horizontal rules", () => {
+		const result = renderFeishuCard("Header\n---\nBody");
+		expect(result.header?.title?.content).toBe("Header");
+		const hrElements = result.elements?.filter((e) => e.tag === "hr");
+		expect(hrElements).toHaveLength(1);
+		expect(result.elements!.some((e) => e.text?.content === "Body")).toBe(true);
+	});
+
+	it("strips markdown heading markers from body text", () => {
+		const result = renderFeishuCard("Header\n## Section Title\nBody");
+		expect(result.elements![0].text?.content).toBe("Section Title");
+	});
+
+	it("produces fallback element for empty input", () => {
 		const result = renderFeishuCard("");
 		expect(result.elements?.[0].text?.content).toBe("");
 	});

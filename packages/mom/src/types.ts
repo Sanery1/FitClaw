@@ -1,6 +1,6 @@
 /**
- * Generic BotAdapter interface.
- * Decouples the IM layer (Slack, Feishu) from the Agent orchestration layer.
+ * Bot adapter types.
+ * Decouples the IM layer (Feishu) from the Agent orchestration layer.
  */
 
 export interface BotMessage {
@@ -26,7 +26,6 @@ export interface BotUser {
 
 export interface BotContext {
 	message: BotMessage;
-	channelName?: string;
 	channels: BotChannel[];
 	users: BotUser[];
 	respond: (text: string, shouldLog?: boolean) => Promise<void>;
@@ -36,12 +35,4 @@ export interface BotContext {
 	uploadFile: (filePath: string, title?: string) => Promise<void>;
 	setWorking: (working: boolean) => Promise<void>;
 	deleteMessage: () => Promise<void>;
-}
-
-export type BotProvider = "slack" | "feishu";
-
-export function resolveBotProvider(): BotProvider {
-	const env = process.env.FITCLAW_BOT_PROVIDER?.toLowerCase();
-	if (env === "feishu") return "feishu";
-	return "slack";
 }

@@ -21,8 +21,8 @@ data:
 ## 数据持久化
 
 你拥有以下持久化工具：
-- `data:swimming-coach:read("namespace")` — 读取已保存的数据
-- `data:swimming-coach:write("namespace", data, mode?)` — 保存数据，mode 为 "replace"（默认，用于 object）或 "append"（用于 array）
+- `data_swimming-coach_read("namespace")` — 读取已保存的数据
+- `data_swimming-coach_write("namespace", data, mode?)` — 保存数据，mode 为 "replace"（默认，用于 object）或 "append"（用于 array）
 
 可用的 namespace：`user_profile`（object）、`training_log`（array）、`pace_records`（array）。
 

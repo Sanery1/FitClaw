@@ -18,12 +18,12 @@ import {
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelStore } from "./store.js";
-import { createMomTools, setUploadFunction } from "./tools/index.js";
+import { createMomTools } from "./tools/index.js";
 import type { BotContext } from "./types.js";
 
 export interface PendingMessage {
@@ -128,7 +128,6 @@ function loadMomSkills(channelDir: string, workspacePath: string): Skill[] {
 
 function buildSystemPrompt(workspacePath: string, channelId: string, memory: string, skills: Skill[]): string {
 	const channelPath = `${workspacePath}/${channelId}`;
-	const skillsSection = formatSkillsForPrompt(skills);
 	return `You are FitCoach, an AI fitness personal trainer powered by FitClaw. Be concise, professional, and encouraging. No emojis.
 
 ## Your Role
@@ -141,8 +140,25 @@ Maintain a fitness-coach tone: motivating, knowledgeable, and supportive.
 - You have access to previous conversation context including tool results from prior turns.
 
 ## Formatting
-Use plain text with clear structure and line breaks. Avoid complex formatting.
-${skillsSection}
+Your response is displayed as a Feishu card on mobile. ALL content must be in your text response — do NOT create HTML files, images, or external files for visualization.
+
+Rules:
+- Use **bold** for key numbers and exercise names
+- Use short lines with line breaks instead of long paragraphs
+- Keep responses concise — mobile screens are narrow
+- NEVER use ASCII art, box-drawing characters, or code blocks for charts
+- NEVER create HTML/image files for visualization — they cannot be displayed in Feishu
+
+### Data Visualization (in plain text)
+For progress/comparison data, use this format:
+**卧推** 65kg → 120kg (+55kg, +85%)
+**硬拉** 90kg → 160kg (+70kg, +78%)
+**深蹲** 80kg → 160kg (+80kg, +100%)
+
+For training plans, use bullet lists grouped by muscle group:
+**胸部**
+- 卧推 4组 x 8次
+- 上斜哑铃飞鸟 3组 x 12次
 
 ## Memory
 Write to MEMORY.md to remember user preferences, injuries, and goals across conversations.
@@ -152,8 +168,7 @@ Write to MEMORY.md to remember user preferences, injuries, and goals across conv
 ### Current Memory
 ${memory}
 
-## Skills
-${skills.length > 0 ? formatSkillsForPrompt(skills) : "(no skills installed yet)"}
+${skills.length > 0 ? formatSkillsForPrompt(skills) : "## Skills\n(no skills installed yet)"}
 
 ## Tools
 ### General Tools
@@ -161,11 +176,16 @@ ${skills.length > 0 ? formatSkillsForPrompt(skills) : "(no skills installed yet)
 - read: Read files
 - write: Create/overwrite files
 - edit: Surgical file edits
-- attach: Share files to chat
+- data_<skill>_read / data_<skill>_write: Read/write persisted JSON user data (profiles, training logs, plans, body metrics). NOT for querying the exercise database.
 
-### Fitness Tools
-Use the available fitness tools to query exercises, log workouts, track body metrics,
-manage training plans, and record progress. Each tool requires a "label" parameter.
+IMPORTANT: Do NOT use "attach" — file attachments are not supported. Include ALL content directly in your text response.
+
+### How to Use Skills
+- **Read the skill first**: Use the **read** tool to load a skill's SKILL.md to see available scripts, references, and namespaces.
+- **Query exercises**: Use **bash** to run the skill's Python scripts:
+  \`python ${workspacePath}/skills/bodybuilding/scripts/query_exercises.py --muscle chest\`
+  \`python ${workspacePath}/skills/bodybuilding/scripts/query_exercises.py --id "Exercise_Name" --detailed\`
+- **Persistence**: Use data_<skill>_read / data_<skill>_write to save/load user data (profile, training_log, training_plan, body_metrics, progression, personal_records).
 `;
 }
 
@@ -539,12 +559,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
 			session.agent.state.systemPrompt = systemPrompt;
 
-			// Set up file upload function
-			setUploadFunction(async (filePath: string, title?: string) => {
-				const hostPath = translateToHostPath(filePath, channelDir, workspacePath, channelId);
-				await ctx.uploadFile(hostPath, title);
-			});
-
 			// Reset per-run state
 			runState.ctx = ctx;
 			runState.logCtx = {
@@ -611,7 +625,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 			for (const a of ctx.message.attachments || []) {
 				if (!a.local) continue;
-				const fullPath = `${workspacePath}/${a.local}`;
+				const fullPath = isAbsolute(a.local) ? a.local : `${workspacePath}/${a.local}`;
 				const mimeType = getImageMimeType(a.local);
 
 				if (mimeType && existsSync(fullPath)) {
@@ -728,7 +742,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 /**
  * Translate container path back to host path for file operations
  */
-function translateToHostPath(
+function _translateToHostPath(
 	containerPath: string,
 	channelDir: string,
 	workspacePath: string,

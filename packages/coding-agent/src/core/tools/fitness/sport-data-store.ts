@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+
 /**
  * Generic sport data store interface.
  * Each sport skill gets its own namespace for data persistence.
@@ -24,40 +27,56 @@ export class FileSportDataStore implements SportDataStore {
 		this.dataDir = dataDir;
 	}
 
+	private resolveNamespacePath(namespace: string): string {
+		const parts = namespace.split("/");
+		if (parts.length !== 2 || parts.some((part) => !/^[a-z0-9][a-z0-9_-]*$/.test(part))) {
+			throw new Error(`Invalid namespace "${namespace}"`);
+		}
+
+		const sportDataDir = resolve(this.dataDir, "sport-data");
+		const filePath = resolve(sportDataDir, parts[0], `${parts[1]}.json`);
+		const relativePath = relative(sportDataDir, filePath);
+		if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+			throw new Error(`Invalid namespace "${namespace}"`);
+		}
+
+		return filePath;
+	}
+
 	async load<T>(namespace: string): Promise<T | null> {
+		const filePath = this.resolveNamespacePath(namespace);
 		if (this.cache.has(namespace)) {
 			return this.cache.get(namespace) as T;
 		}
 		try {
-			const fs = await import("node:fs/promises");
-			const path = await import("node:path");
-			const filePath = path.join(this.dataDir, "sport-data", `${namespace}.json`);
-			const raw = await fs.readFile(filePath, "utf-8");
+			const raw = await readFile(filePath, "utf-8");
 			const data = JSON.parse(raw) as T;
 			this.cache.set(namespace, data);
 			return data;
-		} catch {
-			return null;
+		} catch (error) {
+			if (isNodeError(error) && error.code === "ENOENT") {
+				return null;
+			}
+			if (error instanceof SyntaxError) {
+				throw new Error(`Invalid JSON in sport data namespace "${namespace}": ${error.message}`);
+			}
+			throw error;
 		}
 	}
 
 	read<T>(namespace: string): T | null {
+		this.resolveNamespacePath(namespace);
 		return (this.cache.get(namespace) as T) ?? null;
 	}
 
 	async save<T>(namespace: string, data: T): Promise<void> {
+		const filePath = this.resolveNamespacePath(namespace);
+		await mkdir(dirname(filePath), { recursive: true });
+		await writeFile(filePath, JSON.stringify(data, null, 2));
 		this.cache.set(namespace, data);
-		try {
-			const fs = await import("node:fs/promises");
-			const path = await import("node:path");
-			const filePath = path.join(this.dataDir, "sport-data", `${namespace}.json`);
-			await fs.mkdir(path.dirname(filePath), { recursive: true });
-			await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-		} catch (err) {
-			console.error(
-				`[sport-data-store] Failed to persist ${namespace}:`,
-				err instanceof Error ? err.message : String(err),
-			);
-		}
 	}
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
 }
