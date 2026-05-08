@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeSummary } from "./reporter.js";
+import { createSessionEvalTaskDraft } from "./session-import.js";
 import { loadEvalTask } from "./task-schema.js";
 import { runEvalTask } from "./trial-runner.js";
 import type { EvalTrialResult } from "./types.js";
@@ -13,6 +14,9 @@ type EvalCliOptions = {
 	suite?: string;
 	taskId?: string;
 	runs: number;
+	fromSession?: string;
+	writeTask?: string;
+	draftTaskId?: string;
 };
 
 function requireFlagValue(args: string[], index: number): string {
@@ -37,6 +41,9 @@ function parseArgs(args: string[]): EvalCliOptions {
 	let suite: string | undefined;
 	let taskId: string | undefined;
 	let runs = 1;
+	let fromSession: string | undefined;
+	let writeTask: string | undefined;
+	let draftTaskId: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--tasks") {
@@ -54,16 +61,35 @@ function parseArgs(args: string[]): EvalCliOptions {
 		} else if (arg === "--runs") {
 			runs = parsePositiveInteger(requireFlagValue(args, index), "--runs");
 			index += 1;
+		} else if (arg === "--from-session") {
+			fromSession = requireFlagValue(args, index);
+			index += 1;
+		} else if (arg === "--write-task") {
+			writeTask = requireFlagValue(args, index);
+			index += 1;
+		} else if (arg === "--task-id") {
+			draftTaskId = requireFlagValue(args, index);
+			index += 1;
 		} else if (arg === "--help" || arg === "-h") {
 			console.log(
-				"Usage: npm run eval -- --tasks evals/tasks --out eval-results [--suite skills] [--task task-id] [--runs 3]",
+				"Usage: npm run eval -- --tasks evals/tasks --out eval-results [--suite skills] [--task task-id] [--runs 3]\n" +
+					"       npm run eval -- --from-session session.jsonl --write-task evals/tasks/session/case.yaml --task-id case-id",
 			);
 			process.exit(0);
 		} else {
 			throw new Error(`Unknown eval argument: ${arg}`);
 		}
 	}
-	return { tasksDir: resolve(tasksDir), outputDir: resolve(outputDir), suite, taskId, runs };
+	return {
+		tasksDir: resolve(tasksDir),
+		outputDir: resolve(outputDir),
+		suite,
+		taskId,
+		runs,
+		fromSession: fromSession ? resolve(fromSession) : undefined,
+		writeTask: writeTask ? resolve(writeTask) : undefined,
+		draftTaskId,
+	};
 }
 
 function collectTaskFiles(dir: string): string[] {
@@ -79,6 +105,17 @@ function collectTaskFiles(dir: string): string[] {
 
 export async function runEvalCli(args: string[]): Promise<number> {
 	const options = parseArgs(args);
+	if (options.fromSession || options.writeTask) {
+		if (!options.fromSession || !options.writeTask) {
+			throw new Error("--from-session and --write-task must be provided together.");
+		}
+		const taskId = options.draftTaskId ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+		const draft = createSessionEvalTaskDraft(options.fromSession, { id: taskId, suite: "session" });
+		mkdirSync(dirname(options.writeTask), { recursive: true });
+		writeFileSync(options.writeTask, draft, "utf-8");
+		console.log(`Wrote human-review eval task draft: ${options.writeTask}`);
+		return 0;
+	}
 	if (!existsSync(options.tasksDir)) {
 		throw new Error(`Eval tasks directory does not exist: ${options.tasksDir}`);
 	}
