@@ -1,0 +1,14 @@
+id: feishu-2026-05-08-checkin
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "你在吗？"
+fauxResponses:
+  - text: "在的，有什么可以帮你？今天计划练什么？"
+graders:
+  - type: final_contains
+    text: "在的"
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

@@ -1,0 +1,19 @@
+id: feishu-2026-05-08-shoulder-substitution
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "我肩膀不舒服，卧推可以换什么动作？"
+fauxResponses:
+  - text: |
+      肩膀不适时优先把杠铃卧推换成哑铃对握卧推、哑铃地板卧推或上斜哑铃卧推。训练中保持肩胛后缩，如果有锐痛应停止并降低负荷。
+graders:
+  - type: final_contains
+    text: "哑铃对握卧推"
+  - type: final_contains
+    text: "地板卧推"
+  - type: final_contains
+    text: "肩胛"
+  - type: final_contains
+    text: "停止"
+  - type: max_turns
+    max: 1

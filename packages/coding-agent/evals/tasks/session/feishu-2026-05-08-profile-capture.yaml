@@ -1,0 +1,38 @@
+id: feishu-2026-05-08-profile-capture
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "我想增肌，每周练4天，有杠铃哑铃，帮我记录一下"
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: user_profile
+          data:
+            goal: 增肌
+            training_days_per_week: 4
+            equipment:
+              - barbell
+              - dumbbell
+          mode: replace
+  - text: "已记录：目标增肌，每周训练4天，可用器械为杠铃和哑铃。"
+graders:
+  - type: tool_called
+    tool: data_bodybuilding_write
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
+  - type: json_path_equals
+    file: sport-data/bodybuilding/user_profile.json
+    path: $.goal
+    equals: 增肌
+  - type: json_path_equals
+    file: sport-data/bodybuilding/user_profile.json
+    path: $.training_days_per_week
+    equals: 4
+  - type: final_contains
+    text: "已记录"
+  - type: max_tool_calls
+    max: 1
+  - type: max_turns
+    max: 2

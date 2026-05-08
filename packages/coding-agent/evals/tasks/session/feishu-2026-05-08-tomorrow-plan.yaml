@@ -1,0 +1,26 @@
+id: feishu-2026-05-08-tomorrow-plan
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "帮我安排明天训练"
+initialData:
+  sport-data/bodybuilding/training_log.json:
+    - date: "2026-05-08"
+      exercise: 杠铃卧推
+      notes: 增肌计划 Day1 Upper A
+fauxResponses:
+  - text: |
+      明天是 Day 2 - Lower A（力量侧重）。安排杠铃深蹲、罗马尼亚硬拉、杠铃箭步蹲、提踵和平板支撑，并先做热身组。
+graders:
+  - type: final_contains
+    text: "Lower A"
+  - type: final_contains
+    text: "杠铃深蹲"
+  - type: final_contains
+    text: "罗马尼亚硬拉"
+  - type: final_contains
+    text: "热身"
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1
