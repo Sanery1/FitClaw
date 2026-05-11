@@ -117,7 +117,10 @@ Coding Agent 的 Skill eval：
 cd packages/coding-agent
 npm run eval
 npm run eval -- --suite skills --task bodybuilding-log
+npm run eval -- --tasks evals\tasks --out eval-results --runs 3
 ```
+
+`--runs 3` 会让每个 YAML eval task 跑 3 轮，并在 `eval-results/summary.md` 自动生成 `pass@1`、`pass@3`、`pass^3` 报告。当前 eval harness 主要是 faux-response contract eval，用于回归基线；真实 Feishu 交互基线位于 `packages/coding-agent/evals/tasks/session/`。
 
 ## 主要特性
 
@@ -125,7 +128,7 @@ npm run eval -- --suite skills --task bodybuilding-log
 - **bodybuilding Skill**：800+ 动作数据库 + Python 查询脚本 + 9 份知识库文档
 - **通用数据持久化**：`data:` frontmatter 声明 → 框架自动注册 read/write 工具，读写均限制在声明的 namespace 内
 - **Skill 同步命令**：`skill sync` 将项目 Skill 同步到飞书 Bot workspace，减少 CLI/Bot 行为漂移
-- **确定性 eval harness**：用 faux 模型验证 Skill 工作流、工具调用顺序、危险工具禁用和安全回归
+- **确定性 eval harness**：用 faux 模型验证 Skill 工作流、工具调用顺序、危险工具禁用和安全回归，并输出 pass@1 / pass@k / pass^k 报告
 - 飞书 Bot 完整适配器（WebSocket 长连接模式）
 - 统一配置系统（`.fitclaw/`）
 
