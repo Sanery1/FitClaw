@@ -1,0 +1,26 @@
+id: feishu-2026-05-08-swimming-breathing
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "我自由泳换气不稳，怎么练？"
+fauxResponses:
+  - text: |
+      自由泳换气不稳通常来自抬头换气、憋气和节奏紊乱。练习时用转头换气，水中持续吐气，并做池边单侧转头、单臂划水换气和呼吸管辅助练习。
+graders:
+  - type: final_contains
+    text: "自由泳"
+  - type: final_contains_any
+    texts:
+      - "转头"
+      - "侧转"
+  - type: final_contains_any
+    texts:
+      - "吐气"
+      - "呼气"
+  - type: final_contains_any
+    texts:
+      - "单臂划水"
+      - "池边"
+      - "呼吸管"
+  - type: max_turns
+    max: 1

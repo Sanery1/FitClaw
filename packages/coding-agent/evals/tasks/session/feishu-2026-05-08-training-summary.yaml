@@ -1,0 +1,36 @@
+id: feishu-2026-05-08-training-summary
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "总结一下我最近的训练记录"
+initialData:
+  sport-data/bodybuilding/training_log.json:
+    - date: "2026-05-05"
+      exercise: 杠铃深蹲
+      weight_kg: 100
+      sets: 3
+      reps: 8
+    - date: "2026-05-08"
+      exercise: 杠铃卧推
+      weight_kg: 60
+      sets: 5
+      reps: 5
+      rpe: 8
+fauxResponses:
+  - text: |
+      最近共有2次训练记录：05.05 杠铃深蹲 100kg 3组x8次；05.08 杠铃卧推 60kg 5组x5次，RPE 8。
+graders:
+  - type: final_contains
+    text: "2次"
+  - type: final_contains
+    text: "深蹲"
+  - type: final_contains
+    text: "卧推"
+  - type: final_contains
+    text: "60kg"
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

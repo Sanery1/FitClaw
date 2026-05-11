@@ -8,14 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@fitclaw/agent-core";
-import {
-	type AssistantMessage,
-	getProviders,
-	type ImageContent,
-	type Message,
-	type Model,
-	type OAuthProviderId,
-} from "@fitclaw/ai";
+import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@fitclaw/ai";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -56,7 +49,7 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.js";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
+import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
 import type {
 	AutocompleteProviderFactory,
@@ -75,6 +68,7 @@ import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
+import { parseSkillBlock } from "../../core/skill-block.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
@@ -113,6 +107,12 @@ import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
+import {
+	BEDROCK_PROVIDER_ID,
+	getApiKeyProviderDisplayName,
+	hasDefaultModelProvider,
+	isApiKeyLoginProvider,
+} from "./provider-login-policy.js";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -169,58 +169,6 @@ function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
 
 function isUnknownModel(model: Model<any> | undefined): boolean {
 	return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
-}
-
-function hasDefaultModelProvider(providerId: string): providerId is keyof typeof defaultModelPerProvider {
-	return providerId in defaultModelPerProvider;
-}
-
-const BEDROCK_PROVIDER_ID = "amazon-bedrock";
-
-const API_KEY_LOGIN_PROVIDERS: Record<string, string> = {
-	anthropic: "Anthropic",
-	[BEDROCK_PROVIDER_ID]: "Amazon Bedrock",
-	"azure-openai-responses": "Azure OpenAI Responses",
-	cerebras: "Cerebras",
-	"cloudflare-workers-ai": "Cloudflare Workers AI",
-	deepseek: "DeepSeek",
-	fireworks: "Fireworks",
-	google: "Google Gemini",
-	"google-vertex": "Google Vertex AI",
-	groq: "Groq",
-	huggingface: "Hugging Face",
-	"kimi-coding": "Kimi For Coding",
-	mistral: "Mistral",
-	minimax: "MiniMax",
-	"minimax-cn": "MiniMax (China)",
-	opencode: "OpenCode Zen",
-	"opencode-go": "OpenCode Go",
-	openai: "OpenAI",
-	openrouter: "OpenRouter",
-	"vercel-ai-gateway": "Vercel AI Gateway",
-	xai: "xAI",
-	zai: "ZAI",
-};
-
-const BUILT_IN_API_KEY_LOGIN_PROVIDERS = new Set(Object.keys(API_KEY_LOGIN_PROVIDERS));
-const BUILT_IN_MODEL_PROVIDERS = new Set<string>(getProviders());
-
-export function isApiKeyLoginProvider(
-	providerId: string,
-	oauthProviderIds: ReadonlySet<string>,
-	builtInProviderIds: ReadonlySet<string> = BUILT_IN_MODEL_PROVIDERS,
-): boolean {
-	if (BUILT_IN_API_KEY_LOGIN_PROVIDERS.has(providerId)) {
-		return true;
-	}
-	if (builtInProviderIds.has(providerId)) {
-		return false;
-	}
-	return !oauthProviderIds.has(providerId);
-}
-
-export function getApiKeyProviderDisplayName(providerId: string): string {
-	return API_KEY_LOGIN_PROVIDERS[providerId] ?? providerId;
 }
 
 /**

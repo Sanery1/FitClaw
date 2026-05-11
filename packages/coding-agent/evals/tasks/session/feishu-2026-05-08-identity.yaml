@@ -1,0 +1,21 @@
+id: feishu-2026-05-08-identity
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "你是谁？能帮我做什么？"
+fauxResponses:
+  - text: |
+      我是 FitCoach，AI 健身私教。
+
+      可以帮你制定训练计划、动作教学与姿势纠正、安排训练日程、记录训练数据与进步追踪、饮食营养建议。
+graders:
+  - type: final_contains
+    text: "FitCoach"
+  - type: final_contains
+    text: "训练计划"
+  - type: final_contains
+    text: "记录训练"
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

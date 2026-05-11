@@ -52,6 +52,8 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 - Slack 代码全部删除 (2026-05-02): mom 包纯飞书化，删除 slack.ts/download.ts/events.ts，移除 `@slack/*` 依赖
 - **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data_<skill>_read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
 - **Skill 数据边界加固 (2026-05-07)**: `data_<skill>_read/write` 统一拒绝未声明 namespace；`FileSportDataStore` 校验 namespace 字符集和路径边界，JSON 损坏/权限/写入失败会返回工具错误；Bot bash 增加危险命令拦截
+- **Skill 同步与 eval harness (2026-05-08)**: 新增 `fitclaw skill sync` 同步 CLI/Bot Skill；新增 `npm run eval` 运行 faux 模型 Skill 回归评估，`eval-results/` 不提交
+- **Eval 与大文件边界拆分 (2026-05-08)**: eval CLI 支持 `--suite` / `--task`，grader 支持 `tool_not_called` / `tool_sequence`；Provider 登录策略与 Skill block parser 已从大文件拆出
 
 项目接手速读维护在 [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)。完整历史、技术问答与风险说明统一维护在 [docs/QNA.md](./docs/QNA.md)。
 
@@ -120,14 +122,14 @@ data:
 | swimming-coach | `.fitclaw/skills/swimming-coach/` | `feishu-workspace/skills/swimming-coach/` | `data_swimming-coach_read/write` | 3 个 namespace |
 
 > **注意**：CLI 从 `.fitclaw/skills/` 加载，Bot 从 `feishu-workspace/skills/` 加载。
-> 安装新 skill 需要同步到两个位置。`feishu-workspace/` 是 Docker volume 挂载，文件放入后立即可见。
+> 安装或修改 skill 后运行 `fitclaw skill sync` 同步到 Bot 位置。`feishu-workspace/` 是 Docker volume 挂载，文件放入后立即可见。
 
 ### 添加新 Skill 的步骤
 
 1. 在 `.fitclaw/skills/<name>/` 创建目录
 2. 编写 `SKILL.md`（含 `data:` 声明 + 精准 `description`，描述应包含触发场景和为什么必须用 skill）
 3. 可选：添加 `references/`、`scripts/`、`assets/`
-4. **同步到 Bot**：`cp -r .fitclaw/skills/<name> feishu-workspace/skills/`（如果要让飞书 Bot 使用）
+4. **同步到 Bot**：运行 `fitclaw skill sync`（如果要让飞书 Bot 使用）
 5. 框架自动发现并注册 data 工具
 
 ## 如何启动
