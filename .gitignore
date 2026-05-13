@@ -70,3 +70,10 @@ feishu-workspace/
 
 # ── 二进制分发 ──
 packages/coding-agent/binaries/
+
+# ── 本地 Windows 桌面启动器文件（不提交）──
+fitclaw-bot.ico
+fitclaw-bot-preview.png
+fitclaw-bot-v2.ico
+start-bot.bat
+scripts/gen-icon.py
