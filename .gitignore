@@ -1,0 +1,79 @@
+# ── 依赖 ──
+node_modules/
+*.tsbuildinfo
+
+# ── 构建产物 ──
+dist/
+packages/*/dist/
+packages/*/dist-chrome/
+packages/*/dist-firefox/
+
+# ── 日志与调试 ──
+*.log
+*.cpuprofile
+out.jsonl
+out.html
+pi-*.html
+syntax.jsonl
+tui-debug.log
+compaction-results/
+packages/coding-agent/eval-results/
+
+# ── 密钥与环境变量 ──
+.env
+ecosystem.config.cjs
+
+# ── 编辑器与 IDE ──
+.vscode/
+.zed/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 操作系统 ──
+.DS_Store
+Thumbs.db
+
+# ── Claude Code 本地配置 ──
+.claude/
+.claude/
+
+# ── 测试覆盖率 ──
+coverage/
+.nyc_output/
+
+# ── 包管理器 ──
+.npm/
+
+# ── 本地开发配置 ──
+.pi_config/
+.opencode/
+todo.md
+plans/
+collect.sh
+
+# ── 会话数据（本地 JSONL）──
+.pi/hf-sessions/
+.pi/hf-sessions-backup/
+
+# ── Agent 运行时数据（本地开发产生）──
+.agents/
+**/.agents/
+skills-lock.json
+**/skills-lock.json
+packages/coding-agent/.pi/
+packages/coding-agent/skills/
+
+# ── 运行时数据 ──
+feishu-workspace/
+
+# ── 二进制分发 ──
+packages/coding-agent/binaries/
+
+# ── 本地 Windows 桌面启动器文件（不提交）──
+fitclaw-bot.ico
+fitclaw-bot-preview.png
+fitclaw-bot-v2.ico
+start-bot.bat
+scripts/gen-icon.py

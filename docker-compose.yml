@@ -1,0 +1,9 @@
+services:
+  fitclaw-bot:
+    build: .
+    container_name: fitclaw-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./feishu-workspace:/opt/fitclaw/feishu-workspace

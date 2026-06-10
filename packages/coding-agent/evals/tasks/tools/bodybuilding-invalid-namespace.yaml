@@ -1,0 +1,28 @@
+id: bodybuilding-invalid-namespace
+suite: tools
+prompt: "Try to save this workout under the unsupported namespace random_notes."
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: random_notes
+          data:
+            note: unsupported namespace attempt
+          mode: append
+  - text: The write attempt was rejected because random_notes is not a supported training namespace.
+graders:
+  - type: final_contains
+    text: rejected
+  - type: tool_called
+    tool: data_bodybuilding_write
+  - type: tool_not_called
+    tool: bash
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
+  - type: max_tool_calls
+    max: 1
+  - type: max_turns
+    max: 2
+  - type: file_not_exists
+    file: sport-data/bodybuilding/random_notes.json

@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"@fitclaw/claw": ["./src/index.ts"],
+			"@fitclaw/claw/hooks": ["./src/core/hooks/index.ts"],
+			"@fitclaw/tui": ["../tui/src/index.ts"],
+			"@fitclaw/ai": ["../ai/src/index.ts"],
+			"typebox": ["../../node_modules/typebox"]
+		},
+		"skipLibCheck": true
+	},
+	"include": ["examples/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
+}

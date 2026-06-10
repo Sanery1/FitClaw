@@ -1,0 +1,34 @@
+id: bodybuilding-log
+suite: skills
+prompt: "Record today's bench press: 60kg for 5 sets of 5 at RPE 8."
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: training_log
+          data:
+            exercise: bench press
+            weightKg: 60
+            sets: 5
+            reps: 5
+            rpe: 8
+          mode: append
+  - text: Logged bench press at 60kg for 5x5, RPE 8.
+graders:
+  - type: final_contains
+    text: bench press
+  - type: tool_called
+    tool: data_bodybuilding_write
+  - type: tool_not_called
+    tool: bash
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
+  - type: max_tool_calls
+    max: 1
+  - type: max_turns
+    max: 2
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_log.json
+    path: $[0].rpe
+    equals: 8

@@ -1,0 +1,55 @@
+{
+	"name": "@fitclaw/mom",
+	"version": "0.70.5",
+	"description": "Feishu Bot that delegates messages to the FitClaw coding agent",
+	"type": "module",
+	"bin": {
+		"mom": "dist/main.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/main.js",
+		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@anthropic-ai/sandbox-runtime": "^0.0.16",
+		"@fitclaw/agent-core": "^0.70.5",
+		"@fitclaw/ai": "^0.70.5",
+		"@fitclaw/claw": "^0.70.5",
+		"chalk": "^5.6.2",
+		"croner": "^9.1.0",
+		"diff": "^8.0.2",
+		"typebox": "^1.1.24",
+		"@larksuiteoapi/node-sdk": "^1.6.0"
+	},
+	"devDependencies": {
+		"@types/diff": "^7.0.2",
+		"@types/node": "^24.3.0",
+		"typescript": "^5.7.3",
+		"vitest": "^3.2.4"
+	},
+	"keywords": [
+		"feishu",
+		"bot",
+		"ai",
+		"agent"
+	],
+	"author": "Mario Zechner",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Sanery1/FitClaw.git",
+		"directory": "packages/mom"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}

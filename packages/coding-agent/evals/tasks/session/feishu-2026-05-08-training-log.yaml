@@ -1,0 +1,46 @@
+id: feishu-2026-05-08-training-log
+suite: session
+reviewRequired: true
+sourceSession: D:\Code\Project\FitClaw\feishu-workspace\oc_8177a6b8ea702d5a03b6880ac517755e\context.jsonl
+prompt: "记录今天卧推60kg 5x5，RPE 8"
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: training_log
+          data:
+            date: "2026-05-08"
+            exercise: 杠铃卧推
+            weight_kg: 60
+            sets: 5
+            reps: 5
+            rpe: 8
+          mode: append
+  - text: "已记录：今天杠铃卧推 60kg，5组x5次，RPE 8。"
+graders:
+  - type: tool_called
+    tool: data_bodybuilding_write
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
+  - type: tool_args_match
+    tool: data_bodybuilding_write
+    args:
+      namespace: training_log
+      data:
+        weight_kg: 60
+        rpe: 8
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_log.json
+    path: $[0].weight_kg
+    equals: 60
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_log.json
+    path: $[0].rpe
+    equals: 8
+  - type: final_contains
+    text: "卧推"
+  - type: max_tool_calls
+    max: 1
+  - type: max_turns
+    max: 2

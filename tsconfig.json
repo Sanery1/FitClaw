@@ -1,0 +1,29 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"*": ["./*"],
+			"@fitclaw/ai": ["./packages/ai/src/index.ts"],
+			"@fitclaw/ai/oauth": ["./packages/ai/src/oauth.ts"],
+			"@fitclaw/ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
+			"@fitclaw/ai/dist/*": ["./packages/ai/src/*"],
+			"@fitclaw/agent-core": ["./packages/agent/src/index.ts"],
+			"@fitclaw/agent-core/*": ["./packages/agent/src/*"],
+			"@fitclaw/claw": ["./packages/coding-agent/src/index.ts"],
+			"@fitclaw/claw/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
+			"@fitclaw/claw/*": ["./packages/coding-agent/src/*"],
+			"typebox": ["./node_modules/typebox"],
+			"@fitclaw/mom": ["./packages/mom/src/index.ts"],
+			"@fitclaw/mom/*": ["./packages/mom/src/*"],
+			"@fitclaw/pods": ["./packages/pods/src/index.ts"],
+			"@fitclaw/pods/*": ["./packages/pods/src/*"],
+			"@fitclaw/tui": ["./packages/tui/src/index.ts"],
+			"@fitclaw/tui/*": ["./packages/tui/src/*"],
+			"@fitclaw/web-ui": ["./packages/web-ui/src/index.ts"],
+			"@fitclaw/web-ui/*": ["./packages/web-ui/src/*"]
+		}
+	},
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"exclude": ["packages/web-ui/**/*", "**/dist/**"]
+}
