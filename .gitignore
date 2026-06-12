@@ -38,6 +38,7 @@ Thumbs.db
 # ── Claude Code 本地配置 ──
 .claude/
 .claude/
+.codex/
 
 # ── 测试覆盖率 ──
 coverage/
