@@ -2,6 +2,8 @@
 comet_change: design-feishu-fitness-user-loop
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-06-16-design-feishu-fitness-user-loop
+status: final
 ---
 
 # Design: Feishu Fitness User Loop

@@ -2,6 +2,7 @@
 change: design-feishu-fitness-user-loop
 design-doc: docs/superpowers/specs/2026-06-16-design-feishu-fitness-user-loop-design.md
 base-ref: ac063eac6c453f3febb139bb662e051fc32954b9
+archived-with: 2026-06-16-design-feishu-fitness-user-loop
 ---
 
 # Feishu Fitness User Loop Implementation Plan
@@ -13,8 +14,6 @@ base-ref: ac063eac6c453f3febb139bb662e051fc32954b9
 **Architecture:** This change does not modify runtime code. It defines the Feishu first-stage user loop in OpenSpec and records the technical design in a Superpowers design document.
 
 **Tech Stack:** OpenSpec, Comet workflow metadata, Markdown documentation.
-
----
 
 ### Task 1: Finalize OpenSpec Task State
 

@@ -11,7 +11,7 @@ verification_report: docs/superpowers/reports/2026-06-16-design-feishu-fitness-u
 branch_status: handled
 created_at: 2026-06-16
 verified_at: 2026-06-16
-archived: false
+archived: true
 handoff_context: openspec/changes/design-feishu-fitness-user-loop/.comet/handoff/design-context.json
 handoff_hash: 5a8750374ded251aa49b9d62a7e40265c3fac7c40c50d6304f396e12d181623e
 build_command: cmd.exe /c npx openspec validate design-feishu-fitness-user-loop
