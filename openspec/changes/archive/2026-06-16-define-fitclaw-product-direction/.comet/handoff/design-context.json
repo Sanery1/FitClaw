@@ -1,0 +1,14 @@
+{
+  "change": "define-fitclaw-product-direction",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "8b40afdf3c4810a978ac1bf9c8e58e545ca8851183d7040b0da9f37d8f8d5d19",
+  "files": [
+    { "path": "openspec/changes/define-fitclaw-product-direction/proposal.md", "sha256": "ff2febcbb632458f104f85ee22105a613fa4117745926e2184e242ffc1982f8a" },
+    { "path": "openspec/changes/define-fitclaw-product-direction/design.md", "sha256": "e77301a33a1097c8ab0a8a0ba828e60c53c93ede3eaa69c12e0c4fda01dfff03" },
+    { "path": "openspec/changes/define-fitclaw-product-direction/tasks.md", "sha256": "14d3857f5dba69b3a617fe6b47159cee8a8faaad91f15836625cb92507ae3e9e" },
+    { "path": "openspec/changes/define-fitclaw-product-direction/specs/product-direction/spec.md", "sha256": "7ef4c8efb873d88d1006370f60e9833752e3042b27ec1bc2518aa866c429c6b8" }
+  ]
+}

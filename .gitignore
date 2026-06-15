@@ -52,6 +52,8 @@ coverage/
 .opencode/
 todo.md
 plans/
+!docs/superpowers/plans/
+!docs/superpowers/plans/**
 collect.sh
 
 # ── 会话数据（本地 JSONL）──

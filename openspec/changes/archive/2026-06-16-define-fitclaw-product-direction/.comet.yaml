@@ -1,0 +1,18 @@
+workflow: full
+phase: archive
+build_mode: executing-plans
+isolation: branch
+verify_mode: full
+base_ref: f6841c2d64d28aef0d37ecc6dde025dca75bb160
+design_doc: docs/superpowers/specs/2026-06-16-define-fitclaw-product-direction-design.md
+plan: docs/superpowers/plans/2026-06-16-define-fitclaw-product-direction.md
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-16-define-fitclaw-product-direction-verify.md
+branch_status: handled
+created_at: 2026-06-12
+verified_at: 2026-06-16
+archived: true
+handoff_context: openspec/changes/define-fitclaw-product-direction/.comet/handoff/design-context.json
+handoff_hash: 8b40afdf3c4810a978ac1bf9c8e58e545ca8851183d7040b0da9f37d8f8d5d19
+build_command: cmd.exe /c npx openspec validate define-fitclaw-product-direction
+verify_command: cmd.exe /c npx openspec validate define-fitclaw-product-direction
