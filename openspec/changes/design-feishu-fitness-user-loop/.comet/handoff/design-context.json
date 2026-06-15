@@ -1,0 +1,15 @@
+{
+  "change": "design-feishu-fitness-user-loop",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "5a8750374ded251aa49b9d62a7e40265c3fac7c40c50d6304f396e12d181623e",
+  "files": [
+    { "path": "openspec/changes/design-feishu-fitness-user-loop/proposal.md", "sha256": "f5fcf3a24851fe4cc7ed4623702c0a200ed787d4213b52d6d651a1b5150b72f8" },
+    { "path": "openspec/changes/design-feishu-fitness-user-loop/design.md", "sha256": "556896b02a303cf4b04d76fd3a10107a68987a0a6d4624d8aed63500d5c207c7" },
+    { "path": "openspec/changes/design-feishu-fitness-user-loop/tasks.md", "sha256": "83aa8b4cdc90641a009f79be96231924910b90c9a05907f3eb89861d5f901d8e" },
+    { "path": "openspec/changes/design-feishu-fitness-user-loop/specs/feishu-fitness-user-loop/spec.md", "sha256": "a118c2518c5068de5f3d93360983db8aba318bd5d19964a9a8f1f4ccc484a993" },
+    { "path": "openspec/changes/design-feishu-fitness-user-loop/specs/product-direction/spec.md", "sha256": "d29b6a5b391c924bd4756fa24b79d60a70abff15fbcd35d8bcaaf0d40e4b023f" }
+  ]
+}
