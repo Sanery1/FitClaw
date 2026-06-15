@@ -1,0 +1,18 @@
+workflow: full
+phase: verify
+build_mode: executing-plans
+isolation: branch
+verify_mode: null
+base_ref: ac063eac6c453f3febb139bb662e051fc32954b9
+design_doc: docs/superpowers/specs/2026-06-16-design-feishu-fitness-user-loop-design.md
+plan: docs/superpowers/plans/2026-06-16-design-feishu-fitness-user-loop.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-06-16
+verified_at: null
+archived: false
+handoff_context: openspec/changes/design-feishu-fitness-user-loop/.comet/handoff/design-context.json
+handoff_hash: 5a8750374ded251aa49b9d62a7e40265c3fac7c40c50d6304f396e12d181623e
+build_command: cmd.exe /c npx openspec validate design-feishu-fitness-user-loop
+verify_command: cmd.exe /c npx openspec validate design-feishu-fitness-user-loop
