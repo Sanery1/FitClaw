@@ -121,3 +121,10 @@ FitClaw SHALL keep the `bodybuilding` Skill instructions aligned with the first-
 #### Scenario: Recording a workout through Skill evals
 - **WHEN** deterministic Skill evals cover `training_log` writes
 - **THEN** they SHALL verify the `training_log` namespace, append mode, and snake_case load fields such as `weight_kg`
+
+### Requirement: User profile preserve eval coverage
+FitClaw SHALL protect `user_profile` read-modify-replace behavior with deterministic eval coverage.
+
+#### Scenario: Updating one profile field
+- **WHEN** a deterministic eval updates one durable `user_profile` fact while existing profile fields are present
+- **THEN** the eval SHALL require reading `user_profile` before writing and SHALL verify the replacement object preserves still-valid existing fields
