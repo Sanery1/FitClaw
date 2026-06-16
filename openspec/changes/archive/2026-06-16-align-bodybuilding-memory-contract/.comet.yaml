@@ -1,0 +1,14 @@
+workflow: tweak
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: full
+base_ref: 697ce8ed413e3483ddcfc9e4a45fc373424ee14f
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-16-align-bodybuilding-memory-contract-verify.md
+branch_status: handled
+created_at: 2026-06-16
+verified_at: 2026-06-16
+archived: true
