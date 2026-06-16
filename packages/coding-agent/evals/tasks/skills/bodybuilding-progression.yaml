@@ -1,0 +1,51 @@
+id: bodybuilding-progression
+suite: skills
+prompt: "记录一下：卧推下周加重量，因为 60kg 5x5 已经稳定完成。"
+initialData:
+  sport-data/bodybuilding/progression.json:
+    - date: "2026-06-10"
+      type: deload
+      reason: accumulated fatigue
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: progression
+          mode: append
+          data:
+            date: "2026-06-16"
+            type: load_increase
+            exercise: bench press
+            reason: 60kg 5x5 completed consistently
+  - text: 已记录卧推下周加重量，原因是 60kg 5x5 已稳定完成。
+graders:
+  - type: final_contains
+    text: "加重量"
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_write
+  - type: tool_args_match
+    tool: data_bodybuilding_write
+    args:
+      namespace: progression
+      mode: append
+      data:
+        date: "2026-06-16"
+        type: load_increase
+        reason: 60kg 5x5 completed consistently
+  - type: json_path_equals
+    file: sport-data/bodybuilding/progression.json
+    path: $[0].type
+    equals: deload
+  - type: json_path_equals
+    file: sport-data/bodybuilding/progression.json
+    path: $[1].type
+    equals: load_increase
+  - type: json_path_equals
+    file: sport-data/bodybuilding/progression.json
+    path: $[1].exercise
+    equals: bench press
+  - type: max_tool_calls
+    max: 1
+  - type: max_turns
+    max: 2
