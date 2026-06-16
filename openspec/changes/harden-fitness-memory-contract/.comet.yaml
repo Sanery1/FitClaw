@@ -2,12 +2,12 @@ workflow: full
 phase: verify
 build_mode: executing-plans
 isolation: branch
-verify_mode: null
+verify_mode: full
 base_ref: 484ccd9df5f22d9e2502e783fe7f7e2562fd32a8
 design_doc: docs/superpowers/specs/2026-06-16-harden-fitness-memory-contract-design.md
 plan: docs/superpowers/plans/2026-06-16-harden-fitness-memory-contract.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-06-16-harden-fitness-memory-contract-verify.md
 branch_status: pending
 created_at: 2026-06-16
 verified_at: null
