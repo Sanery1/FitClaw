@@ -17,7 +17,7 @@ description: |
   How to use:
   1. First read SKILL.md to see scripts and namespaces
   2. Query exercises via bash: python skills/bodybuilding/scripts/query_exercises.py --muscle <name>
-  3. Persist data: data_bodybuilding_write("namespace", data)
+  3. Persist data with the namespace write mode: object namespaces use replace, array namespaces use append
 data:
   user_profile: {}
   training_log: {type: array}
@@ -67,19 +67,40 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 - `data_bodybuilding_write("namespace", data, mode?)` — 保存数据
 
 可用 namespace：
-| namespace | type | 用途 |
-|-----------|------|------|
-| `user_profile` | object | 用户画像（经验/目标/器械/伤病/身体数据） |
-| `training_log` | array | 每次训练记录（日期/动作/组数/重量） |
-| `training_plan` | object | 当前训练计划 |
-| `body_metrics` | array | 体测记录（体重/围度/体脂等） |
-| `progression` | array | 渐进超负荷事件 |
-| `personal_records` | array | 个人记录 |
+| namespace | type | 写入模式 | 用途 |
+|-----------|------|----------|------|
+| `user_profile` | object | `replace` 完整对象 | 用户画像（经验/目标/器械/伤病/身体数据） |
+| `training_log` | array | `append` 单条记录 | 每次训练记录（日期/动作/组数/重量） |
+| `training_plan` | object | `replace` 完整对象 | 当前训练计划 |
+| `body_metrics` | array | `append` 单条记录 | 体测记录（体重/围度/体脂等） |
+| `progression` | array | `append` 单条记录 | 渐进超负荷事件 |
+| `personal_records` | array | `append` 单条记录 | 个人记录 |
+
+### 记忆契约
+
+对象 namespace 表示当前状态，写入时必须是完整对象：
+- 更新 `user_profile` 前，先 read 旧数据，保留仍然有效的目标、经验、器械、训练频率、伤病限制等字段，再用 `replace` 写回完整对象
+- 更新 `training_plan` 时，只在用户确认保存或应用计划后，用 `replace` 写回完整当前计划
+
+数组 namespace 表示历史记录，写入时只追加一条新记录：
+- `training_log`、`body_metrics`、`progression`、`personal_records` 使用 `append`
+- 不要为了新增一条训练或体测记录而 replace 整个历史数组
+- 训练记录信息不足时，先追问动作名称或可衡量训练值，不要写入含糊历史
+
+新写入字段统一使用 `snake_case`：
+- 体重/负重：`weight_kg`
+- 时长：`duration_minutes`
+- 每周训练天数：`training_days_per_week`
+- 休息秒数：`rest_seconds`
+- 时间戳：`created_at`、`updated_at`
+- 可选版本字段：`schema_version: 1`
+
+旧数据可能存在 `weightKg` 等历史字段；除非后续明确做迁移，不要仅为了命名清理重写完整历史。
 
 **重要规则**：
 - 收集到用户信息后**立即**调用 write 保存，不要仅保留在内存中
-- 每次训练记录后**立即** append 到 training_log
-- 生成新计划后**立即**保存到 training_plan
+- 每次训练记录后**立即** append 到 `training_log`
+- 生成新计划后，用户确认保存时**立即** replace 到 `training_plan`
 - 开始对话时先 read user_profile 检查是否有已保存的用户数据
 
 ## 第一阶段：用户信息收集
@@ -153,7 +174,7 @@ python scripts/query_exercises.py --id "Incline_Dumbbell_Press"
 
 ### 持久化
 
-生成计划后立即调用：`data_bodybuilding_write("training_plan", planData)`
+用户确认保存计划后立即调用：`data_bodybuilding_write("training_plan", planData, "replace")`
 
 ### 计划输出格式
 
@@ -276,8 +297,8 @@ JSON 格式用于导入训练 App：
 
 每次训练后记录到 training_log，记录超负荷事件到 progression：
 ```
-data_bodybuilding_write("training_log", {date, exercises, sets, weight}, "append")
-data_bodybuilding_write("progression", {event, date}, "append")
+data_bodybuilding_write("training_log", {date, exercises: [{name, sets, reps, weight_kg, rpe}]}, "append")
+data_bodybuilding_write("progression", {date, type, reason}, "append")
 ```
 
 ## 数据库说明
