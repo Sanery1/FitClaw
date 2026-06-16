@@ -9,13 +9,17 @@ const skillDataWriteSchema = Type.Object({
 	mode: Type.Optional(Type.String()),
 });
 
+const skillDataReadSchema = Type.Object({
+	namespace: Type.String(),
+});
+
 const BODYBUILDING_NAMESPACES = new Set([
 	"user_profile",
 	"training_log",
 	"training_plan",
 	"body_metrics",
-	"progress_events",
-	"preferences",
+	"progression",
+	"personal_records",
 ]);
 
 function resolveInside(root: string, relativePath: string): string {
@@ -42,12 +46,53 @@ function readJsonArray(path: string): unknown[] {
 	return parsed;
 }
 
+function readJson(path: string): unknown {
+	if (!existsSync(path)) {
+		return null;
+	}
+	return JSON.parse(readFileSync(path, "utf-8")) as unknown;
+}
+
 function writeJson(path: string, value: unknown): void {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
 export function createEvalTools(workspaceDir: string): AgentTool[] {
+	const dataBodybuildingRead: AgentTool<typeof skillDataReadSchema> = {
+		name: "data_bodybuilding_read",
+		label: "Read Bodybuilding Data",
+		description: "Eval fixture tool that reads bodybuilding JSON data under sport-data/bodybuilding.",
+		parameters: skillDataReadSchema,
+		execute: async (_toolCallId, params) => {
+			const namespace = params.namespace;
+			if (!BODYBUILDING_NAMESPACES.has(namespace)) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify({
+								error: `namespace "${namespace}" is not declared for bodybuilding eval data`,
+							}),
+						},
+					],
+					details: { namespace, error: "undeclared_namespace" },
+				};
+			}
+			const filePath = resolveInside(workspaceDir, join("sport-data", "bodybuilding", `${namespace}.json`));
+			const data = readJson(filePath);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify({ namespace, data }),
+					},
+				],
+				details: { namespace, data },
+			};
+		},
+	};
+
 	const dataBodybuildingWrite: AgentTool<typeof skillDataWriteSchema> = {
 		name: "data_bodybuilding_write",
 		label: "Write Bodybuilding Data",
@@ -84,5 +129,5 @@ export function createEvalTools(workspaceDir: string): AgentTool[] {
 		},
 	};
 
-	return [dataBodybuildingWrite];
+	return [dataBodybuildingRead, dataBodybuildingWrite];
 }

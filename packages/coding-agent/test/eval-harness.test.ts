@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createEvalTools } from "../src/evals/eval-tools.js";
 import { summarizeEvalResults } from "../src/evals/metrics.js";
 import { writeSummary } from "../src/evals/reporter.js";
 import { runEvalCli } from "../src/evals/run-evals.js";
@@ -104,6 +105,92 @@ describe("eval harness", () => {
 		expect(result.metrics.toolCallCount).toBe(0);
 		expect(result.metrics.turnCount).toBe(1);
 		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true, true]);
+	});
+
+	it("supports reading existing bodybuilding data before replacing a profile", async () => {
+		const dir = createTempDir();
+		const taskPath = join(dir, "task.yaml");
+		writeFileSync(
+			taskPath,
+			[
+				"id: profile-preserve-task",
+				"suite: smoke",
+				"prompt: Add my shoulder limitation to my profile.",
+				"initialData:",
+				"  sport-data/bodybuilding/user_profile.json:",
+				"    goal: hypertrophy",
+				"    experience: intermediate",
+				"    equipment:",
+				"      - dumbbell",
+				"fauxResponses:",
+				"  - toolCalls:",
+				"      - name: data_bodybuilding_read",
+				"        args:",
+				"          namespace: user_profile",
+				"  - toolCalls:",
+				"      - name: data_bodybuilding_write",
+				"        args:",
+				"          namespace: user_profile",
+				"          mode: replace",
+				"          data:",
+				"            goal: hypertrophy",
+				"            experience: intermediate",
+				"            equipment:",
+				"              - dumbbell",
+				"            injury_limitations:",
+				"              - shoulder",
+				"  - text: I added your shoulder limitation and kept your existing hypertrophy profile.",
+				"graders:",
+				"  - type: tool_sequence",
+				"    tools:",
+				"      - data_bodybuilding_read",
+				"      - data_bodybuilding_write",
+				"  - type: tool_args_match",
+				"    tool: data_bodybuilding_write",
+				"    args:",
+				"      namespace: user_profile",
+				"      mode: replace",
+				"      data:",
+				"        goal: hypertrophy",
+				"        experience: intermediate",
+				"        injury_limitations:",
+				"          - shoulder",
+				"  - type: json_path_equals",
+				"    file: sport-data/bodybuilding/user_profile.json",
+				"    path: $.goal",
+				"    equals: hypertrophy",
+				"  - type: json_path_equals",
+				"    file: sport-data/bodybuilding/user_profile.json",
+				"    path: $.experience",
+				"    equals: intermediate",
+				"  - type: json_path_equals",
+				"    file: sport-data/bodybuilding/user_profile.json",
+				"    path: $.injury_limitations[0]",
+				"    equals: shoulder",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const task = loadEvalTask(taskPath);
+		const result = await runEvalTask(task, { outputDir: join(dir, "out") });
+		const readTool = createEvalTools(join(dir, "out", "workspaces", "profile-preserve-task")).find(
+			(tool) => tool.name === "data_bodybuilding_read",
+		);
+		const readResult = await readTool?.execute("read-check", { namespace: "user_profile" });
+
+		expect(readTool).toBeDefined();
+		expect(readResult?.details).toEqual({
+			namespace: "user_profile",
+			data: {
+				goal: "hypertrophy",
+				experience: "intermediate",
+				equipment: ["dumbbell"],
+				injury_limitations: ["shoulder"],
+			},
+		});
+		expect(result.passed).toBe(true);
+		expect(result.toolCalls.map((call) => call.name)).toEqual(["data_bodybuilding_read", "data_bodybuilding_write"]);
+		expect(result.graderResults.map((grader) => grader.passed)).toEqual([true, true, true, true, true]);
 	});
 
 	it("rejects unsupported bodybuilding namespaces and can grade missing files", async () => {
