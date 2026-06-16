@@ -1,0 +1,18 @@
+workflow: full
+phase: verify
+build_mode: executing-plans
+isolation: branch
+verify_mode: null
+base_ref: 484ccd9df5f22d9e2502e783fe7f7e2562fd32a8
+design_doc: docs/superpowers/specs/2026-06-16-harden-fitness-memory-contract-design.md
+plan: docs/superpowers/plans/2026-06-16-harden-fitness-memory-contract.md
+verify_result: pending
+verification_report: null
+branch_status: pending
+created_at: 2026-06-16
+verified_at: null
+archived: false
+handoff_context: openspec/changes/harden-fitness-memory-contract/.comet/handoff/design-context.json
+handoff_hash: e3b0da9fad37484918204bc7d64904b4ad63039d0735e01540b570f70ae06ed8
+build_command: cmd.exe /c npx openspec validate harden-fitness-memory-contract
+verify_command: cmd.exe /c npx openspec validate harden-fitness-memory-contract
