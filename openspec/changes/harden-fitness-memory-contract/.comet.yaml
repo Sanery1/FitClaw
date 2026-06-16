@@ -8,7 +8,7 @@ design_doc: docs/superpowers/specs/2026-06-16-harden-fitness-memory-contract-des
 plan: docs/superpowers/plans/2026-06-16-harden-fitness-memory-contract.md
 verify_result: pending
 verification_report: docs/superpowers/reports/2026-06-16-harden-fitness-memory-contract-verify.md
-branch_status: pending
+branch_status: handled
 created_at: 2026-06-16
 verified_at: null
 archived: false
