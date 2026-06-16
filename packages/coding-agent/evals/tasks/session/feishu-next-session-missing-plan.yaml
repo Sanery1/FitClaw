@@ -1,0 +1,47 @@
+id: feishu-next-session-missing-plan
+suite: session
+prompt: "明天我该练什么？"
+initialData:
+  sport-data/bodybuilding/training_log.json:
+    - date: "2026-06-15"
+      exercise: bench press
+      weight_kg: 60
+      sets: 5
+      reps: 5
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_plan
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_log
+  - text: |
+      我现在没有你的当前训练计划，所以不能确定明天应该是哪一天。已知最近一次是 bench press 60kg 5x5；如果你愿意，我可以先根据目标和可训练天数帮你补一个计划，或你告诉我当前计划后再安排明天。
+graders:
+  - type: final_contains_any
+    texts:
+      - "没有你的当前训练计划"
+      - "缺少当前训练计划"
+      - "不能确定"
+  - type: final_contains
+    text: "bench press"
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_read
+      - data_bodybuilding_read
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_plan
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_log
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 2
+  - type: max_turns
+    max: 3

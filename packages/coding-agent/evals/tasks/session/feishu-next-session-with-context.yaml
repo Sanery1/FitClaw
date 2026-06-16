@@ -1,0 +1,71 @@
+id: feishu-next-session-with-context
+suite: session
+prompt: "帮我安排明天训练"
+initialData:
+  sport-data/bodybuilding/training_plan.json:
+    name: four-day hypertrophy split
+    goal: hypertrophy
+    days_per_week: 4
+    days:
+      - name: Day 1 Upper A
+        exercises:
+          - name: bench press
+            sets: 5
+            reps: 5
+            rest_seconds: 150
+      - name: Day 2 Lower A
+        exercises:
+          - name: squat
+            sets: 4
+            reps: 6
+            rest_seconds: 150
+          - name: romanian deadlift
+            sets: 3
+            reps: 8
+            rest_seconds: 120
+  sport-data/bodybuilding/training_log.json:
+    - date: "2026-06-15"
+      session: Day 1 Upper A
+      exercises:
+        - name: bench press
+          sets: 5
+          reps: 5
+          weight_kg: 60
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_plan
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_log
+  - text: |
+      根据当前 four-day hypertrophy split 和最近完成的 Day 1 Upper A，明天安排 Day 2 Lower A：squat 4x6，romanian deadlift 3x8。先做热身组，主项休息约 150 秒。
+graders:
+  - type: final_contains
+    text: "Day 2 Lower A"
+  - type: final_contains
+    text: "squat"
+  - type: final_contains
+    text: "romanian deadlift"
+  - type: final_contains
+    text: "热身"
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_read
+      - data_bodybuilding_read
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_plan
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_log
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 2
+  - type: max_turns
+    max: 3

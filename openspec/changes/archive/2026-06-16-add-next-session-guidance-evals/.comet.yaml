@@ -1,0 +1,14 @@
+workflow: tweak
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: 81430575fb2dd9e51cebd51f1d53df2b2ff48a70
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-16-add-next-session-guidance-evals-verify.md
+branch_status: handled
+created_at: 2026-06-16
+verified_at: 2026-06-16
+archived: true
