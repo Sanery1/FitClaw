@@ -2,6 +2,7 @@
 change: harden-fitness-memory-contract
 design-doc: docs/superpowers/specs/2026-06-16-harden-fitness-memory-contract-design.md
 base-ref: 484ccd9df5f22d9e2502e783fe7f7e2562fd32a8
+archived-with: 2026-06-16-harden-fitness-memory-contract
 ---
 
 # Harden Fitness Memory Contract Implementation Plan
@@ -13,8 +14,6 @@ base-ref: 484ccd9df5f22d9e2502e783fe7f7e2562fd32a8
 **Architecture:** This change does not modify runtime code. It defines the first-stage fitness memory contract in OpenSpec and records the technical design in a Superpowers design document.
 
 **Tech Stack:** OpenSpec, Comet workflow metadata, Markdown documentation.
-
----
 
 ### Task 1: Finalize OpenSpec Task State
 

@@ -11,7 +11,7 @@ verification_report: docs/superpowers/reports/2026-06-16-harden-fitness-memory-c
 branch_status: handled
 created_at: 2026-06-16
 verified_at: 2026-06-16
-archived: false
+archived: true
 handoff_context: openspec/changes/harden-fitness-memory-contract/.comet/handoff/design-context.json
 handoff_hash: e3b0da9fad37484918204bc7d64904b4ad63039d0735e01540b570f70ae06ed8
 build_command: cmd.exe /c npx openspec validate harden-fitness-memory-contract

@@ -2,6 +2,8 @@
 comet_change: harden-fitness-memory-contract
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-06-16-harden-fitness-memory-contract
+status: final
 ---
 
 # Design: Harden Fitness Memory Contract
