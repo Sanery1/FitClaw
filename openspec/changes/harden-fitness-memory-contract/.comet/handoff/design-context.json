@@ -1,0 +1,16 @@
+{
+  "change": "harden-fitness-memory-contract",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "e3b0da9fad37484918204bc7d64904b4ad63039d0735e01540b570f70ae06ed8",
+  "files": [
+    { "path": "openspec/changes/harden-fitness-memory-contract/proposal.md", "sha256": "bf69aea4df8d13f361a3e5c2186d9ab8fb41d6668252132ec4185c98f8132c73" },
+    { "path": "openspec/changes/harden-fitness-memory-contract/design.md", "sha256": "9da4751bd9c78eb5c2c98ab5e2ab1a2caa9bf9ef9ed2d8d271ff6d40ee42f5e0" },
+    { "path": "openspec/changes/harden-fitness-memory-contract/tasks.md", "sha256": "d2ab3f7df3eb88d1adb8bc00ec9bb0259e95f3b0cc0a1d8980ac34202add2bb0" },
+    { "path": "openspec/changes/harden-fitness-memory-contract/specs/feishu-fitness-user-loop/spec.md", "sha256": "11ef586be816dee4625ff3a5c4472f73ca99420fd1eba492b1f8e2e85a351d71" },
+    { "path": "openspec/changes/harden-fitness-memory-contract/specs/fitness-memory-contract/spec.md", "sha256": "497dfb75d303def0ce7e929088074258796f70f4a5719b8b20edf5017a26aded" },
+    { "path": "openspec/changes/harden-fitness-memory-contract/specs/product-direction/spec.md", "sha256": "0772e31f05442eb5abe27bb1f5580a761b61836425ccfc6e348f56780178e46d" }
+  ]
+}
