@@ -1,0 +1,43 @@
+id: bodybuilding-plan-suggest-no-save
+suite: skills
+prompt: "明天腿部有点累，给我一个临时调整建议，先不要保存计划。"
+initialData:
+  sport-data/bodybuilding/training_plan.json:
+    name: hypertrophy base
+    goal: hypertrophy
+    days_per_week: 4
+    days:
+      - name: Lower A
+        exercises:
+          - name: squat
+            sets: 4
+            reps: 6
+            rest_seconds: 150
+fauxResponses:
+  - text: |
+      明天可以临时把深蹲强度下调，保留动作模式但减少 1-2 组，并把主观用力控制在 RPE 6-7。这个只是明天的临时建议，我不会把它保存为你的当前训练计划。
+graders:
+  - type: final_contains
+    text: "临时"
+  - type: final_contains
+    text: "不会"
+  - type: final_contains
+    text: "保存"
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.name
+    equals: hypertrophy base
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.days_per_week
+    equals: 4
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.days[0].exercises[0].sets
+    equals: 4
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1
