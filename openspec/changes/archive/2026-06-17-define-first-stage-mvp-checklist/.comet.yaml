@@ -1,0 +1,14 @@
+workflow: tweak
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: c7d8628f05a32cbd33e0b4b96d73237c8afa2f13
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-define-first-stage-mvp-checklist-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true
