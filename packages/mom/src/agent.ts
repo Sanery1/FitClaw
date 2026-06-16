@@ -18,7 +18,7 @@ import {
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
-import { isAbsolute, join } from "path";
+import { dirname, isAbsolute, join } from "path";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
 import { getMomContextWindowOptions, type MomContextWindowResult, windowMomContext } from "./context-window.js";
 import * as log from "./log.js";
@@ -98,14 +98,23 @@ function getMemory(channelDir: string): string {
 	return parts.join("\n\n");
 }
 
-function loadMomSkills(channelDir: string, workspacePath: string): Skill[] {
+export function resolveMomHostWorkspacePath(channelDir: string, channelId: string): string {
+	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
+	let workspacePath = channelDir;
+	for (let i = 0; i < channelParts.length; i++) {
+		workspacePath = dirname(workspacePath);
+	}
+	return workspacePath;
+}
+
+export function loadMomSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): Skill[] {
 	const skillMap = new Map<string, Skill>();
 
-	// channelDir is the host path (e.g., /Users/.../data/C0A34FL8PMH)
-	// hostWorkspacePath is the parent directory on host
+	// channelDir is the host path for this conversation, e.g.:
+	// - DM:    /Users/.../data/C0A34FL8PMH
+	// - group: /Users/.../data/C0A34FL8PMH/ou_xxx
+	// hostWorkspacePath is the parent Bot workspace on host.
 	// workspacePath is the container path (e.g., /workspace)
-	const hostWorkspacePath = join(channelDir, "..");
-
 	// Helper to translate host paths to container paths
 	const translatePath = (hostPath: string): string => {
 		if (hostPath.startsWith(hostWorkspacePath)) {
@@ -279,14 +288,15 @@ export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: strin
  */
 function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
 	const executor = createExecutor(sandboxConfig);
-	const workspacePath = executor.getWorkspacePath(join(channelDir, ".."));
+	const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, channelId);
+	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
 
 	// Create tools
 	const tools = createMomTools(executor);
 
 	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
 	const memory = getMemory(channelDir);
-	const skills = loadMomSkills(channelDir, workspacePath);
+	const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
 	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
@@ -566,7 +576,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 			// Update system prompt with fresh memory, channel/user info, and skills
 			const memory = getMemory(channelDir);
-			const skills = loadMomSkills(channelDir, workspacePath);
+			const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
 			session.agent.state.systemPrompt = systemPrompt;
 

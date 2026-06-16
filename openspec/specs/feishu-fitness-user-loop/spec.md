@@ -19,6 +19,10 @@ FitClaw SHALL define the first-stage Feishu experience as a conversational fitne
 - **WHEN** 飞书对话产生长期有效的健身事实
 - **THEN** FitClaw SHALL 按 `fitness-memory-contract` 选择 namespace、字段形状和 `replace` / `append` 写入模式
 
+#### Scenario: Loading fitness skills in isolated group conversations
+- **WHEN** 飞书群聊为每个用户创建隔离会话目录
+- **THEN** FitClaw SHALL 仍从 Bot workspace 加载 workspace-level Skill，并注册对应的 `data_<skill>_read/write` 工具
+
 ### Requirement: Feishu onboarding flow
 FitClaw SHALL use progressive onboarding in Feishu, collecting only enough high-value information to start coaching and saving durable facts immediately.
 
