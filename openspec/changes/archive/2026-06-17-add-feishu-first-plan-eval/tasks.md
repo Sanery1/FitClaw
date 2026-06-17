@@ -1,0 +1,4 @@
+- [x] Add Feishu first-plan generation session eval.
+- [x] Verify red phase by running the focused eval before adding faux tool responses.
+- [x] Add minimal faux responses and graders for the durable plan write path.
+- [x] Validate focused eval, session eval suite, OpenSpec specs, and project check.

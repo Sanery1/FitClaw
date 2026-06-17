@@ -1,0 +1,99 @@
+id: feishu-first-plan-from-profile
+suite: session
+prompt: "我的资料都记录好了，帮我生成第一版训练计划并保存。"
+initialData:
+  sport-data/bodybuilding/user_profile.json:
+    goal: hypertrophy
+    experience: beginner
+    training_days_per_week: 4
+    equipment:
+      - barbell
+      - dumbbell
+    injury_limitations: none
+fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: user_profile
+  - toolCalls:
+      - name: data_bodybuilding_write
+        args:
+          namespace: training_plan
+          mode: replace
+          data:
+            name: 4-day beginner hypertrophy plan
+            goal: hypertrophy
+            days_per_week: 4
+            days:
+              - name: Day 1 Upper A
+                exercises:
+                  - name: dumbbell bench press
+                    sets: 3
+                    reps: 10
+                    rest_seconds: 90
+                  - name: barbell row
+                    sets: 3
+                    reps: 10
+                    rest_seconds: 90
+              - name: Day 2 Lower A
+                exercises:
+                  - name: squat
+                    sets: 3
+                    reps: 8
+                    rest_seconds: 120
+              - name: Day 3 Upper B
+                exercises:
+                  - name: overhead press
+                    sets: 3
+                    reps: 8
+                    rest_seconds: 90
+              - name: Day 4 Lower B
+                exercises:
+                  - name: romanian deadlift
+                    sets: 3
+                    reps: 10
+                    rest_seconds: 120
+  - text: |
+      已保存你的第一版 4天 增肌训练计划：Day 1 Upper A、Day 2 Lower A、Day 3 Upper B、Day 4 Lower B。先从保守重量开始，每组保留 1-3 次余力。
+graders:
+  - type: final_contains_any
+    texts:
+      - "已保存"
+      - "保存"
+  - type: final_contains_any
+    texts:
+      - "4天"
+      - "4-day"
+      - "四天"
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_read
+      - data_bodybuilding_write
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: user_profile
+  - type: tool_args_match
+    tool: data_bodybuilding_write
+    args:
+      namespace: training_plan
+      mode: replace
+      data:
+        goal: hypertrophy
+        days_per_week: 4
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.goal
+    equals: hypertrophy
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.days_per_week
+    equals: 4
+  - type: json_path_equals
+    file: sport-data/bodybuilding/training_plan.json
+    path: $.days[0].exercises[0].rest_seconds
+    equals: 90
+  - type: max_tool_calls
+    max: 2
+  - type: max_turns
+    max: 3

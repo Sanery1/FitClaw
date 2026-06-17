@@ -1,0 +1,16 @@
+workflow: hotfix
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: b697dcecb21eefe328aae309e3384a81524eeb4b
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-add-feishu-first-plan-eval-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true
+build_command: npm run check
+verify_command: npm run check

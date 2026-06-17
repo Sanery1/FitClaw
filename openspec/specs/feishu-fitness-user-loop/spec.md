@@ -45,6 +45,13 @@ FitClaw SHALL generate or adjust training plans in Feishu using the bodybuilding
 - **WHEN** 用户表示时间、器械、疼痛或恢复状态发生变化
 - **THEN** FitClaw SHALL 基于当前 `training_plan` 给出最小必要调整，并仅在用户确认或明确请求时更新 `training_plan`
 
+### Requirement: Feishu first-plan eval coverage
+FitClaw SHALL protect first training-plan generation from complete Feishu profile context with deterministic eval coverage.
+
+#### Scenario: Generating and saving a first plan from saved profile
+- **WHEN** deterministic Feishu session evals cover a user asking for a first training plan and saved `user_profile` contains goal, experience, equipment, schedule, and no known injury limits
+- **THEN** they SHALL verify FitClaw reads `user_profile`, replaces `training_plan` with a structured plan, and confirms the saved plan in mobile-readable text
+
 ### Requirement: Feishu training log flow
 FitClaw SHALL parse natural-language workout logs in Feishu and persist completed training to `training_log` using the append-only record contract.
 
