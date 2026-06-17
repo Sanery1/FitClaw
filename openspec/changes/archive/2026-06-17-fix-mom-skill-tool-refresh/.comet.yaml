@@ -1,0 +1,14 @@
+workflow: hotfix
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: 7bd1a2a1ff9b679bdf59c1037c98fb748c585d21
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-fix-mom-skill-tool-refresh-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true

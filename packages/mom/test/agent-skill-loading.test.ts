@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMomSkills, resolveMomHostWorkspacePath } from "../src/agent.js";
+import { createMomSkillDataTools, loadMomSkills, resolveMomHostWorkspacePath } from "../src/agent.js";
 
 function toPosixPath(path: string): string {
 	return path.replace(/\\/g, "/");
@@ -86,5 +86,35 @@ describe("mom skill loading", () => {
 		const bodybuilding = skills.find((skill) => skill.name === "bodybuilding");
 		expect(bodybuilding?.description).toBe("Channel-specific bodybuilding skill.");
 		expect(toPosixPath(bodybuilding?.filePath ?? "")).toBe("/workspace/chat-1/user-1/skills/bodybuilding/SKILL.md");
+	});
+
+	it("builds data tools from currently loaded skill declarations", () => {
+		const channelDir = join(workspaceDir, "chat-1");
+		mkdirSync(channelDir, { recursive: true });
+
+		const initialSkills = loadMomSkills(channelDir, "/workspace", workspaceDir);
+		expect(createMomSkillDataTools(channelDir, initialSkills).map((tool) => tool.name)).toEqual([]);
+
+		const skillDir = join(workspaceDir, "skills", "bodybuilding");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			[
+				"---",
+				"name: bodybuilding",
+				"description: Bodybuilding coaching skill.",
+				"data:",
+				"  training_log:",
+				"    type: array",
+				"---",
+				"# Bodybuilding",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const refreshedSkills = loadMomSkills(channelDir, "/workspace", workspaceDir);
+		const toolNames = createMomSkillDataTools(channelDir, refreshedSkills).map((tool) => tool.name);
+
+		expect(toolNames).toEqual(["data_bodybuilding_read", "data_bodybuilding_write"]);
 	});
 });

@@ -1,4 +1,4 @@
-import { Agent, type AgentEvent } from "@fitclaw/agent-core";
+import { Agent, type AgentEvent, type AgentTool } from "@fitclaw/agent-core";
 import type { ImageContent } from "@fitclaw/ai";
 import {
 	AgentSession,
@@ -141,6 +141,26 @@ export function loadMomSkills(channelDir: string, workspacePath: string, hostWor
 	}
 
 	return Array.from(skillMap.values());
+}
+
+export function createMomSkillDataTools(channelDir: string, skills: Skill[]): AgentTool<any>[] {
+	const tools: AgentTool<any>[] = [];
+
+	for (const skill of skills) {
+		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
+			const skillStore = new FileSportDataStore(channelDir);
+			tools.push(
+				createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces),
+				createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces),
+			);
+		}
+	}
+
+	return tools;
+}
+
+function createMomActiveTools(executor: ReturnType<typeof createExecutor>, channelDir: string, skills: Skill[]) {
+	return [...createMomTools(executor), ...createMomSkillDataTools(channelDir, skills)];
 }
 
 function buildSystemPrompt(workspacePath: string, channelId: string, memory: string, skills: Skill[]): string {
@@ -291,9 +311,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, channelId);
 	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
 
-	// Create tools
-	const tools = createMomTools(executor);
-
 	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
 	const memory = getMemory(channelDir);
 	const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
@@ -302,15 +319,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Model B: auto-register data persistence tools for skills with data: declarations
 	const sportDataDir = join(channelDir, "sport-data");
 	process.env.FITCLAW_DATA_DIR = sportDataDir;
-	for (const skill of skills) {
-		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
-			const skillStore = new FileSportDataStore(channelDir);
-			tools.push(
-				createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces),
-				createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces),
-			);
-		}
-	}
+	const tools = createMomActiveTools(executor, channelDir, skills);
 
 	// Create session manager and settings manager
 	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
@@ -579,6 +588,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
 			session.agent.state.systemPrompt = systemPrompt;
+			session.agent.state.tools = createMomActiveTools(executor, channelDir, skills);
 
 			// Reset per-run state
 			runState.ctx = ctx;
