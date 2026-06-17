@@ -1,0 +1,4 @@
+- [x] Add Feishu confirmed plan-adjustment save session eval.
+- [x] Verify red phase with a text-only faux response that does not persist the plan.
+- [x] Add minimal faux responses that read and replace `training_plan`.
+- [x] Validate focused eval, session eval suite, OpenSpec specs, and project check.

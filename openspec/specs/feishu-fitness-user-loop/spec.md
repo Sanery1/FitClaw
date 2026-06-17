@@ -59,6 +59,13 @@ FitClaw SHALL protect temporary Feishu training-plan adjustment requests with de
 - **WHEN** deterministic Feishu session evals cover a user asking to adjust an existing plan temporarily and explicitly not save the change
 - **THEN** they SHALL verify FitClaw reads `training_plan`, gives a minimal adjustment, does not call `data_bodybuilding_write`, and leaves the persisted plan unchanged
 
+### Requirement: Feishu plan-adjustment save eval coverage
+FitClaw SHALL protect confirmed Feishu training-plan adjustment saves with deterministic eval coverage.
+
+#### Scenario: Saving a confirmed plan adjustment
+- **WHEN** deterministic Feishu session evals cover a user explicitly confirming that an adjusted plan should be saved as the current plan
+- **THEN** they SHALL verify FitClaw reads `training_plan`, replaces `training_plan` with the adjusted structured plan, and confirms the save concisely
+
 ### Requirement: Feishu training log flow
 FitClaw SHALL parse natural-language workout logs in Feishu and persist completed training to `training_log` using the append-only record contract.
 
