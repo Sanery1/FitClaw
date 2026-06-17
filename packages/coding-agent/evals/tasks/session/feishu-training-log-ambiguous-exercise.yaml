@@ -1,0 +1,18 @@
+id: feishu-training-log-ambiguous-exercise
+suite: session
+prompt: "记录今天练了 5x5，RPE 8"
+fauxResponses:
+  - text: "还差一个关键信息：今天练的是什么动作？告诉我动作名称后，我再帮你记录 5x5，RPE 8。"
+graders:
+  - type: final_contains_any
+    texts:
+      - "什么动作"
+      - "哪个动作"
+      - "动作名称"
+      - "练的是什么"
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

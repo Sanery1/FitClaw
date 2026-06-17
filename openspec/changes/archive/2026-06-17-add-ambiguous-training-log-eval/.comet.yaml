@@ -1,0 +1,16 @@
+workflow: hotfix
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: full
+base_ref: 8a3acf1a86ba07a866dcfc3e9a1b744e10933768
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-add-ambiguous-training-log-eval-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true
+build_command: npm run check
+verify_command: npm run check

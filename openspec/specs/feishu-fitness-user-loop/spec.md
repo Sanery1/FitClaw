@@ -100,6 +100,13 @@ FitClaw SHALL protect the first-stage Feishu user loop with deterministic eval o
 - **WHEN** 后续 change adds or changes onboarding, logging, planning, review, or safety behavior
 - **THEN** it SHALL include a deterministic eval or a documented manual Feishu scenario that verifies the behavior
 
+### Requirement: Ambiguous training log eval coverage
+FitClaw SHALL protect ambiguous Feishu workout-log handling with deterministic eval coverage.
+
+#### Scenario: Asking for missing exercise before writing a log
+- **WHEN** deterministic evals cover a Feishu workout-log prompt that includes measurable training values but omits the exercise or action name
+- **THEN** they SHALL verify FitClaw asks a short clarification question and does not call `data_bodybuilding_write`
+
 ### Requirement: Next-session guidance eval coverage
 FitClaw SHALL protect next-session guidance with deterministic eval coverage that verifies saved-context reads and missing-data uncertainty across synthetic and captured Feishu session evals.
 
