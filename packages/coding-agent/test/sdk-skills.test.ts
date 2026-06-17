@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getModel } from "@fitclaw/ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExtensionRuntime } from "../src/core/extensions/loader.js";
 import type { ResourceLoader } from "../src/core/resource-loader.js";
@@ -106,5 +107,50 @@ This is a test skill.
 
 		expect(session.resourceLoader.getSkills().skills).toEqual([customSkill]);
 		expect(session.resourceLoader.getSkills().diagnostics).toEqual([]);
+	});
+
+	it("sets FITCLAW_DATA_DIR to the skill data root used by FileSportDataStore", async () => {
+		const previousDataDir = process.env.FITCLAW_DATA_DIR;
+		const sessionDir = join(tempDir, "session");
+		const customSkill = {
+			name: "bodybuilding",
+			description: "Bodybuilding skill",
+			filePath: "/fake/path/SKILL.md",
+			baseDir: "/fake/path",
+			sourceInfo: createSyntheticSourceInfo("/fake/path/SKILL.md", { source: "sdk" }),
+			disableModelInvocation: false,
+			hasTools: false,
+			dataNamespaces: new Map([["training_log", { type: "array" as const }]]),
+		};
+		const resourceLoader: ResourceLoader = {
+			getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+			getSkills: () => ({ skills: [customSkill], diagnostics: [] }),
+			getPrompts: () => ({ prompts: [], diagnostics: [] }),
+			getThemes: () => ({ themes: [], diagnostics: [] }),
+			getAgentsFiles: () => ({ agentsFiles: [] }),
+			getSystemPrompt: () => undefined,
+			getAppendSystemPrompt: () => [],
+			extendResources: () => {},
+			reload: async () => {},
+		};
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir: tempDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			sessionManager: SessionManager.create(tempDir, sessionDir),
+			resourceLoader,
+		});
+
+		try {
+			expect(process.env.FITCLAW_DATA_DIR).toBe(session.sessionManager.getSessionDir());
+		} finally {
+			session.dispose();
+			if (previousDataDir === undefined) {
+				delete process.env.FITCLAW_DATA_DIR;
+			} else {
+				process.env.FITCLAW_DATA_DIR = previousDataDir;
+			}
+		}
 	});
 });

@@ -1,0 +1,14 @@
+workflow: hotfix
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: 6f026c9dc3c55a20b44966e9fa2f6ac39742359d
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-fix-fitclaw-data-dir-env-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true

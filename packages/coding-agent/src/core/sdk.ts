@@ -388,8 +388,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let customTools = options.customTools;
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
-	const sportDataDir = join(sessionManager.getSessionDir(), "sport-data");
-	process.env.FITCLAW_DATA_DIR = sportDataDir;
+	process.env.FITCLAW_DATA_DIR = sessionManager.getSessionDir();
 	for (const skill of resourceLoader.getSkills().skills) {
 		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
 			const skillStore = new FileSportDataStore(sessionManager.getSessionDir());

@@ -317,8 +317,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
-	const sportDataDir = join(channelDir, "sport-data");
-	process.env.FITCLAW_DATA_DIR = sportDataDir;
+	process.env.FITCLAW_DATA_DIR = channelDir;
 	const tools = createMomActiveTools(executor, channelDir, skills);
 
 	// Create session manager and settings manager
