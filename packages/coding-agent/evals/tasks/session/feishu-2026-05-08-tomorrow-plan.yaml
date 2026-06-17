@@ -9,18 +9,39 @@ initialData:
       exercise: 杠铃卧推
       notes: 增肌计划 Day1 Upper A
 fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_plan
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_log
   - text: |
-      明天是 Day 2 - Lower A（力量侧重）。安排杠铃深蹲、罗马尼亚硬拉、杠铃箭步蹲、提踵和平板支撑，并先做热身组。
+      我现在没有你的当前训练计划，所以不能确定明天应该是哪一天。已知最近一次记录是 05.08 杠铃卧推，备注为增肌计划 Day1 Upper A；如果你补充当前计划，我再帮你安排明天训练。
 graders:
   - type: final_contains
-    text: "Lower A"
-  - type: final_contains
-    text: "杠铃深蹲"
-  - type: final_contains
-    text: "罗马尼亚硬拉"
-  - type: final_contains
-    text: "热身"
+    text: "杠铃卧推"
+  - type: final_contains_any
+    texts:
+      - "没有你的当前训练计划"
+      - "缺少当前训练计划"
+      - "不能确定"
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_read
+      - data_bodybuilding_read
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_plan
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_log
+  - type: tool_not_called
+    tool: data_bodybuilding_write
   - type: max_tool_calls
-    max: 0
+    max: 2
   - type: max_turns
-    max: 1
+    max: 3
