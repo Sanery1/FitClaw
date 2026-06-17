@@ -1,0 +1,16 @@
+workflow: hotfix
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: 193a5ecc87930e9200293c4af59a92fe5c129ecd
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-17-add-feishu-plan-adjust-no-save-eval-verify.md
+branch_status: handled
+created_at: 2026-06-17
+verified_at: 2026-06-17
+archived: true
+build_command: npm run check
+verify_command: npm run check
