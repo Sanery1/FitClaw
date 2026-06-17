@@ -17,6 +17,10 @@ initialData:
       reps: 5
       rpe: 8
 fauxResponses:
+  - toolCalls:
+      - name: data_bodybuilding_read
+        args:
+          namespace: training_log
   - text: |
       最近共有2次训练记录：05.05 杠铃深蹲 100kg 3组x8次；05.08 杠铃卧推 60kg 5组x5次，RPE 8。
 graders:
@@ -30,7 +34,14 @@ graders:
     text: "60kg"
   - type: tool_not_called
     tool: data_bodybuilding_write
+  - type: tool_sequence
+    tools:
+      - data_bodybuilding_read
+  - type: tool_args_match
+    tool: data_bodybuilding_read
+    args:
+      namespace: training_log
   - type: max_tool_calls
-    max: 0
-  - type: max_turns
     max: 1
+  - type: max_turns
+    max: 2
