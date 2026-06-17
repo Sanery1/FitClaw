@@ -107,6 +107,13 @@ FitClaw SHALL protect ambiguous Feishu workout-log handling with deterministic e
 - **WHEN** deterministic evals cover a Feishu workout-log prompt that includes measurable training values but omits the exercise or action name
 - **THEN** they SHALL verify FitClaw asks a short clarification question and does not call `data_bodybuilding_write`
 
+### Requirement: Feishu personal record eval coverage
+FitClaw SHALL protect Feishu personal-record logging with deterministic eval coverage.
+
+#### Scenario: Recording a clear PR from Feishu
+- **WHEN** deterministic Feishu session evals cover a user explicitly reporting a personal record with enough structured data
+- **THEN** they SHALL verify FitClaw appends the completed workout to `training_log`, appends the record to `personal_records`, and confirms the save concisely
+
 ### Requirement: Next-session guidance eval coverage
 FitClaw SHALL protect next-session guidance with deterministic eval coverage that verifies saved-context reads and missing-data uncertainty across synthetic and captured Feishu session evals.
 
