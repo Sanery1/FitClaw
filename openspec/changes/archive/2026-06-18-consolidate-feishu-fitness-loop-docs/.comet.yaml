@@ -1,0 +1,16 @@
+workflow: tweak
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: e7e291cf30054fed036315da5d690ae18316e16a
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-18-consolidate-feishu-fitness-loop-docs-verify.md
+branch_status: handled
+created_at: 2026-06-18
+verified_at: 2026-06-18
+archived: true
+build_command: npm run check
+verify_command: npm run check

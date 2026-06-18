@@ -1,0 +1,3 @@
+- [x] Add `docs/FEISHU_FITNESS_LOOP_STATUS.md`.
+- [x] Link the status document from `docs/PROJECT_UNDERSTANDING.md`.
+- [x] Run documentation-relevant validation and project check.
