@@ -1,0 +1,16 @@
+workflow: tweak
+phase: archive
+build_mode: direct
+isolation: branch
+verify_mode: light
+base_ref: 42a03c5c4d1d1c3c7c911728927c472c5cb2a72e
+design_doc: null
+plan: null
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-18-add-feishu-fitness-smoke-script-verify.md
+branch_status: handled
+created_at: 2026-06-18
+verified_at: 2026-06-18
+archived: true
+build_command: npm run check
+verify_command: npm run check

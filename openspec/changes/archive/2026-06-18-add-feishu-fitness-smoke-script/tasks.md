@@ -1,0 +1,3 @@
+- [x] Add `docs/FEISHU_FITNESS_SMOKE_SCRIPT.md`.
+- [x] Link the smoke script from `docs/FEISHU_FITNESS_LOOP_STATUS.md`.
+- [x] Run documentation-relevant validation and project check.
