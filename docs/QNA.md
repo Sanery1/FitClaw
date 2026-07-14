@@ -7109,6 +7109,8 @@ Prompt / Skill 描述
 - `packages/coding-agent/src/evals/metrics.ts`
 - `packages/coding-agent/evals/tasks/`
 
+当前 `session` suite 有 23 个任务。除身份、计划、训练日志、总结和安全边界外，还覆盖 `body_metrics` 体测追加写入与 `progression` 渐进超负荷事件追加写入；这些任务验证数据合同，不替代真实飞书模型审计。
+
 ---
 
 ### Q38: 当前 eval 是 live model eval 吗？如果不是，faux-response contract eval 的边界是什么？

@@ -223,7 +223,7 @@ npm run eval -- --tasks evals\tasks --out eval-results --runs 3
 - 文件/数据：`json_path_equals`、`file_exists`、`file_not_exists`
 - 效率边界：`max_tool_calls`、`max_turns`
 
-已沉淀 Feishu session eval，位于 `packages/coding-agent/evals/tasks/session/`，覆盖身份介绍、用户画像写入、伤病信息 gate、首计划生成、计划调整保存/不保存、训练日志写入、PR 记录、训练总结、明日训练安排、缺计划不编造、肩痛动作替换、天气边界、游泳换气和腰痛硬拉安全边界。
+已沉淀 23 个 Feishu session eval，位于 `packages/coding-agent/evals/tasks/session/`，覆盖身份介绍、用户画像写入、伤病信息 gate、首计划生成、计划调整保存/不保存、训练日志写入、PR 记录、体测写入、渐进超负荷事件、训练总结、明日训练安排、缺计划不编造、肩痛动作替换、天气边界、游泳换气和腰痛硬拉安全边界。
 
 人工只应在新增真实场景、校准 graders、处理 false positive/false negative 或引入 LLM judge 时介入；已确认的任务日常用命令自动跑报告。
 
