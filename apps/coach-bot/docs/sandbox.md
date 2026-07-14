@@ -1,5 +1,9 @@
 # Mom Docker Sandbox
 
+> Legacy upstream reference. Commands and product names in this document are
+> historical; use `apps/coach-bot/README.md` and the local `docker.sh` for the
+> current FitClaw Coach workflow.
+
 ## Overview
 
 Mom can run tools either directly on the host or inside a Docker container for isolation.

@@ -248,12 +248,12 @@ export function logStartup(workingDir: string, sandbox: string): void {
 }
 
 export function logConnected(): void {
-	console.log("⚡️ Mom bot connected and listening!");
+	console.log("FitClaw coach connected and listening.");
 	console.log("");
 }
 
 export function logDisconnected(): void {
-	console.log("Mom bot disconnected.");
+	console.log("FitClaw coach disconnected.");
 }
 
 // Backfill

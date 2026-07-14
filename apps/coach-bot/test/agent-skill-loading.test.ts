@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	configureMomSkillDataRoot,
-	createMomSkillDataTools,
-	loadMomSkills,
-	resolveMomHostWorkspacePath,
+	configureCoachSkillDataRoot,
+	createCoachSkillDataTools,
+	loadCoachSkills,
+	resolveCoachHostWorkspacePath,
 } from "../src/agent.js";
 
 function toPosixPath(path: string): string {
@@ -46,8 +46,8 @@ describe("coach bot skill loading", () => {
 		const channelDir = join(workspaceDir, "chat-1", "user-1");
 		mkdirSync(channelDir, { recursive: true });
 
-		const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, "chat-1/user-1");
-		const skills = loadMomSkills(channelDir, "/workspace", hostWorkspacePath);
+		const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, "chat-1/user-1");
+		const skills = loadCoachSkills(channelDir, "/workspace", hostWorkspacePath);
 
 		const bodybuilding = skills.find((skill) => skill.name === "bodybuilding");
 		expect(toPosixPath(hostWorkspacePath)).toBe(toPosixPath(workspaceDir));
@@ -85,8 +85,8 @@ describe("coach bot skill loading", () => {
 			"utf-8",
 		);
 
-		const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, "chat-1/user-1");
-		const skills = loadMomSkills(channelDir, "/workspace", hostWorkspacePath);
+		const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, "chat-1/user-1");
+		const skills = loadCoachSkills(channelDir, "/workspace", hostWorkspacePath);
 
 		const bodybuilding = skills.find((skill) => skill.name === "bodybuilding");
 		expect(bodybuilding?.description).toBe("Channel-specific bodybuilding skill.");
@@ -97,8 +97,8 @@ describe("coach bot skill loading", () => {
 		const channelDir = join(workspaceDir, "chat-1");
 		mkdirSync(channelDir, { recursive: true });
 
-		const initialSkills = loadMomSkills(channelDir, "/workspace", workspaceDir);
-		expect(createMomSkillDataTools(channelDir, initialSkills).map((tool) => tool.name)).toEqual([]);
+		const initialSkills = loadCoachSkills(channelDir, "/workspace", workspaceDir);
+		expect(createCoachSkillDataTools(channelDir, initialSkills).map((tool) => tool.name)).toEqual([]);
 
 		const skillDir = join(workspaceDir, "skills", "bodybuilding");
 		mkdirSync(skillDir, { recursive: true });
@@ -117,8 +117,8 @@ describe("coach bot skill loading", () => {
 			"utf-8",
 		);
 
-		const refreshedSkills = loadMomSkills(channelDir, "/workspace", workspaceDir);
-		const toolNames = createMomSkillDataTools(channelDir, refreshedSkills).map((tool) => tool.name);
+		const refreshedSkills = loadCoachSkills(channelDir, "/workspace", workspaceDir);
+		const toolNames = createCoachSkillDataTools(channelDir, refreshedSkills).map((tool) => tool.name);
 
 		expect(toolNames).toEqual(["data_bodybuilding_read", "data_bodybuilding_write"]);
 	});
@@ -129,7 +129,7 @@ describe("coach bot skill loading", () => {
 		const channelDir = join(workspaceDir, channelId);
 		mkdirSync(channelDir, { recursive: true });
 
-		configureMomSkillDataRoot(channelDir);
+		configureCoachSkillDataRoot(channelDir);
 		try {
 			expect(process.env.FITCLAW_DATA_DIR).toBe(channelDir);
 		} finally {

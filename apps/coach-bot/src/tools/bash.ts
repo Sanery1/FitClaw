@@ -12,7 +12,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
  */
 function getTempFilePath(): string {
 	const id = randomBytes(8).toString("hex");
-	return join(tmpdir(), `mom-bash-${id}.log`);
+	return join(tmpdir(), `fitclaw-coach-bash-${id}.log`);
 }
 
 const bashSchema = Type.Object({

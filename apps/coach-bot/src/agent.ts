@@ -21,12 +21,12 @@ import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { dirname, isAbsolute, join } from "path";
-import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
-import { getMomContextWindowOptions, type MomContextWindowResult, windowMomContext } from "./context-window.js";
+import { createCoachSettingsManager, syncLogToSessionManager } from "./context.js";
+import { type CoachContextWindowResult, getCoachContextWindowOptions, windowCoachContext } from "./context-window.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelStore } from "./store.js";
-import { createMomTools } from "./tools/index.js";
+import { createCoachTools } from "./tools/index.js";
 import type { BotContext } from "./types.js";
 
 export interface PendingMessage {
@@ -53,7 +53,7 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 	webp: "image/webp",
 };
 
-function formatContextWindowStats(result: MomContextWindowResult): string {
+function formatContextWindowStats(result: CoachContextWindowResult): string {
 	if (!result.wasTrimmed) {
 		return `${result.originalCount} messages`;
 	}
@@ -64,7 +64,7 @@ function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
 }
 
-export function resolveMomHostWorkspacePath(channelDir: string, channelId: string): string {
+export function resolveCoachHostWorkspacePath(channelDir: string, channelId: string): string {
 	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
 	let workspacePath = channelDir;
 	for (let i = 0; i < channelParts.length; i++) {
@@ -73,7 +73,7 @@ export function resolveMomHostWorkspacePath(channelDir: string, channelId: strin
 	return workspacePath;
 }
 
-export function loadMomSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): Skill[] {
+export function loadCoachSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): Skill[] {
 	const skillMap = new Map<string, Skill>();
 
 	// channelDir is the host path for this conversation, e.g.:
@@ -109,7 +109,7 @@ export function loadMomSkills(channelDir: string, workspacePath: string, hostWor
 	return Array.from(skillMap.values());
 }
 
-export function createMomSkillDataTools(channelDir: string, skills: Skill[]): AgentTool[] {
+export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): AgentTool[] {
 	const tools: AgentTool[] = [];
 
 	for (const skill of skills) {
@@ -125,11 +125,11 @@ export function createMomSkillDataTools(channelDir: string, skills: Skill[]): Ag
 	return tools;
 }
 
-function createMomActiveTools(executor: ReturnType<typeof createExecutor>, channelDir: string, skills: Skill[]) {
-	return [...createMomTools(executor), ...createMomSkillDataTools(channelDir, skills)];
+function createCoachActiveTools(executor: ReturnType<typeof createExecutor>, channelDir: string, skills: Skill[]) {
+	return [...createCoachTools(executor), ...createCoachSkillDataTools(channelDir, skills)];
 }
 
-export function configureMomSkillDataRoot(channelDir: string): void {
+export function configureCoachSkillDataRoot(channelDir: string): void {
 	process.env.FITCLAW_DATA_DIR = channelDir;
 }
 
@@ -215,23 +215,23 @@ export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: strin
  */
 function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
 	const executor = createExecutor(sandboxConfig);
-	const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, channelId);
+	const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, channelId);
 	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
 
 	// Initial system prompt (updated each run with freshly loaded skills)
-	const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
+	const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 	const systemPrompt = buildCoachSystemPrompt(skills);
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
-	configureMomSkillDataRoot(channelDir);
-	const tools = createMomActiveTools(executor, channelDir, skills);
+	configureCoachSkillDataRoot(channelDir);
+	const tools = createCoachActiveTools(executor, channelDir, skills);
 
 	// Create session manager and settings manager
 	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
 	const contextFile = join(channelDir, "context.jsonl");
 	const sessionManager = SessionManager.open(contextFile, channelDir);
-	const settingsManager = createMomSettingsManager(join(channelDir, ".."));
-	const contextWindowOptions = getMomContextWindowOptions();
+	const settingsManager = createCoachSettingsManager(join(channelDir, ".."));
+	const contextWindowOptions = getCoachContextWindowOptions();
 
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
@@ -274,7 +274,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Load existing messages
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
-		const windowedContext = windowMomContext(loadedSession.messages, contextWindowOptions);
+		const windowedContext = windowCoachContext(loadedSession.messages, contextWindowOptions);
 		agent.state.messages = windowedContext.messages;
 		log.logInfo(`[${channelId}] Loaded ${formatContextWindowStats(windowedContext)} from context.jsonl`);
 	}
@@ -483,16 +483,16 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// This picks up any messages synced above
 			const reloadedSession = sessionManager.buildSessionContext();
 			if (reloadedSession.messages.length > 0) {
-				const windowedContext = windowMomContext(reloadedSession.messages, contextWindowOptions);
+				const windowedContext = windowCoachContext(reloadedSession.messages, contextWindowOptions);
 				agent.state.messages = windowedContext.messages;
 				log.logInfo(`[${channelId}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
 			}
 
 			// Update the system prompt and tools with freshly loaded skills
-			const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
+			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildCoachSystemPrompt(skills);
 			session.agent.state.systemPrompt = systemPrompt;
-			session.agent.state.tools = createMomActiveTools(executor, channelDir, skills);
+			session.agent.state.tools = createCoachActiveTools(executor, channelDir, skills);
 
 			// Reset per-run state
 			runState.ctx = ctx;

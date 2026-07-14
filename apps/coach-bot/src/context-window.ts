@@ -1,11 +1,11 @@
 import type { AgentMessage } from "@fitclaw/agent-core";
 
-export interface MomContextWindowOptions {
+export interface CoachContextWindowOptions {
 	maxMessages: number;
 	maxSerializedChars: number;
 }
 
-export interface MomContextWindowResult {
+export interface CoachContextWindowResult {
 	messages: AgentMessage[];
 	originalCount: number;
 	retainedCount: number;
@@ -20,17 +20,17 @@ interface MessageTurn {
 	end: number;
 }
 
-export function getMomContextWindowOptions(env: NodeJS.ProcessEnv = process.env): MomContextWindowOptions {
+export function getCoachContextWindowOptions(env: NodeJS.ProcessEnv = process.env): CoachContextWindowOptions {
 	return {
 		maxMessages: readPositiveInteger(env.MOM_CONTEXT_MAX_MESSAGES, DEFAULT_MAX_MESSAGES),
 		maxSerializedChars: readPositiveInteger(env.MOM_CONTEXT_MAX_CHARS, DEFAULT_MAX_SERIALIZED_CHARS),
 	};
 }
 
-export function windowMomContext(
+export function windowCoachContext(
 	messages: readonly AgentMessage[],
-	options: MomContextWindowOptions,
-): MomContextWindowResult {
+	options: CoachContextWindowOptions,
+): CoachContextWindowResult {
 	if (messages.length === 0) {
 		return {
 			messages: [],
@@ -95,7 +95,7 @@ function splitIntoTurns(messages: readonly AgentMessage[]): MessageTurn[] {
 	return turns;
 }
 
-function trimOversizedNewestTurn(messages: AgentMessage[], options: MomContextWindowOptions): AgentMessage[] {
+function trimOversizedNewestTurn(messages: AgentMessage[], options: CoachContextWindowOptions): AgentMessage[] {
 	if (messages.length <= options.maxMessages && estimateSerializedChars(messages) <= options.maxSerializedChars) {
 		return messages.slice();
 	}

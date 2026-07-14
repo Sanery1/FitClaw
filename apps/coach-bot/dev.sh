@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-CONTAINER_NAME="mom-sandbox"
+CONTAINER_NAME="fitclaw-coach-sandbox"
 DATA_DIR="$(pwd)/data"
 
 # Create data directory if it doesn't exist
@@ -25,6 +25,6 @@ else
         tail -f /dev/null
 fi
 
-# Run mom with tsx watch mode
-echo "Starting mom in dev mode..."
+# Run the coach bot with tsx watch mode
+echo "Starting FitClaw coach in dev mode..."
 npx tsx --watch-path src --watch src/main.ts --sandbox=docker:$CONTAINER_NAME ./data

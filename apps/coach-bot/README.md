@@ -10,6 +10,9 @@ discovery and persisted namespaces live in `@fitclaw/runtime`.
 
 Configure the existing Bot environment variables:
 
+The `MOM_*` prefix is retained as the current deployment contract. Application
+code and user-facing identity use FitClaw Coach terminology.
+
 ```bash
 export MOM_FEISHU_APP_ID=cli-xxxxxxxx
 export MOM_FEISHU_APP_SECRET=xxxxxxxx

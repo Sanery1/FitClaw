@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Mom Docker Sandbox Management Script
+# FitClaw Coach Docker Sandbox Management Script
 # Usage:
 #   ./docker.sh create <data-dir>   - Create and start the container
 #   ./docker.sh start               - Start the container
@@ -9,7 +9,7 @@
 #   ./docker.sh status              - Check container status
 #   ./docker.sh shell               - Open a shell in the container
 
-CONTAINER_NAME="mom-sandbox"
+CONTAINER_NAME="fitclaw-coach-sandbox"
 IMAGE="alpine:latest"
 
 case "$1" in
@@ -39,7 +39,7 @@ case "$1" in
     if [ $? -eq 0 ]; then
       echo "Container created and running."
       echo ""
-      echo "Run mom with: mom --sandbox=docker:${CONTAINER_NAME} $2"
+      echo "Run the coach with: fitclaw-coach --sandbox=docker:${CONTAINER_NAME} $2"
     else
       echo "Failed to create container."
       exit 1
@@ -80,7 +80,7 @@ case "$1" in
     ;;
     
   *)
-    echo "Mom Docker Sandbox Management"
+    echo "FitClaw Coach Docker Sandbox Management"
     echo ""
     echo "Usage: $0 <command> [args]"
     echo ""

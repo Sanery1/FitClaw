@@ -1,13 +1,13 @@
 /**
- * Context management for mom.
+ * Context management for the FitClaw coach.
  *
- * Mom uses two files per channel:
+ * The coach uses two files per channel:
  * - context.jsonl: Structured API messages for LLM context (same format as coding-agent sessions)
  * - log.jsonl: Human-readable channel history for grep (no tool results)
  *
  * This module provides:
  * - syncLogToSessionManager: Syncs messages from log.jsonl to SessionManager
- * - createMomSettingsManager: Creates a SettingsManager backed by workspace settings.json
+ * - createCoachSettingsManager: Creates a SettingsManager backed by workspace settings.json
  */
 
 import type { UserMessage } from "@fitclaw/ai";
@@ -31,7 +31,7 @@ interface LogMessage {
 /**
  * Sync user messages from log.jsonl to SessionManager.
  *
- * This ensures that messages logged while mom wasn't running (channel chatter,
+ * This ensures that messages logged while the coach wasn't running (channel chatter,
  * backfilled messages, messages while busy) are added to the LLM context.
  *
  * @param sessionManager - The SessionManager to sync to
@@ -142,12 +142,12 @@ export function syncLogToSessionManager(
 }
 
 // ============================================================================
-// Settings manager for mom
+// Settings manager for the coach
 // ============================================================================
 
-type MomSettingsStorage = Parameters<typeof SettingsManager.fromStorage>[0];
+type CoachSettingsStorage = Parameters<typeof SettingsManager.fromStorage>[0];
 
-class WorkspaceSettingsStorage implements MomSettingsStorage {
+class WorkspaceSettingsStorage implements CoachSettingsStorage {
 	private settingsPath: string;
 
 	constructor(workspaceDir: string) {
@@ -156,7 +156,7 @@ class WorkspaceSettingsStorage implements MomSettingsStorage {
 
 	withLock(scope: "global" | "project", fn: (current: string | undefined) => string | undefined): void {
 		if (scope === "project") {
-			// Mom stores all settings in a single workspace file.
+			// The coach stores all settings in a single workspace file.
 			fn(undefined);
 			return;
 		}
@@ -175,6 +175,6 @@ class WorkspaceSettingsStorage implements MomSettingsStorage {
 	}
 }
 
-export function createMomSettingsManager(workspaceDir: string): SettingsManager {
+export function createCoachSettingsManager(workspaceDir: string): SettingsManager {
 	return SettingsManager.fromStorage(new WorkspaceSettingsStorage(workspaceDir));
 }

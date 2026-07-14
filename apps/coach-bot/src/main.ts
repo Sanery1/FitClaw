@@ -13,9 +13,9 @@ import type { BotContext } from "./types.js";
 // Config
 // ============================================================================
 
-const MOM_FEISHU_APP_ID = process.env.MOM_FEISHU_APP_ID;
-const MOM_FEISHU_APP_SECRET = process.env.MOM_FEISHU_APP_SECRET;
-const MOM_FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitCoach";
+const FEISHU_APP_ID = process.env.MOM_FEISHU_APP_ID;
+const FEISHU_APP_SECRET = process.env.MOM_FEISHU_APP_SECRET;
+const FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitCoach";
 
 interface ParsedArgs {
 	workingDir?: string;
@@ -51,7 +51,7 @@ if (!parsedArgs.workingDir) {
 	process.exit(1);
 }
 
-if (!MOM_FEISHU_APP_ID || !MOM_FEISHU_APP_SECRET) {
+if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
 	console.error("Missing required environment variables:");
 	console.error("  MOM_FEISHU_APP_ID");
 	console.error("  MOM_FEISHU_APP_SECRET");
@@ -190,10 +190,7 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 
 log.logStartup(workingDir, sandbox.type === "host" ? "host" : `docker:${sandbox.container}`);
 
-const bot = new FeishuBot(
-	{ appId: MOM_FEISHU_APP_ID, appSecret: MOM_FEISHU_APP_SECRET, botName: MOM_FEISHU_BOT_NAME },
-	workingDir,
-);
+const bot = new FeishuBot({ appId: FEISHU_APP_ID, appSecret: FEISHU_APP_SECRET, botName: FEISHU_BOT_NAME }, workingDir);
 
 bot.onMessage(async (event) => {
 	// Download attachments before processing

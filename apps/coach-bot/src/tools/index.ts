@@ -5,6 +5,6 @@ import { createEditTool } from "./edit.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
 
-export function createMomTools(executor: Executor): AgentTool<any>[] {
+export function createCoachTools(executor: Executor): AgentTool[] {
 	return [createReadTool(executor), createBashTool(executor), createEditTool(executor), createWriteTool(executor)];
 }

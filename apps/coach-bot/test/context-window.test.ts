@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@fitclaw/agent-core";
 import { describe, expect, it } from "vitest";
-import { getMomContextWindowOptions, windowMomContext } from "../src/context-window.js";
+import { getCoachContextWindowOptions, windowCoachContext } from "../src/context-window.js";
 
 function userMessage(id: number, content = `user ${id}`): AgentMessage {
 	return {
@@ -36,11 +36,11 @@ function assistantMessage(id: number, content = `assistant ${id}`): AgentMessage
 	};
 }
 
-describe("windowMomContext", () => {
+describe("windowCoachContext", () => {
 	it("returns all messages when the context is already inside the window", () => {
 		const messages = [userMessage(1), assistantMessage(2)];
 
-		const result = windowMomContext(messages, { maxMessages: 10, maxSerializedChars: 10_000 });
+		const result = windowCoachContext(messages, { maxMessages: 10, maxSerializedChars: 10_000 });
 
 		expect(result.messages).toEqual(messages);
 		expect(result.messages).not.toBe(messages);
@@ -59,7 +59,7 @@ describe("windowMomContext", () => {
 			assistantMessage(6),
 		];
 
-		const result = windowMomContext(messages, { maxMessages: 4, maxSerializedChars: 10_000 });
+		const result = windowCoachContext(messages, { maxMessages: 4, maxSerializedChars: 10_000 });
 
 		expect(result.messages).toEqual([userMessage(3), assistantMessage(4), userMessage(5), assistantMessage(6)]);
 		expect(result.originalCount).toBe(6);
@@ -70,16 +70,16 @@ describe("windowMomContext", () => {
 	it("retains the newest message even when it exceeds the character window", () => {
 		const messages = [userMessage(1, "old"), userMessage(2, "x".repeat(200))];
 
-		const result = windowMomContext(messages, { maxMessages: 10, maxSerializedChars: 80 });
+		const result = windowCoachContext(messages, { maxMessages: 10, maxSerializedChars: 80 });
 
 		expect(result.messages).toEqual([userMessage(2, "x".repeat(200))]);
 		expect(result.wasTrimmed).toBe(true);
 	});
 });
 
-describe("getMomContextWindowOptions", () => {
+describe("getCoachContextWindowOptions", () => {
 	it("uses defaults when environment variables are absent", () => {
-		expect(getMomContextWindowOptions({})).toEqual({
+		expect(getCoachContextWindowOptions({})).toEqual({
 			maxMessages: 80,
 			maxSerializedChars: 120_000,
 		});
@@ -87,7 +87,7 @@ describe("getMomContextWindowOptions", () => {
 
 	it("reads positive integer overrides from the environment", () => {
 		expect(
-			getMomContextWindowOptions({
+			getCoachContextWindowOptions({
 				MOM_CONTEXT_MAX_MESSAGES: "12",
 				MOM_CONTEXT_MAX_CHARS: "3456",
 			}),
