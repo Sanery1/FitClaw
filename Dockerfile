@@ -7,8 +7,10 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/tui/package.json packages/tui/tsconfig.build.json ./packages/tui/
 COPY packages/ai/package.json packages/ai/tsconfig.build.json ./packages/ai/
 COPY packages/agent/package.json packages/agent/tsconfig.build.json ./packages/agent/
+COPY packages/runtime/package.json packages/runtime/tsconfig.build.json ./packages/runtime/
+COPY packages/coach-core/package.json packages/coach-core/tsconfig.build.json ./packages/coach-core/
 COPY packages/coding-agent/package.json packages/coding-agent/tsconfig.build.json ./packages/coding-agent/
-COPY packages/mom/package.json packages/mom/tsconfig.build.json ./packages/mom/
+COPY apps/coach-bot/package.json apps/coach-bot/tsconfig.build.json ./apps/coach-bot/
 
 RUN npm install
 
@@ -16,25 +18,31 @@ RUN npm install
 COPY packages/tui/src ./packages/tui/src
 COPY packages/ai/src ./packages/ai/src
 COPY packages/agent/src ./packages/agent/src
+COPY packages/runtime/src ./packages/runtime/src
+COPY packages/coach-core/src ./packages/coach-core/src
 COPY packages/coding-agent/src ./packages/coding-agent/src
 COPY packages/coding-agent/data ./packages/coding-agent/data
-COPY packages/mom/src ./packages/mom/src
+COPY apps/coach-bot/src ./apps/coach-bot/src
 
 # Build all workspace packages in dependency order
 # Use tsgo directly to skip pre/post scripts that require network (generate-models, etc.)
 RUN cd packages/tui && npx tsgo -p tsconfig.build.json && \
     cd /app/packages/ai && npx tsgo -p tsconfig.build.json && \
     cd /app/packages/agent && npx tsgo -p tsconfig.build.json && \
+    cd /app/packages/runtime && npx tsgo -p tsconfig.build.json && \
+    cd /app/packages/coach-core && npx tsgo -p tsconfig.build.json && \
     cd /app/packages/coding-agent && npx tsgo -p tsconfig.build.json && npm run copy-assets && \
-    cd /app/packages/mom && npx tsgo -p tsconfig.build.json && chmod +x dist/main.js
+    cd /app/apps/coach-bot && npx tsgo -p tsconfig.build.json && chmod +x dist/main.js
 
 # Pack each workspace into .tgz (production files only)
 RUN mkdir -p /tmp/packs && \
     cd packages/tui && npm pack --pack-destination /tmp/packs && \
     cd /app/packages/ai && npm pack --pack-destination /tmp/packs && \
     cd /app/packages/agent && npm pack --pack-destination /tmp/packs && \
+    cd /app/packages/runtime && npm pack --pack-destination /tmp/packs && \
+    cd /app/packages/coach-core && npm pack --pack-destination /tmp/packs && \
     cd /app/packages/coding-agent && npm pack --pack-destination /tmp/packs && \
-    cd /app/packages/mom && npm pack --pack-destination /tmp/packs
+    cd /app/apps/coach-bot && npm pack --pack-destination /tmp/packs
 
 # ============================================================================
 # Stage 2: Runtime

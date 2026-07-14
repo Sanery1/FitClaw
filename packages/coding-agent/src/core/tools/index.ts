@@ -197,9 +197,8 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 
 // ── Skill data persistence tools (Model B) ──
 
-export { createSkillDataReadTool, createSkillDataWriteTool } from "./skill-data-tools.js";
+export { createSkillDataReadTool, createSkillDataWriteTool } from "@fitclaw/runtime";
 
 // ── Generic data persistence (used by Model B skill data tools) ──
 
-export type { SportDataStore } from "./fitness/sport-data-store.js";
-export { FileSportDataStore } from "./fitness/sport-data-store.js";
+export { FileSkillDataStore, type SkillDataStore } from "@fitclaw/runtime";

@@ -7,8 +7,8 @@
  */
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
-import type { SkillDataDeclaration } from "../skills.js";
-import type { FileSportDataStore } from "./fitness/sport-data-store.js";
+import type { SkillDataStore } from "./data-store.js";
+import type { SkillDataDeclaration } from "./skills.js";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -55,7 +55,7 @@ function listDeclaredNamespaces(dataNamespaces: Map<string, SkillDataDeclaration
 // ---------------------------------------------------------------------------
 
 export function createSkillDataReadTool(
-	store: FileSportDataStore,
+	store: SkillDataStore,
 	skillName: string,
 	dataNamespaces: Map<string, SkillDataDeclaration>,
 ): AgentTool<typeof dataReadSchema> {
@@ -134,7 +134,7 @@ export function createSkillDataReadTool(
 // ---------------------------------------------------------------------------
 
 export function createSkillDataWriteTool(
-	store: FileSportDataStore,
+	store: SkillDataStore,
 	skillName: string,
 	dataNamespaces: Map<string, SkillDataDeclaration>,
 ): AgentTool<typeof dataWriteSchema> {

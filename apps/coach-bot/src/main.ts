@@ -47,7 +47,7 @@ function parseArgs(): ParsedArgs {
 const parsedArgs = parseArgs();
 
 if (!parsedArgs.workingDir) {
-	console.error("Usage: mom [--sandbox=host|docker:<name>] <working-directory>");
+	console.error("Usage: fitclaw-coach [--sandbox=host|docker:<name>] <working-directory>");
 	process.exit(1);
 }
 

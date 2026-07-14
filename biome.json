@@ -25,6 +25,8 @@
 	},
 	"files": {
 		"includes": [
+			"apps/*/src/**/*.ts",
+			"apps/*/test/**/*.ts",
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
@@ -34,7 +36,7 @@
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",
 			"!packages/web-ui/src/app.css",
-			"!packages/mom/data/**/*",
+			"!apps/coach-bot/data/**/*",
 			"!!**/node_modules"
 		]
 	}

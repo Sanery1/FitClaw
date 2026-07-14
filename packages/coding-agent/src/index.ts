@@ -1,5 +1,17 @@
 // Core session management
 
+// Skills
+export {
+	formatSkillsForPrompt,
+	type LoadSkillsFromDirOptions,
+	type LoadSkillsResult,
+	loadSkills,
+	loadSkillsFromDir,
+	parseFrontmatter,
+	type Skill,
+	type SkillFrontmatter,
+	stripFrontmatter,
+} from "@fitclaw/runtime";
 // Config paths
 export { getAgentDir, VERSION } from "./config.js";
 export {
@@ -218,16 +230,6 @@ export {
 	type RetrySettings,
 	SettingsManager,
 } from "./core/settings-manager.js";
-// Skills
-export {
-	formatSkillsForPrompt,
-	type LoadSkillsFromDirOptions,
-	type LoadSkillsResult,
-	loadSkills,
-	loadSkillsFromDir,
-	type Skill,
-	type SkillFrontmatter,
-} from "./core/skills.js";
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
 // Fitness tools
@@ -254,7 +256,7 @@ export {
 	type EditToolDetails,
 	type EditToolInput,
 	type EditToolOptions,
-	FileSportDataStore,
+	FileSkillDataStore,
 	type FindOperations,
 	type FindToolDetails,
 	type FindToolInput,
@@ -272,7 +274,7 @@ export {
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
-	type SportDataStore,
+	type SkillDataStore,
 	type ToolsOptions,
 	type TruncationOptions,
 	type TruncationResult,
@@ -353,6 +355,5 @@ export {
 } from "./modes/interactive/theme/theme.js";
 // Clipboard utilities
 export { copyToClipboard } from "./utils/clipboard.js";
-export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.js";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.js";

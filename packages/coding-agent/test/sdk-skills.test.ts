@@ -109,7 +109,7 @@ This is a test skill.
 		expect(session.resourceLoader.getSkills().diagnostics).toEqual([]);
 	});
 
-	it("sets FITCLAW_DATA_DIR to the skill data root used by FileSportDataStore", async () => {
+	it("sets FITCLAW_DATA_DIR to the skill data root used by FileSkillDataStore", async () => {
 		const previousDataDir = process.env.FITCLAW_DATA_DIR;
 		const sessionDir = join(tempDir, "session");
 		const customSkill = {

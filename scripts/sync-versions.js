@@ -1,27 +1,30 @@
 #!/usr/bin/env node
 
 /**
- * Syncs ALL @mariozechner/* package dependency versions to match their current versions.
+ * Syncs all @fitclaw/* workspace dependency versions to match their current versions.
  * This ensures lockstep versioning across the monorepo.
  */
 
 import { readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
-const packagesDir = join(process.cwd(), 'packages');
-const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
-	.filter(dirent => dirent.isDirectory())
-	.map(dirent => dirent.name);
+const workspaceRoots = ['apps', 'packages'];
+const packageDirs = workspaceRoots.flatMap(root => {
+	const rootDir = join(process.cwd(), root);
+	return readdirSync(rootDir, { withFileTypes: true })
+		.filter(dirent => dirent.isDirectory())
+		.map(dirent => ({ key: `${root}/${dirent.name}`, path: join(rootDir, dirent.name, 'package.json') }));
+});
 
 // Read all package.json files and build version map
 const packages = {};
 const versionMap = {};
 
 for (const dir of packageDirs) {
-	const pkgPath = join(packagesDir, dir, 'package.json');
+	const pkgPath = dir.path;
 	try {
 		const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-		packages[dir] = { path: pkgPath, data: pkg };
+		packages[dir.key] = { path: pkgPath, data: pkg };
 		versionMap[pkg.name] = pkg.version;
 	} catch (e) {
 		console.error(`Failed to read ${pkgPath}:`, e.message);

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Skill } from "@fitclaw/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { ExtensionRunner } from "../src/core/extensions/runner.js";
@@ -8,7 +9,6 @@ import { ModelRegistry } from "../src/core/model-registry.js";
 import { DefaultResourceLoader } from "../src/core/resource-loader.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
-import type { Skill } from "../src/core/skills.js";
 import { createSyntheticSourceInfo } from "../src/core/source-info.js";
 
 describe("DefaultResourceLoader", () => {
@@ -39,10 +39,10 @@ describe("DefaultResourceLoader", () => {
 		});
 
 		it("should discover skills from agentDir", async () => {
-			const skillsDir = join(agentDir, "skills");
+			const skillsDir = join(agentDir, "skills", "test-skill");
 			mkdirSync(skillsDir, { recursive: true });
 			writeFileSync(
-				join(skillsDir, "test-skill.md"),
+				join(skillsDir, "SKILL.md"),
 				`---
 name: test-skill
 description: A test skill
@@ -58,7 +58,7 @@ Skill content here.`,
 		});
 
 		it("should ignore extra markdown files in auto-discovered skill dirs", async () => {
-			const skillDir = join(agentDir, "skills", "pi-skills", "browser-tools");
+			const skillDir = join(agentDir, "skills", "fitclaw-skills", "browser-tools");
 			mkdirSync(skillDir, { recursive: true });
 			writeFileSync(
 				join(skillDir, "SKILL.md"),
@@ -98,7 +98,7 @@ Prompt content.`,
 
 		it("should prefer project resources over user on name collisions", async () => {
 			const userPromptsDir = join(agentDir, "prompts");
-			const projectPromptsDir = join(cwd, ".pi", "prompts");
+			const projectPromptsDir = join(cwd, ".fitclaw", "prompts");
 			mkdirSync(userPromptsDir, { recursive: true });
 			mkdirSync(projectPromptsDir, { recursive: true });
 			const userPromptPath = join(userPromptsDir, "commit.md");
@@ -107,7 +107,7 @@ Prompt content.`,
 			writeFileSync(projectPromptPath, "Project prompt");
 
 			const userSkillDir = join(agentDir, "skills", "collision-skill");
-			const projectSkillDir = join(cwd, ".pi", "skills", "collision-skill");
+			const projectSkillDir = join(cwd, ".fitclaw", "skills", "collision-skill");
 			mkdirSync(userSkillDir, { recursive: true });
 			mkdirSync(projectSkillDir, { recursive: true });
 			const userSkillPath = join(userSkillDir, "SKILL.md");
@@ -134,9 +134,9 @@ Project skill`,
 			) as { name: string; vars?: Record<string, string> };
 			baseTheme.name = "collision-theme";
 			const userThemePath = join(agentDir, "themes", "collision.json");
-			const projectThemePath = join(cwd, ".pi", "themes", "collision.json");
+			const projectThemePath = join(cwd, ".fitclaw", "themes", "collision.json");
 			mkdirSync(join(agentDir, "themes"), { recursive: true });
-			mkdirSync(join(cwd, ".pi", "themes"), { recursive: true });
+			mkdirSync(join(cwd, ".fitclaw", "themes"), { recursive: true });
 			writeFileSync(userThemePath, JSON.stringify(baseTheme, null, 2));
 			if (baseTheme.vars) {
 				baseTheme.vars.accent = "#ff00ff";
@@ -170,9 +170,10 @@ Project skill`,
 			);
 
 			mkdirSync(agentDir, { recursive: true });
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
-			symlinkSync(sharedExtDir, join(agentDir, "extensions"), "dir");
-			symlinkSync(sharedExtDir, join(cwd, ".pi", "extensions"), "dir");
+			mkdirSync(join(cwd, ".fitclaw"), { recursive: true });
+			const symlinkType = process.platform === "win32" ? "junction" : "dir";
+			symlinkSync(sharedExtDir, join(agentDir, "extensions"), symlinkType);
+			symlinkSync(sharedExtDir, join(cwd, ".fitclaw", "extensions"), symlinkType);
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -183,12 +184,12 @@ Project skill`,
 
 			// mergePaths processes project paths before user paths, so the project
 			// alias is the canonical survivor.
-			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".pi", "extensions", "shared.ts"));
+			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".fitclaw", "extensions", "shared.ts"));
 		});
 
 		it("should keep both extensions loaded when command names collide", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".pi", "extensions");
+			const projectExtDir = join(cwd, ".fitclaw", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 
@@ -317,10 +318,10 @@ Content`,
 			expect(agentsFiles).toEqual([]);
 		});
 
-		it("should discover SYSTEM.md from cwd/.pi", async () => {
-			const piDir = join(cwd, ".pi");
-			mkdirSync(piDir, { recursive: true });
-			writeFileSync(join(piDir, "SYSTEM.md"), "You are a helpful assistant.");
+		it("should discover SYSTEM.md from cwd/.fitclaw", async () => {
+			const fitclawDir = join(cwd, ".fitclaw");
+			mkdirSync(fitclawDir, { recursive: true });
+			writeFileSync(join(fitclawDir, "SYSTEM.md"), "You are a helpful assistant.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -329,9 +330,9 @@ Content`,
 		});
 
 		it("should discover APPEND_SYSTEM.md", async () => {
-			const piDir = join(cwd, ".pi");
-			mkdirSync(piDir, { recursive: true });
-			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Additional instructions.");
+			const fitclawDir = join(cwd, ".fitclaw");
+			mkdirSync(fitclawDir, { recursive: true });
+			writeFileSync(join(fitclawDir, "APPEND_SYSTEM.md"), "Additional instructions.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();

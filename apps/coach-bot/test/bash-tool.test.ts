@@ -15,7 +15,7 @@ class RecordingExecutor implements Executor {
 	}
 }
 
-describe("mom bash tool", () => {
+describe("coach bot bash tool", () => {
 	it("blocks dangerous commands before execution", async () => {
 		const executor = new RecordingExecutor();
 		const tool = createBashTool(executor);

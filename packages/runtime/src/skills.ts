@@ -1,12 +1,9 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import ignore from "ignore";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
-import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
-import { parseFrontmatter } from "../utils/frontmatter.js";
-import { canonicalizePath } from "../utils/paths.js";
-import type { ResourceDiagnostic } from "./diagnostics.js";
-import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
+import { parseFrontmatter } from "./frontmatter.js";
+import { createSyntheticSourceInfo, type ResourceDiagnostic, type SourceInfo } from "./resource.js";
 
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
@@ -16,7 +13,17 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 
 const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 
+const DEFAULT_PROJECT_CONFIG_DIR_NAME = ".fitclaw";
+
 type IgnoreMatcher = ReturnType<typeof ignore>;
+
+function canonicalizePath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return path;
+	}
+}
 
 function toPosixPath(p: string): string {
 	return p.split(sep).join("/");
@@ -383,7 +390,7 @@ function loadSkillFromFile(
 					continue;
 				}
 				if (decl && typeof decl === "object") {
-					const type = (decl as any).type === "array" ? "array" : "object";
+					const type = decl.type === "array" ? "array" : "object";
 					dataNamespaces.set(key, { type });
 				}
 			}
@@ -478,6 +485,8 @@ export interface LoadSkillsOptions {
 	skillPaths: string[];
 	/** Include default skills directories. */
 	includeDefaults: boolean;
+	/** Project configuration directory name. Default: .fitclaw */
+	projectConfigDirName?: string;
 }
 
 function normalizePath(input: string): string {
@@ -498,10 +507,13 @@ function resolveSkillPath(p: string, cwd: string): string {
  * Returns skills and any validation diagnostics.
  */
 export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
-	const { cwd, agentDir, skillPaths, includeDefaults } = options;
-
-	// Resolve agentDir - if not provided, use default from config
-	const resolvedAgentDir = agentDir ?? getAgentDir();
+	const {
+		cwd,
+		agentDir: resolvedAgentDir,
+		skillPaths,
+		includeDefaults,
+		projectConfigDirName = DEFAULT_PROJECT_CONFIG_DIR_NAME,
+	} = options;
 
 	const skillMap = new Map<string, Skill>();
 	const realPathSet = new Set<string>();
@@ -541,11 +553,11 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 
 	if (includeDefaults) {
 		addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
-		addSkills(loadSkillsFromDirInternal(resolve(cwd, CONFIG_DIR_NAME, "skills"), "project", true));
+		addSkills(loadSkillsFromDirInternal(resolve(cwd, projectConfigDirName, "skills"), "project", true));
 	}
 
 	const userSkillsDir = join(resolvedAgentDir, "skills");
-	const projectSkillsDir = resolve(cwd, CONFIG_DIR_NAME, "skills");
+	const projectSkillsDir = resolve(cwd, projectConfigDirName, "skills");
 
 	const isUnderPath = (target: string, root: string): boolean => {
 		const normalizedRoot = resolve(root);

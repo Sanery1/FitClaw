@@ -5,16 +5,18 @@ import {
 	AuthStorage,
 	convertToLlm,
 	createExtensionRuntime,
-	createSkillDataReadTool,
-	createSkillDataWriteTool,
-	FileSportDataStore,
-	formatSkillsForPrompt,
-	loadSkillsFromDir,
 	ModelRegistry,
 	type ResourceLoader,
 	SessionManager,
-	type Skill,
 } from "@fitclaw/claw";
+import { buildCoachSystemPrompt } from "@fitclaw/coach-core";
+import {
+	createSkillDataReadTool,
+	createSkillDataWriteTool,
+	FileSkillDataStore,
+	loadSkillsFromDir,
+	type Skill,
+} from "@fitclaw/runtime";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
@@ -62,42 +64,6 @@ function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
 }
 
-function getMemory(channelDir: string): string {
-	const parts: string[] = [];
-
-	// Read workspace-level memory (shared across all channels)
-	const workspaceMemoryPath = join(channelDir, "..", "MEMORY.md");
-	if (existsSync(workspaceMemoryPath)) {
-		try {
-			const content = readFileSync(workspaceMemoryPath, "utf-8").trim();
-			if (content) {
-				parts.push(`### Global Workspace Memory\n${content}`);
-			}
-		} catch (error) {
-			log.logWarning("Failed to read workspace memory", `${workspaceMemoryPath}: ${error}`);
-		}
-	}
-
-	// Read channel-specific memory
-	const channelMemoryPath = join(channelDir, "MEMORY.md");
-	if (existsSync(channelMemoryPath)) {
-		try {
-			const content = readFileSync(channelMemoryPath, "utf-8").trim();
-			if (content) {
-				parts.push(`### Channel-Specific Memory\n${content}`);
-			}
-		} catch (error) {
-			log.logWarning("Failed to read channel memory", `${channelMemoryPath}: ${error}`);
-		}
-	}
-
-	if (parts.length === 0) {
-		return "(no working memory yet)";
-	}
-
-	return parts.join("\n\n");
-}
-
 export function resolveMomHostWorkspacePath(channelDir: string, channelId: string): string {
 	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
 	let workspacePath = channelDir;
@@ -143,12 +109,12 @@ export function loadMomSkills(channelDir: string, workspacePath: string, hostWor
 	return Array.from(skillMap.values());
 }
 
-export function createMomSkillDataTools(channelDir: string, skills: Skill[]): AgentTool<any>[] {
-	const tools: AgentTool<any>[] = [];
+export function createMomSkillDataTools(channelDir: string, skills: Skill[]): AgentTool[] {
+	const tools: AgentTool[] = [];
 
 	for (const skill of skills) {
 		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
-			const skillStore = new FileSportDataStore(channelDir);
+			const skillStore = new FileSkillDataStore(channelDir);
 			tools.push(
 				createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces),
 				createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces),
@@ -163,67 +129,8 @@ function createMomActiveTools(executor: ReturnType<typeof createExecutor>, chann
 	return [...createMomTools(executor), ...createMomSkillDataTools(channelDir, skills)];
 }
 
-function buildSystemPrompt(workspacePath: string, channelId: string, memory: string, skills: Skill[]): string {
-	const channelPath = `${workspacePath}/${channelId}`;
-	return `You are FitCoach, an AI fitness personal trainer powered by FitClaw. Be concise, professional, and encouraging. No emojis.
-
-## Your Role
-You are FitCoach (FitClaw AI), a fitness personal trainer. Keep responses SHORT — 1-3 sentences for simple questions. Do NOT list your capabilities unless specifically asked. For "who are you" / "你是谁", just say: "我是 FitCoach，AI 健身私教。有什么可以帮你的？"
-
-Maintain a fitness-coach tone: motivating, knowledgeable, and supportive.
-
-## Context
-- Current date: use the \`date\` bash command if needed.
-- You have access to previous conversation context including tool results from prior turns.
-
-## Formatting
-Your response is displayed as a Feishu card on mobile. ALL content must be in your text response — do NOT create HTML files, images, or external files for visualization.
-
-Rules:
-- Use **bold** for key numbers and exercise names
-- Use short lines with line breaks instead of long paragraphs
-- Keep responses concise — mobile screens are narrow
-- NEVER use ASCII art, box-drawing characters, or code blocks for charts
-- NEVER create HTML/image files for visualization — they cannot be displayed in Feishu
-
-### Data Visualization (in plain text)
-For progress/comparison data, use this format:
-**卧推** 65kg → 120kg (+55kg, +85%)
-**硬拉** 90kg → 160kg (+70kg, +78%)
-**深蹲** 80kg → 160kg (+80kg, +100%)
-
-For training plans, use bullet lists grouped by muscle group:
-**胸部**
-- 卧推 4组 x 8次
-- 上斜哑铃飞鸟 3组 x 12次
-
-## Memory
-Write to MEMORY.md to remember user preferences, injuries, and goals across conversations.
-- Global: ${workspacePath}/MEMORY.md
-- Channel: ${channelPath}/MEMORY.md
-
-### Current Memory
-${memory}
-
-${skills.length > 0 ? formatSkillsForPrompt(skills) : "## Skills\n(no skills installed yet)"}
-
-## Tools
-### General Tools
-- bash: Run shell commands (primary tool). Install packages as needed.
-- read: Read files
-- write: Create/overwrite files
-- edit: Surgical file edits
-- data_<skill>_read / data_<skill>_write: Read/write persisted JSON user data (profiles, training logs, plans, body metrics). NOT for querying the exercise database.
-
-IMPORTANT: Do NOT use "attach" — file attachments are not supported. Include ALL content directly in your text response.
-
-### How to Use Skills
-- **Read the skill first**: Use the **read** tool to load a skill's SKILL.md to see available scripts, references, and namespaces.
-- **Query exercises**: Use **bash** to run the skill's Python scripts:
-  \`python ${workspacePath}/skills/bodybuilding/scripts/query_exercises.py --muscle chest\`
-  \`python ${workspacePath}/skills/bodybuilding/scripts/query_exercises.py --id "Exercise_Name" --detailed\`
-- **Persistence**: Use data_<skill>_read / data_<skill>_write to save/load user data (profile, training_log, training_plan, body_metrics, progression, personal_records).
-`;
+export function configureMomSkillDataRoot(channelDir: string): void {
+	process.env.FITCLAW_DATA_DIR = channelDir;
 }
 
 function truncate(text: string, maxLen: number): string {
@@ -311,13 +218,12 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const hostWorkspacePath = resolveMomHostWorkspacePath(channelDir, channelId);
 	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
 
-	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
-	const memory = getMemory(channelDir);
+	// Initial system prompt (updated each run with freshly loaded skills)
 	const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
-	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
+	const systemPrompt = buildCoachSystemPrompt(skills);
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
-	process.env.FITCLAW_DATA_DIR = channelDir;
+	configureMomSkillDataRoot(channelDir);
 	const tools = createMomActiveTools(executor, channelDir, skills);
 
 	// Create session manager and settings manager
@@ -333,7 +239,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const modelRegistry = ModelRegistry.create(authStorage);
 
 	// Resolve model from env vars, with fallback
-	const llmProvider = process.env.MOM_LLM_PROVIDER || "MiniMax";
+	const llmProvider = process.env.MOM_LLM_PROVIDER || "minimax";
 	const llmModelId = process.env.MOM_LLM_MODEL || "MiniMax-M2.7-highspeed";
 	const resolvedModel = modelRegistry.find(llmProvider, llmModelId);
 	if (!resolvedModel) {
@@ -582,10 +488,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				log.logInfo(`[${channelId}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
 			}
 
-			// Update system prompt with fresh memory, channel/user info, and skills
-			const memory = getMemory(channelDir);
+			// Update the system prompt and tools with freshly loaded skills
 			const skills = loadMomSkills(channelDir, workspacePath, hostWorkspacePath);
-			const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, skills);
+			const systemPrompt = buildCoachSystemPrompt(skills);
 			session.agent.state.systemPrompt = systemPrompt;
 			session.agent.state.tools = createMomActiveTools(executor, channelDir, skills);
 
@@ -636,7 +541,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			};
 
 			// Log context info
-			log.logInfo(`Context sizes - system: ${systemPrompt.length} chars, memory: ${memory.length} chars`);
+			log.logInfo(`Context size - system: ${systemPrompt.length} chars`);
 			log.logInfo(`Channels: ${ctx.channels.length}, Users: ${ctx.users.length}`);
 
 			// Build user message with timestamp and username prefix

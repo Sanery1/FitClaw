@@ -1,8 +1,8 @@
+import { parseFrontmatter } from "@fitclaw/runtime";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "path";
 import { CONFIG_DIR_NAME } from "../config.js";
-import { parseFrontmatter } from "../utils/frontmatter.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 
 /**

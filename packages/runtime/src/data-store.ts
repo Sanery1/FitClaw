@@ -1,11 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
-/**
- * Generic sport data store interface.
- * Each sport skill gets its own namespace for data persistence.
- */
-export interface SportDataStore {
+/** Generic persisted data boundary for a Skill's declared namespaces. */
+export interface SkillDataStore {
 	readonly dataDir: string;
 	/** Load persisted data from disk into memory. Idempotent. */
 	load<T>(namespace: string): Promise<T | null>;
@@ -16,10 +13,10 @@ export interface SportDataStore {
 }
 
 /**
- * File-based SportDataStore.
+ * File-based SkillDataStore.
  * Data is persisted to {dataDir}/sport-data/{namespace}.json
  */
-export class FileSportDataStore implements SportDataStore {
+export class FileSkillDataStore implements SkillDataStore {
 	readonly dataDir: string;
 	private cache = new Map<string, unknown>();
 
@@ -58,7 +55,7 @@ export class FileSportDataStore implements SportDataStore {
 				return null;
 			}
 			if (error instanceof SyntaxError) {
-				throw new Error(`Invalid JSON in sport data namespace "${namespace}": ${error.message}`);
+				throw new Error(`Invalid JSON in skill data namespace "${namespace}": ${error.message}`);
 			}
 			throw error;
 		}

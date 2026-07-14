@@ -13,9 +13,13 @@
 			"@fitclaw/claw": ["./packages/coding-agent/src/index.ts"],
 			"@fitclaw/claw/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@fitclaw/claw/*": ["./packages/coding-agent/src/*"],
+			"@fitclaw/coach-core": ["./packages/coach-core/src/index.ts"],
+			"@fitclaw/coach-core/*": ["./packages/coach-core/src/*"],
+			"@fitclaw/runtime": ["./packages/runtime/src/index.ts"],
+			"@fitclaw/runtime/*": ["./packages/runtime/src/*"],
 			"typebox": ["./node_modules/typebox"],
-			"@fitclaw/mom": ["./packages/mom/src/index.ts"],
-			"@fitclaw/mom/*": ["./packages/mom/src/*"],
+			"@fitclaw/coach-bot": ["./apps/coach-bot/src/main.ts"],
+			"@fitclaw/coach-bot/*": ["./apps/coach-bot/src/*"],
 			"@fitclaw/pods": ["./packages/pods/src/index.ts"],
 			"@fitclaw/pods/*": ["./packages/pods/src/*"],
 			"@fitclaw/tui": ["./packages/tui/src/index.ts"],
@@ -24,6 +28,6 @@
 			"@fitclaw/web-ui/*": ["./packages/web-ui/src/*"]
 		}
 	},
-	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"include": ["apps/*/src/**/*", "apps/*/test/**/*", "packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
 	"exclude": ["packages/web-ui/**/*", "**/dist/**"]
 }

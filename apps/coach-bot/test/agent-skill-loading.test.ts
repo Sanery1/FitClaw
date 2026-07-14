@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	configureMomSkillDataRoot,
 	createMomSkillDataTools,
-	getOrCreateRunner,
 	loadMomSkills,
 	resolveMomHostWorkspacePath,
 } from "../src/agent.js";
@@ -13,11 +13,11 @@ function toPosixPath(path: string): string {
 	return path.replace(/\\/g, "/");
 }
 
-describe("mom skill loading", () => {
+describe("coach bot skill loading", () => {
 	let workspaceDir: string;
 
 	beforeEach(() => {
-		workspaceDir = join(tmpdir(), `fitclaw-mom-skills-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		workspaceDir = join(tmpdir(), `fitclaw-coach-skills-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(workspaceDir, { recursive: true });
 	});
 
@@ -123,36 +123,20 @@ describe("mom skill loading", () => {
 		expect(toolNames).toEqual(["data_bodybuilding_read", "data_bodybuilding_write"]);
 	});
 
-	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSportDataStore", () => {
+	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {
 		const previousDataDir = process.env.FITCLAW_DATA_DIR;
-		const previousProvider = process.env.MOM_LLM_PROVIDER;
-		const previousModel = process.env.MOM_LLM_MODEL;
 		const channelId = `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 		const channelDir = join(workspaceDir, channelId);
 		mkdirSync(channelDir, { recursive: true });
 
-		process.env.MOM_LLM_PROVIDER = "anthropic";
-		process.env.MOM_LLM_MODEL = "claude-sonnet-4-5";
-
-		const runner = getOrCreateRunner({ type: "host" }, channelId, channelDir);
+		configureMomSkillDataRoot(channelDir);
 		try {
 			expect(process.env.FITCLAW_DATA_DIR).toBe(channelDir);
 		} finally {
-			runner.abort();
 			if (previousDataDir === undefined) {
 				delete process.env.FITCLAW_DATA_DIR;
 			} else {
 				process.env.FITCLAW_DATA_DIR = previousDataDir;
-			}
-			if (previousProvider === undefined) {
-				delete process.env.MOM_LLM_PROVIDER;
-			} else {
-				process.env.MOM_LLM_PROVIDER = previousProvider;
-			}
-			if (previousModel === undefined) {
-				delete process.env.MOM_LLM_MODEL;
-			} else {
-				process.env.MOM_LLM_MODEL = previousModel;
 			}
 		}
 	});

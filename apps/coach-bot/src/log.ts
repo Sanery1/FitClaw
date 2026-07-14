@@ -242,7 +242,7 @@ export function logUsageSummary(
 
 // Startup (no context needed)
 export function logStartup(workingDir: string, sandbox: string): void {
-	console.log("Starting mom bot...");
+	console.log("Starting FitClaw coach bot...");
 	console.log(`  Working directory: ${workingDir}`);
 	console.log(`  Sandbox: ${sandbox}`);
 }

@@ -40,4 +40,4 @@ JSON.stringify(
 echo "Config files generated: $AGENT_DIR/auth.json, $AGENT_DIR/models.json"
 echo "Bot starting..."
 
-exec node /opt/fitclaw/node_modules/@fitclaw/mom/dist/main.js "$@"
+exec node /opt/fitclaw/node_modules/@fitclaw/coach-bot/dist/main.js "$@"

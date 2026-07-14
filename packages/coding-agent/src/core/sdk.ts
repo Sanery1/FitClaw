@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, type ThinkingLevel } from "@fitclaw/agent-core";
 import { type Message, type Model, streamSimple } from "@fitclaw/ai";
+import { createSkillDataReadTool, createSkillDataWriteTool, FileSkillDataStore } from "@fitclaw/runtime";
 import { APP_NAME, getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
@@ -16,7 +17,6 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
-import { FileSportDataStore } from "./tools/fitness/sport-data-store.js";
 import {
 	createBashTool,
 	createCodingTools,
@@ -30,7 +30,6 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.js";
-import { createSkillDataReadTool, createSkillDataWriteTool } from "./tools/skill-data-tools.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 
 export interface CreateAgentSessionOptions {
@@ -94,6 +93,7 @@ export interface CreateAgentSessionResult {
 
 // Re-exports
 
+export type { Skill } from "@fitclaw/runtime";
 export * from "./agent-session-runtime.js";
 export type {
 	ExtensionAPI,
@@ -105,7 +105,6 @@ export type {
 	ToolDefinition,
 } from "./extensions/index.js";
 export type { PromptTemplate } from "./prompt-templates.js";
-export type { Skill } from "./skills.js";
 export type { Tool } from "./tools/index.js";
 
 export {
@@ -391,7 +390,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	process.env.FITCLAW_DATA_DIR = sessionManager.getSessionDir();
 	for (const skill of resourceLoader.getSkills().skills) {
 		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
-			const skillStore = new FileSportDataStore(sessionManager.getSessionDir());
+			const skillStore = new FileSkillDataStore(sessionManager.getSessionDir());
 			for (const [key, decl] of skill.dataNamespaces) {
 				const ns = `${skill.name}/${key}`;
 				if ((await skillStore.load(ns)) === null) {

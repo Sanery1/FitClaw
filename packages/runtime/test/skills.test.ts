@@ -1,9 +1,14 @@
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
-import type { ResourceDiagnostic } from "../src/core/diagnostics.js";
-import { formatSkillsForPrompt, loadSkills, loadSkillsFromDir, type Skill } from "../src/core/skills.js";
-import { createSyntheticSourceInfo } from "../src/core/source-info.js";
+import {
+	createSyntheticSourceInfo,
+	formatSkillsForPrompt,
+	loadSkills,
+	loadSkillsFromDir,
+	type ResourceDiagnostic,
+	type Skill,
+} from "../src/index.js";
 
 const fixturesDir = resolve(__dirname, "fixtures/skills");
 const collisionFixturesDir = resolve(__dirname, "fixtures/skills-collision");
@@ -398,11 +403,11 @@ describe("skills", () => {
 		});
 
 		it("should expand ~ in skillPaths", () => {
-			const homeSkillsDir = join(homedir(), ".pi/agent/skills");
+			const homeSkillsDir = join(homedir(), ".fitclaw/agent/skills");
 			const { skills: withTilde } = loadSkills({
 				agentDir: emptyAgentDir,
 				cwd: emptyCwd,
-				skillPaths: ["~/.pi/agent/skills"],
+				skillPaths: ["~/.fitclaw/agent/skills"],
 				includeDefaults: true,
 			});
 			const { skills: withoutTilde } = loadSkills({

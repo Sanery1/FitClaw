@@ -1,5 +1,5 @@
 // ============================================================================
-// packages/mom/src/feishu.ts
+// Legacy Feishu helpers retained while callers migrate to adapters/feishu.
 // Feishu Bot adapter using WebSocket long-connection mode.
 // SDK: @larksuiteoapi/node-sdk
 // ============================================================================

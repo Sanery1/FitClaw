@@ -2,7 +2,7 @@
 /**
  * fitclaw-data — CLI bridge for skill data persistence.
  *
- * Provides read/write access to FileSportDataStore namespaces from shell
+ * Provides read/write access to FileSkillDataStore namespaces from shell
  * scripts and Python code. Uses FITCLAW_DATA_DIR env var by default.
  *
  * Usage:
@@ -12,7 +12,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { FileSportDataStore } from "../core/tools/fitness/sport-data-store.js";
+import { FileSkillDataStore } from "@fitclaw/runtime";
 
 interface ParsedOptions {
 	namespace?: string;
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	const store = new FileSportDataStore(dataDir);
+	const store = new FileSkillDataStore(dataDir);
 
 	if (subcommand === "read") {
 		const data = await store.load(namespace);
@@ -117,8 +117,7 @@ async function main(): Promise<void> {
 			if (existing === null) {
 				await store.save(namespace, [parsed]);
 			} else if (Array.isArray(existing)) {
-				existing.push(parsed);
-				await store.save(namespace, existing);
+				await store.save(namespace, [...existing, parsed]);
 			} else {
 				console.error(`Error: cannot append to "${namespace}": existing data is not an array`);
 				process.exit(1);

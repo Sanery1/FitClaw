@@ -44,6 +44,7 @@
 		"@mariozechner/jiti": "^2.6.2",
 		"@fitclaw/agent-core": "^0.70.5",
 		"@fitclaw/ai": "^0.70.5",
+		"@fitclaw/runtime": "^0.70.5",
 		"@fitclaw/tui": "^0.70.5",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",

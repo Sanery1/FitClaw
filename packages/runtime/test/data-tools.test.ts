@@ -2,9 +2,12 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { SkillDataDeclaration } from "../src/core/skills.js";
-import { FileSportDataStore } from "../src/core/tools/fitness/sport-data-store.js";
-import { createSkillDataReadTool, createSkillDataWriteTool } from "../src/core/tools/skill-data-tools.js";
+import {
+	createSkillDataReadTool,
+	createSkillDataWriteTool,
+	FileSkillDataStore,
+	type SkillDataDeclaration,
+} from "../src/index.js";
 
 function parseTextResult(result: { content: Array<{ type: string; text?: string }> }): Record<string, unknown> {
 	const text = result.content.find((part) => part.type === "text")?.text;
@@ -16,13 +19,13 @@ function parseTextResult(result: { content: Array<{ type: string; text?: string 
 
 describe("skill data tools", () => {
 	let tempDir: string;
-	let store: FileSportDataStore;
+	let store: FileSkillDataStore;
 	let dataNamespaces: Map<string, SkillDataDeclaration>;
 
 	beforeEach(() => {
 		tempDir = join(tmpdir(), `fitclaw-skill-data-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
-		store = new FileSportDataStore(tempDir);
+		store = new FileSkillDataStore(tempDir);
 		dataNamespaces = new Map<string, SkillDataDeclaration>([
 			["user_profile", { type: "object" }],
 			["training_log", { type: "array" }],

@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const clawSrcIndex = fileURLToPath(new URL("../coding-agent/src/index.ts", import.meta.url));
+const clawSrcIndex = fileURLToPath(new URL("../../packages/coding-agent/src/index.ts", import.meta.url));
 
 export default defineConfig({
 	test: {

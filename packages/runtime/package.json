@@ -1,0 +1,45 @@
+{
+	"name": "@fitclaw/runtime",
+	"version": "0.70.5",
+	"description": "Shared Skill discovery, persistence, and runtime primitives for FitClaw applications",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json",
+		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@fitclaw/agent-core": "^0.70.5",
+		"ignore": "^7.0.5",
+		"typebox": "^1.1.24",
+		"yaml": "^2.8.2"
+	},
+	"devDependencies": {
+		"@types/node": "^24.3.0",
+		"shx": "^0.4.0",
+		"typescript": "^5.7.3",
+		"vitest": "^3.2.4"
+	},
+	"keywords": [
+		"agent",
+		"skills",
+		"runtime"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Sanery1/FitClaw.git",
+		"directory": "packages/runtime"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}

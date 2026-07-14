@@ -5,7 +5,7 @@
 
 ## 一句话定位
 
-**FitClaw = AI 运动私教 + 智能编程助手**，全栈 AI Agent 平台。
+**FitClaw = 飞书优先、具有结构化长期记忆的个人 AI 健身教练。**
 
 ## 项目来历
 
@@ -21,23 +21,26 @@
 
 ## 架构概览
 
-7 个 npm 包，monorepo 结构：
+一个主应用和八个支撑包：
 
 | 包 | npm 名 | 职责 |
 |----|--------|------|
+| `apps/coach-bot` | `@fitclaw/coach-bot` | **主产品**：飞书接入、消息渲染、会话和部署 |
+| `packages/coach-core` | `@fitclaw/coach-core` | FitCoach 身份、回复规则和长期数据策略 |
+| `packages/runtime` | `@fitclaw/runtime` | Skill 发现、frontmatter、namespace 存储和数据工具 |
 | `packages/ai` | `@fitclaw/ai` | 多厂商 LLM API 统一层 |
 | `packages/agent` | `@fitclaw/agent-core` | Agent 运行时：工具调用、状态管理 |
-| `packages/coding-agent` | `@fitclaw/claw` | **主 CLI 应用**（交互式 TUI） |
+| `packages/coding-agent` | `@fitclaw/claw` | 开发/调试 CLI（交互式 TUI） |
 | `packages/tui` | `@fitclaw/tui` | 终端 UI 组件库 |
-| `packages/mom` | `@fitclaw/mom` | 飞书 Bot |
-| `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件 |
-| `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
+| `packages/web-ui` | `@fitclaw/web-ui` | 非核心 Web UI 组件，第一阶段冻结扩张 |
+| `packages/pods` | `@fitclaw/pods` | 非核心 GPU Pod 工具，第一阶段冻结扩张 |
 
 AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)
 架构学习、问答与风险记录 → [docs/QNA.md](./docs/QNA.md)
 
 ## 近期完成
 
+- **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
 - **Bot Skill 完整修复 (2026-05-03)**: 修复 6 个问题打通 Bot 本地数据库查询链路：
   1. `.env.example` Provider 名 `MiniMax`→`minimax`（匹配内置 Provider）
   2. `docker/entrypoint.sh` 中 `node -e`→`node -p`（修复 auth.json/models.json 空文件）
@@ -51,7 +54,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 - PI_ 向后兼容彻底移除 (2026-05-02, c7d6ba52): 26 个源文件中所有 `process.env.PI_*` fallback 全部移除
 - Slack 代码全部删除 (2026-05-02): mom 包纯飞书化，删除 slack.ts/download.ts/events.ts，移除 `@slack/*` 依赖
 - **Model B 纯 Skill 架构 (2026-05-02)**: 删除 fitness-coach (Model A)、删除 11 个 AgentTool + jiti 动态加载、删除 fitnessMode 标志。改为 `data:` frontmatter 声明 + 框架自动注册 `data_<skill>_read/write` 工具。新增 bodybuilding skill (800+ 动作 Python 数据库)。swimming-coach 同步迁移
-- **Skill 数据边界加固 (2026-05-07)**: `data_<skill>_read/write` 统一拒绝未声明 namespace；`FileSportDataStore` 校验 namespace 字符集和路径边界，JSON 损坏/权限/写入失败会返回工具错误；Bot bash 增加危险命令拦截
+- **Skill 数据边界加固 (2026-05-07)**: `data_<skill>_read/write` 统一拒绝未声明 namespace；当前的 `FileSkillDataStore` 校验 namespace 字符集和路径边界，JSON 损坏/权限/写入失败会返回工具错误；Bot bash 增加危险命令拦截
 - **Skill 同步与 eval harness (2026-05-08)**: 新增 `fitclaw skill sync` 同步 CLI/Bot Skill；新增 `npm run eval` 运行 faux 模型 Skill 回归评估，`eval-results/` 不提交
 - **Eval 与大文件边界拆分 (2026-05-08)**: eval CLI 支持 `--suite` / `--task`，grader 支持 `tool_not_called` / `tool_sequence`；Provider 登录策略与 Skill block parser 已从大文件拆出
 
@@ -59,8 +62,8 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 待完成
 
-1. **Web UI 运动界面** — `packages/web-ui` 目前只有通用聊天界面
-2. **飞书图片上传** — `packages/mom/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
+1. **飞书图片上传** — `apps/coach-bot/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
+2. **live Feishu 审计** — 当前确定性 eval 不能代替真实模型和真实飞书闭环验证
 
 ## 运动数据架构（Model B 纯 Skill）
 
@@ -82,7 +85,7 @@ Skill 作者**不接触任何框架类型**。Skill = SKILL.md + references/ + s
 ```
 用户消息 → LLM 结合 SKILL.md 指令决策
   → LLM 调用 data_bodybuilding_write("training_log", {...}, "append")
-    → FileSportDataStore.save("bodybuilding/training_log", data)
+    → FileSkillDataStore.save("bodybuilding/training_log", data)
       → {dataDir}/sport-data/bodybuilding/training_log.json
 ```
 
@@ -166,15 +169,15 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 
 | 需求 | 路径 |
 |------|------|
-| Skill data 工具实现 | `packages/coding-agent/src/core/tools/skill-data-tools.ts` |
-| SportDataStore 接口 | `packages/coding-agent/src/core/tools/fitness/sport-data-store.ts` |
+| Skill data 工具实现 | `packages/runtime/src/data-tools.ts` |
+| SkillDataStore 接口 | `packages/runtime/src/data-store.ts` |
 | bodybuilding Skill | `.fitclaw/skills/bodybuilding/` (SKILL.md + 800+ 动作数据库 + 9 份 references) |
 | swimming-coach Skill | `.fitclaw/skills/swimming-coach/` (SKILL.md + 3 份 references) |
-| Skill 加载与解析 | `packages/coding-agent/src/core/skills.ts` |
+| Skill 加载与解析 | `packages/runtime/src/skills.ts` |
 | data 工具注册 | `packages/coding-agent/src/core/sdk.ts` `createAgentSession()` |
 | fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
-| MOM Bot 工具注册 | `packages/mom/src/agent.ts` `createRunner()` |
-| MOM Bot 系统提示词 | `packages/mom/src/agent.ts` `buildSystemPrompt()` |
+| Coach Bot 工具注册 | `apps/coach-bot/src/agent.ts` `createRunner()` |
+| Coach 系统提示词 | `packages/coach-core/src/system-prompt.ts` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
 | Docker 镜像 | `Dockerfile` + `docker-compose.yml` |
 | Bot 入口脚本 | `docker/entrypoint.sh` |
