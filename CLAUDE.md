@@ -40,7 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
-- **Coach Skill 命令边界 (2026-07-15)**: Skill 可通过 `permissions.commands.allow` 声明固定本地脚本前缀；Coach 默认只暴露 `read` 和 Skill data 工具，仅在存在有效声明时提供 `bash`，并以单进程参数执行代替任意 shell 字符串。`edit` / `write` 不再进入 Coach 工具集。
+- **Coach Skill 工具边界 (2026-07-15)**: Skill 可通过 `permissions.commands.allow` 声明固定本地脚本前缀；Coach 只为已加载 Skill 提供限定根目录的 `read`，仅在存在有效声明时提供 `bash`，并以单进程参数执行代替任意 shell 字符串。`edit` / `write` 不再进入 Coach 工具集。
 - **Coach 会话运行时解耦 (2026-07-15)**: auth、model、settings、JSONL session、compaction 和 `ManagedAgentSession` 已迁入 `@fitclaw/runtime`；`apps/coach-bot` 删除 `@fitclaw/claw` 依赖，同时保留持久化、自动重试和自动压缩测试。
 - **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
 - **Bot Skill 完整修复 (2026-05-03)**: 修复 6 个问题打通 Bot 本地数据库查询链路：
@@ -132,6 +132,8 @@ permissions:
 ```
 
 `args[0]` 必须指向 Skill 目录内已存在的文件。调用时只允许在此前缀后追加参数，进程参数不会经过 shell 解析。未声明 permissions 的 Skill 不会获得 `bash` 工具。
+
+Coach 的 `read` 只接受已加载 Skill 目录内的绝对路径，并在读取前检查最终 realpath。`..` 路径逃逸和指向 Skill 外部的软链接都会被拒绝；host 模式使用 Node 文件 API，Docker sandbox 使用参数化进程读取，不再拼接 shell 命令。
 
 ### 已安装 Skill
 

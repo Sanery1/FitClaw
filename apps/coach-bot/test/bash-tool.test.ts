@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExecOptions, ExecResult, Executor } from "../src/sandbox.js";
+import { createExecutor, type ExecOptions, type ExecResult, type Executor } from "../src/sandbox.js";
 import { createBashTool } from "../src/tools/bash.js";
 
 class RecordingExecutor implements Executor {
@@ -14,6 +14,14 @@ class RecordingExecutor implements Executor {
 	async execFile(executable: string, args: readonly string[], _options?: ExecOptions): Promise<ExecResult> {
 		this.fileCommands.push({ executable, args });
 		return { stdout: "ok", stderr: "", code: 0 };
+	}
+
+	async resolvePath(path: string): Promise<string> {
+		return path;
+	}
+
+	async readFile(_path: string): Promise<Buffer> {
+		throw new Error("file reads are not expected");
 	}
 
 	getWorkspacePath(hostPath: string): string {
@@ -57,5 +65,18 @@ describe("coach bot bash tool", () => {
 
 		expect(executor.commands).toEqual([]);
 		expect(executor.fileCommands).toEqual([]);
+	});
+
+	it("passes metacharacters literally through the host executor", async () => {
+		const argumentPrefix = ["-e", "process.stdout.write(process.argv[1])"];
+		const tool = createBashTool(createExecutor({ type: "host" }), [{ executable: process.execPath, argumentPrefix }]);
+
+		const result = await tool.execute("host", {
+			label: "literal argument",
+			command: process.execPath,
+			args: [...argumentPrefix, "value && echo unsafe"],
+		});
+
+		expect(result.content[0]).toEqual({ type: "text", text: "value && echo unsafe" });
 	});
 });

@@ -64,9 +64,13 @@ export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): 
 
 export function createCoachActiveTools(executor: Executor, channelDir: string, skills: Skill[]): AgentTool[] {
 	return [
-		...createCoachTools(executor, createCoachAllowedCommands(skills)),
+		...createCoachTools(executor, createCoachReadRoots(skills), createCoachAllowedCommands(skills)),
 		...createCoachSkillDataTools(channelDir, skills),
 	];
+}
+
+export function createCoachReadRoots(skills: readonly Skill[]): string[] {
+	return Array.from(new Set(skills.map((skill) => skill.baseDir)));
 }
 
 export function createCoachAllowedCommands(skills: readonly Skill[]): AllowedCommand[] {

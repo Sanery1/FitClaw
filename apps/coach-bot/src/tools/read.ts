@@ -1,9 +1,11 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import type { ImageContent, TextContent } from "@fitclaw/ai";
-import { extname } from "path";
+import { extname, posix, win32 } from "path";
 import { Type } from "typebox";
 import type { Executor } from "../sandbox.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
+
+const MAX_READ_FILE_BYTES = 10 * 1024 * 1024;
 
 /**
  * Map of file extensions to MIME types for common image formats
@@ -26,54 +28,88 @@ function isImageFile(filePath: string): string | null {
 
 const readSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're reading and why (shown to user)" }),
-	path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
-	offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
-	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+	path: Type.String({ description: "Absolute path inside one of the available Skill directories" }),
+	offset: Type.Optional(Type.Integer({ minimum: 1, description: "Line number to start reading from (1-indexed)" })),
+	limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of lines to read" })),
 });
 
 interface ReadToolDetails {
 	truncation?: TruncationResult;
 }
 
-export function createReadTool(executor: Executor): AgentTool<typeof readSchema> {
+function isAbsolutePath(path: string): boolean {
+	return posix.isAbsolute(path) || win32.isAbsolute(path);
+}
+
+function isWindowsPath(path: string): boolean {
+	return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+function isPathInside(candidatePath: string, rootPath: string): boolean {
+	const pathApi = isWindowsPath(rootPath) ? win32 : posix;
+	const relativePath = pathApi.relative(pathApi.normalize(rootPath), pathApi.normalize(candidatePath));
+	return (
+		relativePath === "" ||
+		(relativePath !== ".." && !relativePath.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relativePath))
+	);
+}
+
+function validateLineOptions(offset: number | undefined, limit: number | undefined): void {
+	if (offset !== undefined && (!Number.isInteger(offset) || offset < 1)) {
+		throw new Error("offset must be a positive integer");
+	}
+	if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+		throw new Error("limit must be a positive integer");
+	}
+}
+
+export function createReadTool(executor: Executor, allowedRoots: readonly string[]): AgentTool<typeof readSchema> {
+	let canonicalRootsPromise: Promise<string[]> | undefined;
+	const getCanonicalRoots = (): Promise<string[]> => {
+		canonicalRootsPromise ??= Promise.all(allowedRoots.map((root) => executor.resolvePath(root)));
+		return canonicalRootsPromise;
+	};
+	const allowedRootList = allowedRoots.join(", ");
+
 	return {
 		name: "read",
 		label: "read",
-		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files.`,
+		description: `Read a file inside an available Skill directory: ${allowedRootList}. Supports text and images (jpg, png, gif, webp). Text is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 		parameters: readSchema,
 		execute: async (
 			_toolCallId: string,
 			{ path, offset, limit }: { label: string; path: string; offset?: number; limit?: number },
 			signal?: AbortSignal,
 		): Promise<{ content: (TextContent | ImageContent)[]; details: ReadToolDetails | undefined }> => {
-			const mimeType = isImageFile(path);
+			validateLineOptions(offset, limit);
+			if (!isAbsolutePath(path) || !allowedRoots.some((root) => isPathInside(path, root))) {
+				throw new Error(`SECURITY_BLOCKED: File is outside the available Skill directories: ${path}`);
+			}
+
+			const [resolvedPath, canonicalRoots] = await Promise.all([
+				executor.resolvePath(path, { signal }),
+				getCanonicalRoots(),
+			]);
+			if (!canonicalRoots.some((root) => isPathInside(resolvedPath, root))) {
+				throw new Error(`SECURITY_BLOCKED: File resolves outside the available Skill directories: ${path}`);
+			}
+
+			const fileContent = await executor.readFile(resolvedPath, { signal, maxBytes: MAX_READ_FILE_BYTES });
+			const mimeType = isImageFile(resolvedPath);
 
 			if (mimeType) {
-				// Read as image (binary) - use base64
-				const result = await executor.exec(`base64 < ${shellEscape(path)}`, { signal });
-				if (result.code !== 0) {
-					throw new Error(result.stderr || `Failed to read file: ${path}`);
-				}
-				const base64 = result.stdout.replace(/\s/g, ""); // Remove whitespace from base64
-
 				return {
 					content: [
 						{ type: "text", text: `Read image file [${mimeType}]` },
-						{ type: "image", data: base64, mimeType },
+						{ type: "image", data: fileContent.toString("base64"), mimeType },
 					],
 					details: undefined,
 				};
 			}
 
-			// Get total line count first
-			const countResult = await executor.exec(`wc -l < ${shellEscape(path)}`, { signal });
-			if (countResult.code !== 0) {
-				throw new Error(countResult.stderr || `Failed to read file: ${path}`);
-			}
-			const totalFileLines = Number.parseInt(countResult.stdout.trim(), 10) + 1; // wc -l counts newlines, not lines
-
-			// Apply offset if specified (1-indexed)
-			const startLine = offset ? Math.max(1, offset) : 1;
+			const lines = fileContent.toString("utf-8").split("\n");
+			const totalFileLines = lines.length;
+			const startLine = offset ?? 1;
 			const startLineDisplay = startLine;
 
 			// Check if offset is out of bounds
@@ -81,20 +117,7 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 				throw new Error(`Offset ${offset} is beyond end of file (${totalFileLines} lines total)`);
 			}
 
-			// Read content with offset
-			let cmd: string;
-			if (startLine === 1) {
-				cmd = `cat ${shellEscape(path)}`;
-			} else {
-				cmd = `tail -n +${startLine} ${shellEscape(path)}`;
-			}
-
-			const result = await executor.exec(cmd, { signal });
-			if (result.code !== 0) {
-				throw new Error(result.stderr || `Failed to read file: ${path}`);
-			}
-
-			let selectedContent = result.stdout;
+			let selectedContent = lines.slice(startLine - 1).join("\n");
 			let userLimitedLines: number | undefined;
 
 			// Apply user limit if specified
@@ -152,8 +175,4 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 			};
 		},
 	};
-}
-
-function shellEscape(s: string): string {
-	return `'${s.replace(/'/g, "'\\''")}'`;
 }

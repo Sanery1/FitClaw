@@ -20,6 +20,14 @@ class RecordingExecutor implements Executor {
 		return { stdout: "", stderr: "", code: 0 };
 	}
 
+	async resolvePath(path: string): Promise<string> {
+		return path;
+	}
+
+	async readFile(_path: string): Promise<Buffer> {
+		throw new Error("file reads are not expected");
+	}
+
 	getWorkspacePath(hostPath: string): string {
 		return hostPath;
 	}
@@ -145,7 +153,7 @@ describe("coach bot skill loading", () => {
 		const executor = new RecordingExecutor();
 
 		const initialSkills = loadCoachSkills(channelDir, workspaceDir, workspaceDir);
-		expect(createCoachActiveTools(executor, channelDir, initialSkills).map((tool) => tool.name)).toEqual(["read"]);
+		expect(createCoachActiveTools(executor, channelDir, initialSkills).map((tool) => tool.name)).toEqual([]);
 
 		const skillDir = join(workspaceDir, "skills", "bodybuilding");
 		const scriptsDir = join(skillDir, "scripts");

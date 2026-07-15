@@ -3,8 +3,15 @@ import type { Executor } from "../sandbox.js";
 import { type AllowedCommand, createBashTool } from "./bash.js";
 import { createReadTool } from "./read.js";
 
-export function createCoachTools(executor: Executor, allowedCommands: readonly AllowedCommand[]): AgentTool[] {
-	const tools: AgentTool[] = [createReadTool(executor)];
+export function createCoachTools(
+	executor: Executor,
+	allowedReadRoots: readonly string[],
+	allowedCommands: readonly AllowedCommand[],
+): AgentTool[] {
+	const tools: AgentTool[] = [];
+	if (allowedReadRoots.length > 0) {
+		tools.push(createReadTool(executor, allowedReadRoots));
+	}
 	if (allowedCommands.length > 0) {
 		tools.push(createBashTool(executor, allowedCommands));
 	}
