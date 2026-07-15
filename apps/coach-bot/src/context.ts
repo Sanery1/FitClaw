@@ -7,13 +7,11 @@
  *
  * This module provides:
  * - syncLogToSessionManager: Syncs messages from log.jsonl to SessionManager
- * - createCoachSettingsManager: Creates a SettingsManager backed by workspace settings.json
  */
 
 import type { UserMessage } from "@fitclaw/ai";
-import { type SessionManager, type SessionMessageEntry, SettingsManager } from "@fitclaw/claw";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 
 // ============================================================================
 // Sync log.jsonl to SessionManager
@@ -28,6 +26,16 @@ interface LogMessage {
 	isBot?: boolean;
 }
 
+interface SessionEntry {
+	type: string;
+	message?: unknown;
+}
+
+export interface CoachSessionHistory {
+	getEntries(): readonly SessionEntry[];
+	appendMessage(message: UserMessage): void;
+}
+
 /**
  * Sync user messages from log.jsonl to SessionManager.
  *
@@ -40,7 +48,7 @@ interface LogMessage {
  * @returns Number of messages synced
  */
 export function syncLogToSessionManager(
-	sessionManager: SessionManager,
+	sessionManager: CoachSessionHistory,
 	channelDir: string,
 	excludeMessageTs?: string,
 ): number {
@@ -51,9 +59,8 @@ export function syncLogToSessionManager(
 	// Build set of existing message content from session
 	const existingMessages = new Set<string>();
 	for (const entry of sessionManager.getEntries()) {
-		if (entry.type === "message") {
-			const msgEntry = entry as SessionMessageEntry;
-			const msg = msgEntry.message as { role: string; content?: unknown };
+		if (entry.type === "message" && entry.message) {
+			const msg = entry.message as { role: string; content?: unknown };
 			if (msg.role === "user" && msg.content !== undefined) {
 				const content = msg.content;
 				if (typeof content === "string") {
@@ -139,42 +146,4 @@ export function syncLogToSessionManager(
 	}
 
 	return newMessages.length;
-}
-
-// ============================================================================
-// Settings manager for the coach
-// ============================================================================
-
-type CoachSettingsStorage = Parameters<typeof SettingsManager.fromStorage>[0];
-
-class WorkspaceSettingsStorage implements CoachSettingsStorage {
-	private settingsPath: string;
-
-	constructor(workspaceDir: string) {
-		this.settingsPath = join(workspaceDir, "settings.json");
-	}
-
-	withLock(scope: "global" | "project", fn: (current: string | undefined) => string | undefined): void {
-		if (scope === "project") {
-			// The coach stores all settings in a single workspace file.
-			fn(undefined);
-			return;
-		}
-
-		const current = existsSync(this.settingsPath) ? readFileSync(this.settingsPath, "utf-8") : undefined;
-		const next = fn(current);
-		if (next === undefined) {
-			return;
-		}
-
-		const dir = dirname(this.settingsPath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-		writeFileSync(this.settingsPath, next, "utf-8");
-	}
-}
-
-export function createCoachSettingsManager(workspaceDir: string): SettingsManager {
-	return SettingsManager.fromStorage(new WorkspaceSettingsStorage(workspaceDir));
 }

@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **Coach Bot 内部边界拆分 (2026-07-15)**: `agent.ts` 拆出 `runtime/skills.ts`、`runtime/session.ts` 和 `runtime/events.ts`；Skill 热更新、上下文同步和重试提示新增边界测试；`@fitclaw/claw` 导入收口到单一会话适配器。
 - **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
 - **Bot Skill 完整修复 (2026-05-03)**: 修复 6 个问题打通 Bot 本地数据库查询链路：
   1. `.env.example` Provider 名 `MiniMax`→`minimax`（匹配内置 Provider）
@@ -62,8 +63,9 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 待完成
 
-1. **飞书图片上传** — `apps/coach-bot/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
-2. **live Feishu 审计** — 当前确定性 eval 不能代替真实模型和真实飞书闭环验证
+1. **Coach 会话运行时解耦** — 将 `apps/coach-bot/src/runtime/session.ts` 使用的 session/model/auth 能力移出开发 CLI 包，删除 `@fitclaw/coach-bot -> @fitclaw/claw` 依赖
+2. **飞书图片上传** — `apps/coach-bot/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
+3. **live Feishu 审计** — 当前确定性 eval 不能代替真实模型和真实飞书闭环验证
 
 ## 运动数据架构（Model B 纯 Skill）
 
@@ -176,7 +178,8 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | Skill 加载与解析 | `packages/runtime/src/skills.ts` |
 | data 工具注册 | `packages/coding-agent/src/core/sdk.ts` `createAgentSession()` |
 | fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
-| Coach Bot 工具注册 | `apps/coach-bot/src/agent.ts` `createRunner()` |
+| Coach Bot 工具注册 | `apps/coach-bot/src/runtime/skills.ts` |
+| Coach Bot 会话适配 | `apps/coach-bot/src/runtime/session.ts` |
 | Coach 系统提示词 | `packages/coach-core/src/system-prompt.ts` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
 | Docker 镜像 | `Dockerfile` + `docker-compose.yml` |

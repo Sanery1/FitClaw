@@ -7,7 +7,7 @@ import {
 	createCoachSkillDataTools,
 	loadCoachSkills,
 	resolveCoachHostWorkspacePath,
-} from "../src/agent.js";
+} from "../src/runtime/skills.js";
 
 function toPosixPath(path: string): string {
 	return path.replace(/\\/g, "/");

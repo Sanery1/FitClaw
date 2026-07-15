@@ -46,7 +46,10 @@ npx tsx apps/coach-bot/src/main.ts ./feishu-workspace
 Key modules:
 
 - `src/main.ts`: process entrypoint and message routing
-- `src/agent.ts`: Agent session orchestration
+- `src/agent.ts`: per-channel run orchestration
+- `src/runtime/skills.ts`: Skill loading and data-tool assembly
+- `src/runtime/session.ts`: isolated adapter to the current CLI session stack
+- `src/runtime/events.ts`: Agent/session events translated into Bot responses
 - `src/adapters/feishu/`: Feishu transport and rendering
 - `src/tools/`: sandboxed file and shell tools
 - `src/store.ts`: channel logs and persisted conversation state

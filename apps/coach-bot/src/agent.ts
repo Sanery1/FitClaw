@@ -1,32 +1,21 @@
-import { Agent, type AgentEvent, type AgentTool } from "@fitclaw/agent-core";
-import type { ImageContent } from "@fitclaw/ai";
-import {
-	AgentSession,
-	AuthStorage,
-	convertToLlm,
-	createExtensionRuntime,
-	ModelRegistry,
-	type ResourceLoader,
-	SessionManager,
-} from "@fitclaw/claw";
+import type { AssistantMessage, ImageContent } from "@fitclaw/ai";
 import { buildCoachSystemPrompt } from "@fitclaw/coach-core";
-import {
-	createSkillDataReadTool,
-	createSkillDataWriteTool,
-	FileSkillDataStore,
-	loadSkillsFromDir,
-	type Skill,
-} from "@fitclaw/runtime";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
-import { homedir } from "os";
-import { dirname, isAbsolute, join } from "path";
-import { createCoachSettingsManager, syncLogToSessionManager } from "./context.js";
+import { isAbsolute, join } from "path";
+import { syncLogToSessionManager } from "./context.js";
 import { type CoachContextWindowResult, getCoachContextWindowOptions, windowCoachContext } from "./context-window.js";
 import * as log from "./log.js";
+import { createCoachRunState, createCoachSessionEventHandler, createEmptyUsageTotals } from "./runtime/events.js";
+import { createCoachSession } from "./runtime/session.js";
+import {
+	configureCoachSkillDataRoot,
+	createCoachActiveTools,
+	loadCoachSkills,
+	resolveCoachHostWorkspacePath,
+} from "./runtime/skills.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelStore } from "./store.js";
-import { createCoachTools } from "./tools/index.js";
 import type { BotContext } from "./types.js";
 
 export interface PendingMessage {
@@ -64,135 +53,6 @@ function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
 }
 
-export function resolveCoachHostWorkspacePath(channelDir: string, channelId: string): string {
-	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
-	let workspacePath = channelDir;
-	for (let i = 0; i < channelParts.length; i++) {
-		workspacePath = dirname(workspacePath);
-	}
-	return workspacePath;
-}
-
-export function loadCoachSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): Skill[] {
-	const skillMap = new Map<string, Skill>();
-
-	// channelDir is the host path for this conversation, e.g.:
-	// - DM:    /Users/.../data/C0A34FL8PMH
-	// - group: /Users/.../data/C0A34FL8PMH/ou_xxx
-	// hostWorkspacePath is the parent Bot workspace on host.
-	// workspacePath is the container path (e.g., /workspace)
-	// Helper to translate host paths to container paths
-	const translatePath = (hostPath: string): string => {
-		if (hostPath.startsWith(hostWorkspacePath)) {
-			return workspacePath + hostPath.slice(hostWorkspacePath.length);
-		}
-		return hostPath;
-	};
-
-	// Load workspace-level skills (global)
-	const workspaceSkillsDir = join(hostWorkspacePath, "skills");
-	for (const skill of loadSkillsFromDir({ dir: workspaceSkillsDir, source: "workspace" }).skills) {
-		// Translate paths to container paths for system prompt
-		skill.filePath = translatePath(skill.filePath);
-		skill.baseDir = translatePath(skill.baseDir);
-		skillMap.set(skill.name, skill);
-	}
-
-	// Load channel-specific skills (override workspace skills on collision)
-	const channelSkillsDir = join(channelDir, "skills");
-	for (const skill of loadSkillsFromDir({ dir: channelSkillsDir, source: "channel" }).skills) {
-		skill.filePath = translatePath(skill.filePath);
-		skill.baseDir = translatePath(skill.baseDir);
-		skillMap.set(skill.name, skill);
-	}
-
-	return Array.from(skillMap.values());
-}
-
-export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): AgentTool[] {
-	const tools: AgentTool[] = [];
-
-	for (const skill of skills) {
-		if (skill.dataNamespaces && skill.dataNamespaces.size > 0) {
-			const skillStore = new FileSkillDataStore(channelDir);
-			tools.push(
-				createSkillDataReadTool(skillStore, skill.name, skill.dataNamespaces),
-				createSkillDataWriteTool(skillStore, skill.name, skill.dataNamespaces),
-			);
-		}
-	}
-
-	return tools;
-}
-
-function createCoachActiveTools(executor: ReturnType<typeof createExecutor>, channelDir: string, skills: Skill[]) {
-	return [...createCoachTools(executor), ...createCoachSkillDataTools(channelDir, skills)];
-}
-
-export function configureCoachSkillDataRoot(channelDir: string): void {
-	process.env.FITCLAW_DATA_DIR = channelDir;
-}
-
-function truncate(text: string, maxLen: number): string {
-	if (text.length <= maxLen) return text;
-	return `${text.substring(0, maxLen - 3)}...`;
-}
-
-function extractToolResultText(result: unknown): string {
-	if (typeof result === "string") {
-		return result;
-	}
-
-	if (
-		result &&
-		typeof result === "object" &&
-		"content" in result &&
-		Array.isArray((result as { content: unknown }).content)
-	) {
-		const content = (result as { content: Array<{ type: string; text?: string }> }).content;
-		const textParts: string[] = [];
-		for (const part of content) {
-			if (part.type === "text" && part.text) {
-				textParts.push(part.text);
-			}
-		}
-		if (textParts.length > 0) {
-			return textParts.join("\n");
-		}
-	}
-
-	return JSON.stringify(result);
-}
-
-function formatToolArgs(_toolName: string, args: Record<string, unknown>): string {
-	const lines: string[] = [];
-
-	for (const [key, value] of Object.entries(args)) {
-		if (key === "label") continue;
-
-		if (key === "path" && typeof value === "string") {
-			const offset = args.offset as number | undefined;
-			const limit = args.limit as number | undefined;
-			if (offset !== undefined && limit !== undefined) {
-				lines.push(`${value}:${offset}-${offset + limit}`);
-			} else {
-				lines.push(value);
-			}
-			continue;
-		}
-
-		if (key === "offset" || key === "limit") continue;
-
-		if (typeof value === "string") {
-			lines.push(value);
-		} else {
-			lines.push(JSON.stringify(value));
-		}
-	}
-
-	return lines.join("\n");
-}
-
 // Cache runners per channel
 const channelRunners = new Map<string, AgentRunner>();
 
@@ -226,226 +86,27 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	configureCoachSkillDataRoot(channelDir);
 	const tools = createCoachActiveTools(executor, channelDir, skills);
 
-	// Create session manager and settings manager
-	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
-	const contextFile = join(channelDir, "context.jsonl");
-	const sessionManager = SessionManager.open(contextFile, channelDir);
-	const settingsManager = createCoachSettingsManager(join(channelDir, ".."));
 	const contextWindowOptions = getCoachContextWindowOptions();
-
-	// Create AuthStorage and ModelRegistry
-	// Auth stored outside workspace so agent can't access it
-	const authStorage = AuthStorage.create(join(homedir(), ".fitclaw", "agent", "auth.json"));
-	const modelRegistry = ModelRegistry.create(authStorage);
-
-	// Resolve model from env vars, with fallback
-	const llmProvider = process.env.MOM_LLM_PROVIDER || "minimax";
-	const llmModelId = process.env.MOM_LLM_MODEL || "MiniMax-M2.7-highspeed";
-	const resolvedModel = modelRegistry.find(llmProvider, llmModelId);
-	if (!resolvedModel) {
-		throw new Error(
-			`Model not found: "${llmProvider}/${llmModelId}".\n` +
-				"Configure models.json or set MOM_LLM_PROVIDER / MOM_LLM_MODEL env vars.",
-		);
-	}
-	log.logInfo(`[${channelId}] Using model: ${llmProvider}/${llmModelId}`);
-
-	// Create agent
-	const agent = new Agent({
-		initialState: {
-			systemPrompt,
-			model: resolvedModel,
-			thinkingLevel: "off",
-			tools,
-		},
-		convertToLlm,
-		getApiKey: async () => {
-			const auth = await modelRegistry.getApiKeyAndHeaders(resolvedModel);
-			if (!auth.ok || !auth.apiKey) {
-				throw new Error(
-					`No API key found for "${resolvedModel.provider}".\n\n` +
-						"Set API key via auth.json or environment variable (e.g., MINIMAX_API_KEY).",
-				);
-			}
-			return auth.apiKey;
-		},
+	const session = createCoachSession({
+		channelDir,
+		cwd: process.cwd(),
+		systemPrompt,
+		skills,
+		tools,
 	});
+	const { model: resolvedModel, sessionManager } = session;
+	log.logInfo(`[${channelId}] Using model: ${resolvedModel.provider}/${resolvedModel.id}`);
 
 	// Load existing messages
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
 		const windowedContext = windowCoachContext(loadedSession.messages, contextWindowOptions);
-		agent.state.messages = windowedContext.messages;
+		session.agent.state.messages = windowedContext.messages;
 		log.logInfo(`[${channelId}] Loaded ${formatContextWindowStats(windowedContext)} from context.jsonl`);
 	}
 
-	const resourceLoader: ResourceLoader = {
-		getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-		getSkills: () => ({ skills, diagnostics: [] }),
-		getPrompts: () => ({ prompts: [], diagnostics: [] }),
-		getThemes: () => ({ themes: [], diagnostics: [] }),
-		getAgentsFiles: () => ({ agentsFiles: [] }),
-		getSystemPrompt: () => systemPrompt,
-		getAppendSystemPrompt: () => [],
-		extendResources: () => {},
-		reload: async () => {},
-	};
-
-	const baseToolsOverride = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
-
-	// Create AgentSession wrapper
-	const session = new AgentSession({
-		agent,
-		sessionManager,
-		settingsManager,
-		cwd: process.cwd(),
-		modelRegistry,
-		resourceLoader,
-		baseToolsOverride,
-	});
-
-	// Mutable per-run state - event handler references this
-	const runState = {
-		ctx: null as BotContext | null,
-		logCtx: null as { channelId: string; userName?: string } | null,
-		queue: null as {
-			enqueue(fn: () => Promise<void>, errorContext: string): void;
-			enqueueMessage(text: string, target: "main" | "thread", errorContext: string, doLog?: boolean): void;
-		} | null,
-		pendingTools: new Map<string, { toolName: string; args: unknown; startTime: number }>(),
-		totalUsage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		errorMessage: undefined as string | undefined,
-	};
-
-	// Subscribe to events ONCE
-	session.subscribe(async (event) => {
-		// Skip if no active run
-		if (!runState.ctx || !runState.logCtx || !runState.queue) return;
-
-		const { ctx, logCtx, queue, pendingTools } = runState;
-
-		if (event.type === "tool_execution_start") {
-			const agentEvent = event as AgentEvent & { type: "tool_execution_start" };
-			const args = agentEvent.args as { label?: string };
-			const label = args.label || agentEvent.toolName;
-
-			pendingTools.set(agentEvent.toolCallId, {
-				toolName: agentEvent.toolName,
-				args: agentEvent.args,
-				startTime: Date.now(),
-			});
-
-			log.logToolStart(logCtx, agentEvent.toolName, label, agentEvent.args as Record<string, unknown>);
-			queue.enqueue(() => ctx.respond(`_→ ${label}_`, false), "tool label");
-		} else if (event.type === "tool_execution_end") {
-			const agentEvent = event as AgentEvent & { type: "tool_execution_end" };
-			const resultStr = extractToolResultText(agentEvent.result);
-			const pending = pendingTools.get(agentEvent.toolCallId);
-			pendingTools.delete(agentEvent.toolCallId);
-
-			const durationMs = pending ? Date.now() - pending.startTime : 0;
-
-			if (agentEvent.isError) {
-				log.logToolError(logCtx, agentEvent.toolName, durationMs, resultStr);
-			} else {
-				log.logToolSuccess(logCtx, agentEvent.toolName, durationMs, resultStr);
-			}
-
-			// Post args + result to thread
-			const label = pending?.args ? (pending.args as { label?: string }).label : undefined;
-			const argsFormatted = pending
-				? formatToolArgs(agentEvent.toolName, pending.args as Record<string, unknown>)
-				: "(args not found)";
-			const duration = (durationMs / 1000).toFixed(1);
-			let threadMessage = `*${agentEvent.isError ? "✗" : "✓"} ${agentEvent.toolName}*`;
-			if (label) threadMessage += `: ${label}`;
-			threadMessage += ` (${duration}s)\n`;
-			if (argsFormatted) threadMessage += `\`\`\`\n${argsFormatted}\n\`\`\`\n`;
-			threadMessage += `*Result:*\n\`\`\`\n${resultStr}\n\`\`\``;
-
-			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
-
-			if (agentEvent.isError) {
-				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultStr, 200)}_`, false), "tool error");
-			}
-		} else if (event.type === "message_start") {
-			const agentEvent = event as AgentEvent & { type: "message_start" };
-			if (agentEvent.message.role === "assistant") {
-				log.logResponseStart(logCtx);
-			}
-		} else if (event.type === "message_end") {
-			const agentEvent = event as AgentEvent & { type: "message_end" };
-			if (agentEvent.message.role === "assistant") {
-				const assistantMsg = agentEvent.message as any;
-
-				if (assistantMsg.stopReason) {
-					runState.stopReason = assistantMsg.stopReason;
-				}
-				if (assistantMsg.errorMessage) {
-					runState.errorMessage = assistantMsg.errorMessage;
-				}
-
-				if (assistantMsg.usage) {
-					runState.totalUsage.input += assistantMsg.usage.input;
-					runState.totalUsage.output += assistantMsg.usage.output;
-					runState.totalUsage.cacheRead += assistantMsg.usage.cacheRead;
-					runState.totalUsage.cacheWrite += assistantMsg.usage.cacheWrite;
-					runState.totalUsage.cost.input += assistantMsg.usage.cost.input;
-					runState.totalUsage.cost.output += assistantMsg.usage.cost.output;
-					runState.totalUsage.cost.cacheRead += assistantMsg.usage.cost.cacheRead;
-					runState.totalUsage.cost.cacheWrite += assistantMsg.usage.cost.cacheWrite;
-					runState.totalUsage.cost.total += assistantMsg.usage.cost.total;
-				}
-
-				const content = agentEvent.message.content;
-				const thinkingParts: string[] = [];
-				const textParts: string[] = [];
-				for (const part of content) {
-					if (part.type === "thinking") {
-						thinkingParts.push((part as any).thinking);
-					} else if (part.type === "text") {
-						textParts.push((part as any).text);
-					}
-				}
-
-				const text = textParts.join("\n");
-
-				for (const thinking of thinkingParts) {
-					log.logThinking(logCtx, thinking);
-					queue.enqueueMessage(`_${thinking}_`, "thread", "thinking thread", false);
-				}
-
-				if (text.trim()) {
-					log.logResponse(logCtx, text);
-					queue.enqueueMessage(text, "main", "response main");
-					queue.enqueueMessage(text, "thread", "response thread", false);
-				}
-			}
-		} else if (event.type === "compaction_start") {
-			log.logInfo(`Compaction started (reason: ${event.reason})`);
-			queue.enqueue(() => ctx.respond("_Compacting context..._", false), "compaction start");
-		} else if (event.type === "compaction_end") {
-			if (event.result) {
-				log.logInfo(`Compaction complete: ${event.result.tokensBefore} tokens compacted`);
-			} else if (event.aborted) {
-				log.logInfo("Compaction aborted");
-			}
-		} else if (event.type === "auto_retry_start") {
-			const retryEvent = event as any;
-			log.logWarning(`Retrying (${retryEvent.attempt}/${retryEvent.maxAttempts})`, retryEvent.errorMessage);
-			queue.enqueue(
-				() => ctx.respond(`_Retrying (${retryEvent.attempt}/${retryEvent.maxAttempts})..._`, false),
-				"retry",
-			);
-		}
-	});
+	const runState = createCoachRunState();
+	session.subscribe(createCoachSessionEventHandler(runState));
 
 	const MAX_MESSAGE_LENGTH = 30000;
 	const splitMessage = (text: string): string[] => {
@@ -484,15 +145,15 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const reloadedSession = sessionManager.buildSessionContext();
 			if (reloadedSession.messages.length > 0) {
 				const windowedContext = windowCoachContext(reloadedSession.messages, contextWindowOptions);
-				agent.state.messages = windowedContext.messages;
+				session.agent.state.messages = windowedContext.messages;
 				log.logInfo(`[${channelId}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
 			}
 
 			// Update the system prompt and tools with freshly loaded skills
 			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildCoachSystemPrompt(skills);
-			session.agent.state.systemPrompt = systemPrompt;
-			session.agent.state.tools = createCoachActiveTools(executor, channelDir, skills);
+			const activeTools = createCoachActiveTools(executor, channelDir, skills);
+			session.updateRuntime(systemPrompt, skills, activeTools);
 
 			// Reset per-run state
 			runState.ctx = ctx;
@@ -501,13 +162,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				userName: ctx.message.userName,
 			};
 			runState.pendingTools.clear();
-			runState.totalUsage = {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			};
+			runState.totalUsage = createEmptyUsageTotals();
 			runState.stopReason = "stop";
 			runState.errorMessage = undefined;
 
@@ -591,7 +246,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			};
 			await writeFile(join(channelDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2));
 
-			await session.prompt(userMessage, imageAttachments.length > 0 ? { images: imageAttachments } : undefined);
+			await session.prompt(userMessage, imageAttachments);
 
 			// Wait for queued messages
 			await queueChain;
@@ -645,7 +300,10 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				const lastAssistantMessage = messages
 					.slice()
 					.reverse()
-					.find((m) => m.role === "assistant" && (m as any).stopReason !== "aborted") as any;
+					.find(
+						(message): message is AssistantMessage =>
+							message.role === "assistant" && message.stopReason !== "aborted",
+					);
 
 				const contextTokens = lastAssistantMessage
 					? lastAssistantMessage.usage.input +
