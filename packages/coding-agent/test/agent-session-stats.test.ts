@@ -1,10 +1,13 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Agent } from "@fitclaw/agent-core";
 import { type AssistantMessage, getModel, type Usage } from "@fitclaw/ai";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
-import { SessionManager } from "../src/core/session-manager.js";
+import { CURRENT_SESSION_VERSION, SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 import { createTestResourceLoader } from "./utilities.js";
 
@@ -136,6 +139,70 @@ describe("AgentSession.getSessionStats", () => {
 			expect(stats.contextUsage).toBeDefined();
 			expect(stats.contextUsage?.tokens).toBe(25_000);
 			expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+		} finally {
+			session.dispose();
+		}
+	});
+});
+
+describe("AgentSession reporting", () => {
+	it("exports only the current branch to JSONL", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "fitclaw-session-export-"));
+		const { session, sessionManager } = createSession();
+
+		try {
+			const rootId = sessionManager.appendMessage(createUserMessage("root", 1));
+			sessionManager.appendMessage(createAssistantMessage("abandoned", 10, 2));
+			sessionManager.branch(rootId);
+			const activeId = sessionManager.appendMessage(createAssistantMessage("active", 20, 3));
+
+			const requestedPath = join(tempDir, "nested", "session.jsonl");
+			const exportedPath = session.exportToJsonl(requestedPath);
+			const lines = readFileSync(exportedPath, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+
+			expect(exportedPath).toBe(resolve(requestedPath));
+			expect(lines[0]).toMatchObject({
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: sessionManager.getSessionId(),
+				cwd: sessionManager.getCwd(),
+			});
+			expect(lines.slice(1).map((entry) => entry.id)).toEqual([rootId, activeId]);
+			expect(lines.slice(1).map((entry) => entry.parentId)).toEqual([null, rootId]);
+			expect(lines[2].message.content[0].text).toBe("active");
+		} finally {
+			session.dispose();
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("returns text from the last non-empty assistant response", () => {
+		const { session } = createSession();
+		const previous = createAssistantMessage(" previous response ", 10, 1);
+		const aborted = {
+			...createAssistantMessage("", 0, 2),
+			content: [],
+			stopReason: "aborted" as const,
+		};
+
+		try {
+			session.agent.state.messages = [previous, aborted];
+			expect(session.getLastAssistantText()).toBe("previous response");
+
+			session.agent.state.messages = [
+				previous,
+				{
+					...createAssistantMessage("", 20, 3),
+					content: [
+						{ type: "text", text: " latest " },
+						{ type: "text", text: "response " },
+					],
+				},
+			];
+			expect(session.getLastAssistantText()).toBe("latest response");
 		} finally {
 			session.dispose();
 		}

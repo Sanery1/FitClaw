@@ -13,8 +13,8 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@fitclaw/agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@fitclaw/ai";
 import { resetApiProviders } from "@fitclaw/ai";
@@ -25,18 +25,9 @@ import {
 	type AgentRetryEvent,
 	stripFrontmatter,
 } from "@fitclaw/runtime";
-import { theme } from "../modes/interactive/theme/theme.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.js";
 import type { BashResult } from "./bash-executor.js";
-import {
-	type CompactionResult,
-	calculateContextTokens,
-	compact,
-	estimateContextTokens,
-	prepareCompaction,
-} from "./compaction/index.js";
-import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.js";
-import { createToolHtmlRenderer } from "./export-html/tool-renderer.js";
+import { type CompactionResult, compact, prepareCompaction } from "./compaction/index.js";
 import {
 	type ContextUsage,
 	type ExtensionCommandContextActions,
@@ -68,8 +59,15 @@ import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import { SessionBashController, type SessionBashExecutionOptions } from "./session-bash-controller.js";
 import type { SessionManager } from "./session-manager.js";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.js";
 import { type ModelCycleResult, SessionModelController, type SessionScopedModel } from "./session-model-controller.js";
+import {
+	exportSessionHtml,
+	exportSessionJsonl,
+	getLastAssistantText,
+	getSessionContextUsage,
+	getSessionStats,
+	type SessionStats,
+} from "./session-reporting.js";
 import {
 	type ForkableUserMessage,
 	SessionTreeController,
@@ -84,6 +82,7 @@ import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 
 export type { ModelCycleResult } from "./session-model-controller.js";
+export type { SessionStats } from "./session-reporting.js";
 export { type ParsedSkillBlock, parseSkillBlock } from "./skill-block.js";
 
 /** Session-specific events that extend the core AgentEvent */
@@ -155,26 +154,6 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
-}
-
-/** Session statistics for /session command */
-export interface SessionStats {
-	sessionFile: string | undefined;
-	sessionId: string;
-	userMessages: number;
-	assistantMessages: number;
-	toolCalls: number;
-	toolResults: number;
-	totalMessages: number;
-	tokens: {
-		input: number;
-		output: number;
-		cacheRead: number;
-		cacheWrite: number;
-		total: number;
-	};
-	cost: number;
-	contextUsage?: ContextUsage;
 }
 
 interface ToolDefinitionEntry {
@@ -1951,94 +1930,11 @@ export class AgentSession {
 	 * Get session statistics.
 	 */
 	getSessionStats(): SessionStats {
-		const state = this.state;
-		const userMessages = state.messages.filter((m) => m.role === "user").length;
-		const assistantMessages = state.messages.filter((m) => m.role === "assistant").length;
-		const toolResults = state.messages.filter((m) => m.role === "toolResult").length;
-
-		let toolCalls = 0;
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalCost = 0;
-
-		for (const message of state.messages) {
-			if (message.role === "assistant") {
-				const assistantMsg = message as AssistantMessage;
-				toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-				totalInput += assistantMsg.usage.input;
-				totalOutput += assistantMsg.usage.output;
-				totalCacheRead += assistantMsg.usage.cacheRead;
-				totalCacheWrite += assistantMsg.usage.cacheWrite;
-				totalCost += assistantMsg.usage.cost.total;
-			}
-		}
-
-		return {
-			sessionFile: this.sessionFile,
-			sessionId: this.sessionId,
-			userMessages,
-			assistantMessages,
-			toolCalls,
-			toolResults,
-			totalMessages: state.messages.length,
-			tokens: {
-				input: totalInput,
-				output: totalOutput,
-				cacheRead: totalCacheRead,
-				cacheWrite: totalCacheWrite,
-				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
-			},
-			cost: totalCost,
-			contextUsage: this.getContextUsage(),
-		};
+		return getSessionStats(this.state, this.sessionManager);
 	}
 
 	getContextUsage(): ContextUsage | undefined {
-		const model = this.model;
-		if (!model) return undefined;
-
-		const contextWindow = model.contextWindow ?? 0;
-		if (contextWindow <= 0) return undefined;
-
-		// After compaction, the last assistant usage reflects pre-compaction context size.
-		// We can only trust usage from an assistant that responded after the latest compaction.
-		// If no such assistant exists, context token count is unknown until the next LLM response.
-		const branchEntries = this.sessionManager.getBranch();
-		const latestCompaction = getLatestCompactionEntry(branchEntries);
-
-		if (latestCompaction) {
-			// Check if there's a valid assistant usage after the compaction boundary
-			const compactionIndex = branchEntries.lastIndexOf(latestCompaction);
-			let hasPostCompactionUsage = false;
-			for (let i = branchEntries.length - 1; i > compactionIndex; i--) {
-				const entry = branchEntries[i];
-				if (entry.type === "message" && entry.message.role === "assistant") {
-					const assistant = entry.message;
-					if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error") {
-						const contextTokens = calculateContextTokens(assistant.usage);
-						if (contextTokens > 0) {
-							hasPostCompactionUsage = true;
-						}
-						break;
-					}
-				}
-			}
-
-			if (!hasPostCompactionUsage) {
-				return { tokens: null, contextWindow, percent: null };
-			}
-		}
-
-		const estimate = estimateContextTokens(this.messages);
-		const percent = (estimate.tokens / contextWindow) * 100;
-
-		return {
-			tokens: estimate.tokens,
-			contextWindow,
-			percent,
-		};
+		return getSessionContextUsage(this.state, this.sessionManager);
 	}
 
 	/**
@@ -2047,19 +1943,12 @@ export class AgentSession {
 	 * @returns Path to exported file
 	 */
 	async exportToHtml(outputPath?: string): Promise<string> {
-		const themeName = this.settingsManager.getTheme();
-
-		// Create tool renderer if we have an extension runner (for custom tool HTML rendering)
-		const toolRenderer: ToolHtmlRenderer = createToolHtmlRenderer({
-			getToolDefinition: (name) => this.getToolDefinition(name),
-			theme,
-			cwd: this.sessionManager.getCwd(),
-		});
-
-		return await exportSessionToHtml(this.sessionManager, this.state, {
+		return exportSessionHtml({
 			outputPath,
-			themeName,
-			toolRenderer,
+			sessionManager: this.sessionManager,
+			state: this.state,
+			themeName: this.settingsManager.getTheme(),
+			getToolDefinition: (name) => this.getToolDefinition(name),
 		});
 	}
 
@@ -2070,33 +1959,7 @@ export class AgentSession {
 	 * @returns The resolved output file path.
 	 */
 	exportToJsonl(outputPath?: string): string {
-		const filePath = resolve(outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
-		const dir = dirname(filePath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-
-		const header: SessionHeader = {
-			type: "session",
-			version: CURRENT_SESSION_VERSION,
-			id: this.sessionManager.getSessionId(),
-			timestamp: new Date().toISOString(),
-			cwd: this.sessionManager.getCwd(),
-		};
-
-		const branchEntries = this.sessionManager.getBranch();
-		const lines = [JSON.stringify(header)];
-
-		// Re-chain parentIds to form a linear sequence
-		let prevId: string | null = null;
-		for (const entry of branchEntries) {
-			const linear = { ...entry, parentId: prevId };
-			lines.push(JSON.stringify(linear));
-			prevId = entry.id;
-		}
-
-		writeFileSync(filePath, `${lines.join("\n")}\n`);
-		return filePath;
+		return exportSessionJsonl(this.sessionManager, outputPath);
 	}
 
 	// =========================================================================
@@ -2109,27 +1972,7 @@ export class AgentSession {
 	 * @returns Text content, or undefined if no assistant message exists
 	 */
 	getLastAssistantText(): string | undefined {
-		const lastAssistant = this.messages
-			.slice()
-			.reverse()
-			.find((m) => {
-				if (m.role !== "assistant") return false;
-				const msg = m as AssistantMessage;
-				// Skip aborted messages with no content
-				if (msg.stopReason === "aborted" && msg.content.length === 0) return false;
-				return true;
-			});
-
-		if (!lastAssistant) return undefined;
-
-		let text = "";
-		for (const content of (lastAssistant as AssistantMessage).content) {
-			if (content.type === "text") {
-				text += content.text;
-			}
-		}
-
-		return text.trim() || undefined;
+		return getLastAssistantText(this.messages);
 	}
 
 	// =========================================================================
