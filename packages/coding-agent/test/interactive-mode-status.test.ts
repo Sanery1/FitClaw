@@ -163,6 +163,27 @@ describe("InteractiveMode.createExtensionUIContext addAutocompleteProvider", () 
 	});
 });
 
+describe("InteractiveMode.createExtensionUIContext working state", () => {
+	test("delegates working state changes to the working controller", () => {
+		const setMessage = vi.fn();
+		const setVisible = vi.fn();
+		const setIndicator = vi.fn();
+		const fakeThis = { workingController: { setIndicator, setMessage, setVisible } };
+		const createExtensionUIContext = Reflect.get(InteractiveMode.prototype, "createExtensionUIContext") as (
+			this: typeof fakeThis,
+		) => ExtensionUIContext;
+		const uiContext = createExtensionUIContext.call(fakeThis);
+
+		uiContext.setWorkingMessage("Analyzing");
+		uiContext.setWorkingVisible(false);
+		uiContext.setWorkingIndicator({ frames: ["#"] });
+
+		expect(setMessage).toHaveBeenCalledWith("Analyzing");
+		expect(setVisible).toHaveBeenCalledWith(false);
+		expect(setIndicator).toHaveBeenCalledWith({ frames: ["#"] });
+	});
+});
+
 describe("renderLoadedResources", () => {
 	beforeAll(() => {
 		initTheme("dark");

@@ -20,8 +20,6 @@ import type {
 import {
 	type Component,
 	Container,
-	Loader,
-	type LoaderIndicatorOptions,
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
@@ -68,6 +66,7 @@ import { InteractiveMessageQueueController } from "./interactive-message-queue-c
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
+import { InteractiveWorkingController } from "./interactive-working-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
 	getAvailableThemes,
@@ -120,11 +119,6 @@ export class InteractiveMode {
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
-	private loadingAnimation: Loader | undefined = undefined;
-	private workingMessage: string | undefined = undefined;
-	private workingVisible = true;
-	private workingIndicatorOptions: LoaderIndicatorOptions | undefined = undefined;
-	private readonly defaultWorkingMessage = "Working...";
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
@@ -141,6 +135,7 @@ export class InteractiveMode {
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
 	private readonly sessionViewController: InteractiveSessionViewController;
+	private readonly workingController: InteractiveWorkingController;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
 	private lastStatusSpacer: Spacer | undefined = undefined;
@@ -225,6 +220,11 @@ export class InteractiveMode {
 			footerDataProvider: this.footerDataProvider,
 			getToolOutputExpanded: () => this.toolOutputExpanded,
 		});
+		this.workingController = new InteractiveWorkingController({
+			ui: this.ui,
+			statusContainer: this.statusContainer,
+			isStreaming: () => this.session.isStreaming,
+		});
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -272,7 +272,7 @@ export class InteractiveMode {
 			getEditor: () => this.editor,
 			showConfirm: (title, message) => this.extensionDialogController.confirm(title, message),
 			promptForMissingSessionCwd: (error) => this.extensionDialogController.promptForMissingSessionCwd(error),
-			stopWorkingLoader: () => this.stopWorkingLoader(),
+			stopWorkingLoader: () => this.workingController.stop(),
 			renderCurrentSessionState: () => this.renderCurrentSessionState(),
 			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
@@ -291,7 +291,7 @@ export class InteractiveMode {
 			showExtensionSelector: (title, options) => this.extensionDialogController.select(title, options),
 			showExtensionEditor: (title) => this.extensionDialogController.editor(title),
 			promptForMissingSessionCwd: (error) => this.extensionDialogController.promptForMissingSessionCwd(error),
-			stopWorkingLoader: () => this.stopWorkingLoader(),
+			stopWorkingLoader: () => this.workingController.stop(),
 			renderCurrentSessionState: () => this.renderCurrentSessionState(),
 			renderInitialMessages: () => this.renderInitialMessages(),
 			showStatus: (message) => this.showStatus(message),
@@ -311,20 +311,8 @@ export class InteractiveMode {
 			initialize: () => this.init(),
 			invalidateFooter: () => this.footer.invalidate(),
 			updateEditorBorderColor: () => this.updateEditorBorderColor(),
-			startAgentActivity: () => {
-				this.stopWorkingLoader();
-				if (this.workingVisible) {
-					this.loadingAnimation = this.createWorkingLoader();
-					this.statusContainer.addChild(this.loadingAnimation);
-				}
-			},
-			stopAgentActivity: () => {
-				if (this.loadingAnimation) {
-					this.loadingAnimation.stop();
-					this.loadingAnimation = undefined;
-					this.statusContainer.clear();
-				}
-			},
+			startAgentActivity: () => this.workingController.startAgentActivity(),
+			stopAgentActivity: () => this.workingController.stopAgentActivity(),
 			updatePendingMessagesDisplay: () => this.messageQueueController.updatePendingMessagesDisplay(),
 			updateTerminalTitle: () => this.updateTerminalTitle(),
 			checkShutdownRequested: () => this.checkShutdownRequested(),
@@ -795,11 +783,7 @@ export class InteractiveMode {
 			commandContextActions: {
 				waitForIdle: () => this.session.agent.waitForIdle(),
 				newSession: async (options) => {
-					if (this.loadingAnimation) {
-						this.loadingAnimation.stop();
-						this.loadingAnimation = undefined;
-					}
-					this.statusContainer.clear();
+					this.workingController.stop();
 					try {
 						const result = await this.runtimeHost.newSession(options);
 						if (!result.cancelled) {
@@ -968,49 +952,6 @@ export class InteractiveMode {
 		};
 	}
 
-	private getWorkingLoaderMessage(): string {
-		return this.workingMessage ?? this.defaultWorkingMessage;
-	}
-
-	private createWorkingLoader(): Loader {
-		return new Loader(
-			this.ui,
-			(spinner) => theme.fg("accent", spinner),
-			(text) => theme.fg("muted", text),
-			this.getWorkingLoaderMessage(),
-			this.workingIndicatorOptions,
-		);
-	}
-
-	private stopWorkingLoader(): void {
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
-		this.statusContainer.clear();
-	}
-
-	private setWorkingVisible(visible: boolean): void {
-		this.workingVisible = visible;
-		if (!visible) {
-			this.stopWorkingLoader();
-			this.ui.requestRender();
-			return;
-		}
-		if (this.session.isStreaming && !this.loadingAnimation) {
-			this.statusContainer.clear();
-			this.loadingAnimation = this.createWorkingLoader();
-			this.statusContainer.addChild(this.loadingAnimation);
-		}
-		this.ui.requestRender();
-	}
-
-	private setWorkingIndicator(options?: LoaderIndicatorOptions): void {
-		this.workingIndicatorOptions = options;
-		this.loadingAnimation?.setIndicator(options);
-		this.ui.requestRender();
-	}
-
 	private setHiddenThinkingLabel(label?: string): void {
 		this.hiddenThinkingLabel = label ?? this.defaultHiddenThinkingLabel;
 		this.sessionViewController.updateHiddenThinkingLabel(this.hiddenThinkingLabel);
@@ -1026,12 +967,7 @@ export class InteractiveMode {
 		this.autocompleteController.setup();
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
-		this.workingMessage = undefined;
-		this.workingVisible = true;
-		this.setWorkingIndicator();
-		if (this.loadingAnimation) {
-			this.loadingAnimation.setMessage(`${this.defaultWorkingMessage} (${keyText("app.interrupt")} to interrupt)`);
-		}
+		this.workingController.reset();
 		this.setHiddenThinkingLabel();
 	}
 
@@ -1064,14 +1000,9 @@ export class InteractiveMode {
 			notify: (message, type) => this.showExtensionNotify(message, type),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
 			setStatus: (key, text) => this.extensionChromeController.setStatus(key, text),
-			setWorkingMessage: (message) => {
-				this.workingMessage = message;
-				if (this.loadingAnimation) {
-					this.loadingAnimation.setMessage(message ?? this.defaultWorkingMessage);
-				}
-			},
-			setWorkingVisible: (visible) => this.setWorkingVisible(visible),
-			setWorkingIndicator: (options) => this.setWorkingIndicator(options),
+			setWorkingMessage: (message) => this.workingController.setMessage(message),
+			setWorkingVisible: (visible) => this.workingController.setVisible(visible),
+			setWorkingIndicator: (options) => this.workingController.setIndicator(options),
 			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
 			setWidget: (key, content, options) => this.extensionChromeController.setWidget(key, content, options),
 			setFooter: (factory) => this.extensionChromeController.setFooter(factory),
@@ -2529,11 +2460,7 @@ export class InteractiveMode {
 	}
 
 	private async handleClearCommand(): Promise<void> {
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
-		this.statusContainer.clear();
+		this.workingController.stop();
 		try {
 			const result = await this.runtimeHost.newSession();
 			if (result.cancelled) {
@@ -2614,11 +2541,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
-		this.statusContainer.clear();
+		this.workingController.stop();
 
 		try {
 			await this.session.compact(customInstructions);
@@ -2632,10 +2555,7 @@ export class InteractiveMode {
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
+		this.workingController.dispose();
 		this.clearExtensionTerminalInputListeners();
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
