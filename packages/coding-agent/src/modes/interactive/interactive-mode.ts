@@ -7,7 +7,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ImageContent, Model } from "@fitclaw/ai";
+import type { ImageContent } from "@fitclaw/ai";
 import type { EditorComponent, Keybinding, KeyId, MarkdownTheme } from "@fitclaw/tui";
 import {
 	type Component,
@@ -28,7 +28,6 @@ import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type { ExtensionContext, ExtensionRunner, ExtensionUIContext } from "../../core/extensions/index.js";
 import { FooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
-import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
@@ -43,8 +42,6 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExpandableText, isExpandable } from "./components/expandable-text.js";
 import { FooterComponent } from "./components/footer.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
-import { ModelSelectorComponent } from "./components/model-selector.js";
-import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
 import { InteractiveAutocompleteController } from "./interactive-autocomplete-controller.js";
 import { InteractiveBashController } from "./interactive-bash-controller.js";
@@ -52,6 +49,7 @@ import { InteractiveExtensionChromeController } from "./interactive-extension-ch
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
 import { InteractiveExtensionSurfaceController } from "./interactive-extension-surface-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
+import { InteractiveModelController } from "./interactive-model-controller.js";
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
@@ -119,6 +117,7 @@ export class InteractiveMode {
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
 	private readonly extensionSurfaceController: InteractiveExtensionSurfaceController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
+	private readonly modelController: InteractiveModelController;
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly settingsController: InteractiveSettingsController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
@@ -251,10 +250,23 @@ export class InteractiveMode {
 			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
 			showWarning: (message) => this.showWarning(message),
-			updateAvailableProviderCount: () => this.updateAvailableProviderCount(),
+			updateAvailableProviderCount: () => this.modelController.updateAvailableProviderCount(),
 			invalidateFooter: () => this.footer.invalidate(),
 			updateEditorBorderColor: () => this.updateEditorBorderColor(),
 			checkModelEasterEgg: (model) => this.checkDaxnutsEasterEgg(model),
+		});
+		this.modelController = new InteractiveModelController({
+			getSession: () => this.session,
+			ui: this.ui,
+			showSelector: (create) => this.extensionSurfaceController.showSelector(create),
+			invalidateFooter: () => this.footer.invalidate(),
+			setAvailableProviderCount: (count) => this.footerDataProvider.setAvailableProviderCount(count),
+			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			warnAboutAnthropicSubscriptionAuth: (model) =>
+				this.authController.maybeWarnAboutAnthropicSubscriptionAuth(model),
+			checkModelEasterEgg: (model) => this.checkDaxnutsEasterEgg(model),
+			showStatus: (message) => this.showStatus(message),
+			showError: (message) => this.showError(message),
 		});
 		this.messageQueueController = new InteractiveMessageQueueController({
 			getSession: () => this.session,
@@ -451,7 +463,7 @@ export class InteractiveMode {
 		});
 
 		// Initialize available provider count for footer display
-		await this.updateAvailableProviderCount();
+		await this.modelController.updateAvailableProviderCount();
 	}
 
 	/**
@@ -706,7 +718,7 @@ export class InteractiveMode {
 		this.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
-		await this.updateAvailableProviderCount();
+		await this.modelController.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
@@ -926,12 +938,12 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
-		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
-		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
+		this.defaultEditor.onAction("app.model.cycleForward", () => this.modelController.cycle("forward"));
+		this.defaultEditor.onAction("app.model.cycleBackward", () => this.modelController.cycle("backward"));
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
-		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
+		this.defaultEditor.onAction("app.model.select", () => this.modelController.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
@@ -991,13 +1003,13 @@ export class InteractiveMode {
 			}
 			if (text === "/scoped-models") {
 				this.editor.setText("");
-				await this.showModelsSelector();
+				await this.modelController.showScopedModelsSelector();
 				return;
 			}
 			if (text === "/model" || text.startsWith("/model ")) {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
-				await this.handleModelCommand(searchTerm);
+				await this.modelController.handleCommand(searchTerm);
 				return;
 			}
 			if (text === "/export" || text.startsWith("/export ")) {
@@ -1340,25 +1352,6 @@ export class InteractiveMode {
 		}
 	}
 
-	private async cycleModel(direction: "forward" | "backward"): Promise<void> {
-		try {
-			const result = await this.session.cycleModel(direction);
-			if (result === undefined) {
-				const msg = this.session.scopedModels.length > 0 ? "Only one model in scope" : "Only one model available";
-				this.showStatus(msg);
-			} else {
-				this.footer.invalidate();
-				this.updateEditorBorderColor();
-				const thinkingStr =
-					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
-				this.showStatus(`Switched to ${result.model.name || result.model.id}${thinkingStr}`);
-				void this.authController.maybeWarnAboutAnthropicSubscriptionAuth(result.model);
-			}
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
-		}
-	}
-
 	private toggleToolOutputExpansion(): void {
 		this.setToolsExpanded(!this.toolOutputExpanded);
 	}
@@ -1485,168 +1478,6 @@ export class InteractiveMode {
 		);
 		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
 		this.ui.requestRender();
-	}
-
-	// =========================================================================
-	// Selectors
-	// =========================================================================
-
-	private async handleModelCommand(searchTerm?: string): Promise<void> {
-		if (!searchTerm) {
-			this.showModelSelector();
-			return;
-		}
-
-		const model = await this.findExactModelMatch(searchTerm);
-		if (model) {
-			try {
-				await this.session.setModel(model);
-				this.footer.invalidate();
-				this.updateEditorBorderColor();
-				this.showStatus(`Model: ${model.id}`);
-				void this.authController.maybeWarnAboutAnthropicSubscriptionAuth(model);
-				this.checkDaxnutsEasterEgg(model);
-			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
-			}
-			return;
-		}
-
-		this.showModelSelector(searchTerm);
-	}
-
-	private async findExactModelMatch(searchTerm: string): Promise<Model<any> | undefined> {
-		const models = await this.getModelCandidates();
-		return findExactModelReferenceMatch(searchTerm, models);
-	}
-
-	private async getModelCandidates(): Promise<Model<any>[]> {
-		if (this.session.scopedModels.length > 0) {
-			return this.session.scopedModels.map((scoped) => scoped.model);
-		}
-
-		this.session.modelRegistry.refresh();
-		try {
-			return await this.session.modelRegistry.getAvailable();
-		} catch {
-			return [];
-		}
-	}
-
-	/** Update the footer's available provider count from current model candidates */
-	private async updateAvailableProviderCount(): Promise<void> {
-		const models = await this.getModelCandidates();
-		const uniqueProviders = new Set(models.map((m) => m.provider));
-		this.footerDataProvider.setAvailableProviderCount(uniqueProviders.size);
-	}
-
-	private showModelSelector(initialSearchInput?: string): void {
-		this.extensionSurfaceController.showSelector((done) => {
-			const selector = new ModelSelectorComponent(
-				this.ui,
-				this.session.model,
-				this.settingsManager,
-				this.session.modelRegistry,
-				this.session.scopedModels,
-				async (model) => {
-					try {
-						await this.session.setModel(model);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-						done();
-						this.showStatus(`Model: ${model.id}`);
-						void this.authController.maybeWarnAboutAnthropicSubscriptionAuth(model);
-						this.checkDaxnutsEasterEgg(model);
-					} catch (error) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
-					}
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-				initialSearchInput,
-			);
-			return { component: selector, focus: selector };
-		});
-	}
-
-	private async showModelsSelector(): Promise<void> {
-		// Get all available models
-		this.session.modelRegistry.refresh();
-		const allModels = this.session.modelRegistry.getAvailable();
-
-		if (allModels.length === 0) {
-			this.showStatus("No models available");
-			return;
-		}
-
-		// Check if session has scoped models (from previous session-only changes or CLI --models)
-		const sessionScopedModels = this.session.scopedModels;
-		const hasSessionScope = sessionScopedModels.length > 0;
-
-		// Build enabled model IDs from session state or settings
-		let currentEnabledIds: string[] | null = null;
-
-		if (hasSessionScope) {
-			// Use current session's scoped models
-			currentEnabledIds = sessionScopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`);
-		} else {
-			// Fall back to settings
-			const patterns = this.settingsManager.getEnabledModels();
-			if (patterns !== undefined && patterns.length > 0) {
-				const scopedModels = await resolveModelScope(patterns, this.session.modelRegistry);
-				currentEnabledIds = scopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`);
-			}
-		}
-
-		// Helper to update session's scoped models (session-only, no persist)
-		const updateSessionModels = async (enabledIds: string[] | null) => {
-			currentEnabledIds = enabledIds === null ? null : [...enabledIds];
-			if (enabledIds && enabledIds.length > 0 && enabledIds.length < allModels.length) {
-				const newScopedModels = await resolveModelScope(enabledIds, this.session.modelRegistry);
-				this.session.setScopedModels(
-					newScopedModels.map((sm) => ({
-						model: sm.model,
-						thinkingLevel: sm.thinkingLevel,
-					})),
-				);
-			} else {
-				// All enabled or none enabled = no filter
-				this.session.setScopedModels([]);
-			}
-			await this.updateAvailableProviderCount();
-			this.ui.requestRender();
-		};
-
-		this.extensionSurfaceController.showSelector((done) => {
-			const selector = new ScopedModelsSelectorComponent(
-				{
-					allModels,
-					enabledModelIds: currentEnabledIds,
-				},
-				{
-					onChange: async (enabledIds) => {
-						await updateSessionModels(enabledIds);
-					},
-					onPersist: (enabledIds) => {
-						// Persist to settings
-						const newPatterns =
-							enabledIds === null || enabledIds.length === allModels.length
-								? undefined // All enabled = clear filter
-								: enabledIds;
-						this.settingsManager.setEnabledModels(newPatterns ? [...newPatterns] : undefined);
-						this.showStatus("Model selection saved to settings");
-					},
-					onCancel: () => {
-						done();
-						this.ui.requestRender();
-					},
-				},
-			);
-			return { component: selector, focus: selector };
-		});
 	}
 
 	// =========================================================================
