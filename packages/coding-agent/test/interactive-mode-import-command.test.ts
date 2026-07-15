@@ -1,144 +1,168 @@
+import { Container, type EditorComponent, type TUI } from "@fitclaw/tui";
 import { describe, expect, it, vi } from "vitest";
-import { SessionImportFileNotFoundError } from "../src/core/agent-session-runtime.js";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import type { AgentSession } from "../src/core/agent-session.js";
+import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../src/core/agent-session-runtime.js";
+import { MissingSessionCwdError } from "../src/core/session-cwd.js";
+import {
+	getPathCommandArgument,
+	InteractiveSessionTransferController,
+} from "../src/modes/interactive/interactive-session-transfer-controller.js";
 
-type PathCommand = "/export" | "/import";
+interface TransferFixtureOptions {
+	importFromJsonl?: AgentSessionRuntime["importFromJsonl"];
+	selectedCwd?: string;
+}
 
-type InteractiveModePrototype = {
-	getPathCommandArgument(this: unknown, text: string, command: PathCommand): string | undefined;
-	handleImportCommand(this: ImportCommandContext, text: string): Promise<void>;
-};
-
-type ImportCommandContext = {
-	loadingAnimation?: { stop: () => void };
-	statusContainer: { clear: () => void };
-	runtimeHost: { importFromJsonl: (inputPath: string, cwdOverride?: string) => Promise<{ cancelled: boolean }> };
-	showError: (message: string) => void;
-	showStatus: (message: string) => void;
-	showExtensionConfirm: (title: string, message: string) => Promise<boolean>;
-	handleRuntimeSessionChange: () => Promise<void>;
-	renderCurrentSessionState: () => void;
-	handleFatalRuntimeError: (prefix: string, error: unknown) => Promise<never>;
-	promptForMissingSessionCwd: (error: unknown) => Promise<string | undefined>;
-	getPathCommandArgument: (text: string, command: PathCommand) => string | undefined;
-};
-
-const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
-
-describe("InteractiveMode /import parsing", () => {
-	it("strips quotes from /import path arguments", () => {
-		expect(interactiveModePrototype.getPathCommandArgument('/import "path/to/session.jsonl"', "/import")).toBe(
-			"path/to/session.jsonl",
-		);
-		expect(
-			interactiveModePrototype.getPathCommandArgument('/import "path with spaces/session.jsonl"', "/import"),
-		).toBe("path with spaces/session.jsonl");
+function createTransferFixture(options: TransferFixtureOptions = {}) {
+	const exportToHtml = vi.fn<AgentSession["exportToHtml"]>(async (outputPath) => outputPath ?? "session.html");
+	const exportToJsonl = vi.fn<AgentSession["exportToJsonl"]>((outputPath) => outputPath ?? "session.jsonl");
+	const session = {
+		exportToHtml,
+		exportToJsonl,
+		getLastAssistantText: () => undefined,
+	} as unknown as AgentSession;
+	const importFromJsonl = vi.fn<AgentSessionRuntime["importFromJsonl"]>(
+		options.importFromJsonl ?? (async () => ({ cancelled: false })),
+	);
+	const showConfirm = vi.fn(async () => true);
+	const promptForMissingSessionCwd = vi.fn(async () => options.selectedCwd);
+	const stopWorkingLoader = vi.fn();
+	const renderCurrentSessionState = vi.fn();
+	const showStatus = vi.fn();
+	const showError = vi.fn();
+	const handleFatalRuntimeError = vi.fn(async (_prefix: string, error: unknown): Promise<never> => {
+		throw error;
+	});
+	const controller = new InteractiveSessionTransferController({
+		getSession: () => session,
+		runtimeHost: { importFromJsonl },
+		ui: {} as TUI,
+		editorContainer: new Container(),
+		getEditor: () => new Container() as unknown as EditorComponent,
+		showConfirm,
+		promptForMissingSessionCwd,
+		stopWorkingLoader,
+		renderCurrentSessionState,
+		showStatus,
+		showError,
+		handleFatalRuntimeError,
 	});
 
-	it("preserves apostrophes in unquoted /import path arguments", () => {
-		expect(interactiveModePrototype.getPathCommandArgument("/import john's/session.jsonl", "/import")).toBe(
-			"john's/session.jsonl",
+	return {
+		controller,
+		exportToHtml,
+		exportToJsonl,
+		handleFatalRuntimeError,
+		importFromJsonl,
+		promptForMissingSessionCwd,
+		renderCurrentSessionState,
+		showConfirm,
+		showError,
+		showStatus,
+		stopWorkingLoader,
+	};
+}
+
+describe("session transfer path parsing", () => {
+	it("strips quotes from path arguments", () => {
+		expect(getPathCommandArgument('/import "path/to/session.jsonl"', "/import")).toBe("path/to/session.jsonl");
+		expect(getPathCommandArgument('/import "path with spaces/session.jsonl"', "/import")).toBe(
+			"path with spaces/session.jsonl",
 		);
+	});
+
+	it("preserves apostrophes in unquoted path arguments", () => {
+		expect(getPathCommandArgument("/import john's/session.jsonl", "/import")).toBe("john's/session.jsonl");
 	});
 
 	it("enforces command token boundaries", () => {
-		expect(interactiveModePrototype.getPathCommandArgument("/important /tmp/session.jsonl", "/import")).toBe(
-			undefined,
-		);
-		expect(interactiveModePrototype.getPathCommandArgument("/exporter out.html", "/export")).toBe(undefined);
-		expect(interactiveModePrototype.getPathCommandArgument("/import /tmp/session.jsonl", "/import")).toBe(
-			"/tmp/session.jsonl",
-		);
+		expect(getPathCommandArgument("/important /tmp/session.jsonl", "/import")).toBe(undefined);
+		expect(getPathCommandArgument("/exporter out.html", "/export")).toBe(undefined);
+		expect(getPathCommandArgument("/import /tmp/session.jsonl", "/import")).toBe("/tmp/session.jsonl");
+	});
+});
+
+describe("InteractiveSessionTransferController export", () => {
+	it("exports .jsonl paths as JSONL", async () => {
+		const fixture = createTransferFixture();
+
+		await fixture.controller.handleExportCommand("/export session.jsonl");
+
+		expect(fixture.exportToJsonl).toHaveBeenCalledWith("session.jsonl");
+		expect(fixture.exportToHtml).not.toHaveBeenCalled();
+		expect(fixture.showStatus).toHaveBeenCalledWith("Session exported to: session.jsonl");
 	});
 
-	it("passes unquoted path to runtimeHost.importFromJsonl", async () => {
-		const importFromJsonl = vi.fn(async () => ({ cancelled: false }));
-		const showExtensionConfirm = vi.fn(async () => true);
-		const showStatus = vi.fn();
-		const showError = vi.fn();
+	it("exports other paths as HTML", async () => {
+		const fixture = createTransferFixture();
 
-		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
-			runtimeHost: { importFromJsonl },
-			showError,
-			showStatus,
-			showExtensionConfirm,
-			handleRuntimeSessionChange: vi.fn(async () => {}),
-			renderCurrentSessionState: vi.fn(),
-			handleFatalRuntimeError: vi.fn(async () => {
-				throw new Error("unexpected fatal error");
-			}),
-			promptForMissingSessionCwd: vi.fn(async () => undefined),
-			getPathCommandArgument: interactiveModePrototype.getPathCommandArgument,
-		};
+		await fixture.controller.handleExportCommand("/export session.html");
 
-		await interactiveModePrototype.handleImportCommand.call(context, '/import "path/to/session.jsonl"');
+		expect(fixture.exportToHtml).toHaveBeenCalledWith("session.html");
+		expect(fixture.exportToJsonl).not.toHaveBeenCalled();
+		expect(fixture.showStatus).toHaveBeenCalledWith("Session exported to: session.html");
+	});
+});
 
-		expect(showExtensionConfirm).toHaveBeenCalledWith(
+describe("InteractiveSessionTransferController import", () => {
+	it("passes an unquoted path to the runtime", async () => {
+		const fixture = createTransferFixture();
+
+		await fixture.controller.handleImportCommand('/import "path/to/session.jsonl"');
+
+		expect(fixture.showConfirm).toHaveBeenCalledWith(
 			"Import session",
 			"Replace current session with path/to/session.jsonl?",
 		);
-		expect(importFromJsonl).toHaveBeenCalledWith("path/to/session.jsonl");
-		expect(showError).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledWith("Session imported from: path/to/session.jsonl");
+		expect(fixture.stopWorkingLoader).toHaveBeenCalledOnce();
+		expect(fixture.importFromJsonl).toHaveBeenCalledWith("path/to/session.jsonl");
+		expect(fixture.renderCurrentSessionState).toHaveBeenCalledOnce();
+		expect(fixture.showError).not.toHaveBeenCalled();
+		expect(fixture.showStatus).toHaveBeenCalledWith("Session imported from: path/to/session.jsonl");
 	});
 
-	it("passes unquoted apostrophe path to runtimeHost.importFromJsonl unchanged", async () => {
-		const importFromJsonl = vi.fn(async () => ({ cancelled: false }));
-		const showExtensionConfirm = vi.fn(async () => true);
-		const showStatus = vi.fn();
-		const showError = vi.fn();
+	it("passes an unquoted apostrophe path unchanged", async () => {
+		const fixture = createTransferFixture();
 
-		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
-			runtimeHost: { importFromJsonl },
-			showError,
-			showStatus,
-			showExtensionConfirm,
-			handleRuntimeSessionChange: vi.fn(async () => {}),
-			renderCurrentSessionState: vi.fn(),
-			handleFatalRuntimeError: vi.fn(async () => {
-				throw new Error("unexpected fatal error");
-			}),
-			promptForMissingSessionCwd: vi.fn(async () => undefined),
-			getPathCommandArgument: interactiveModePrototype.getPathCommandArgument,
-		};
+		await fixture.controller.handleImportCommand("/import john's/session.jsonl");
 
-		await interactiveModePrototype.handleImportCommand.call(context, "/import john's/session.jsonl");
-
-		expect(importFromJsonl).toHaveBeenCalledWith("john's/session.jsonl");
-		expect(showError).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledWith("Session imported from: john's/session.jsonl");
+		expect(fixture.importFromJsonl).toHaveBeenCalledWith("john's/session.jsonl");
+		expect(fixture.showError).not.toHaveBeenCalled();
 	});
 
-	it("shows a non-fatal error when /import path does not exist", async () => {
-		const importFromJsonl = vi.fn(async () => {
+	it("shows a non-fatal error when the path does not exist", async () => {
+		const importFromJsonl = vi.fn<AgentSessionRuntime["importFromJsonl"]>(async () => {
 			throw new SessionImportFileNotFoundError("/tmp/missing-session.jsonl");
 		});
-		const showExtensionConfirm = vi.fn(async () => true);
-		const showStatus = vi.fn();
-		const showError = vi.fn();
-		const handleFatalRuntimeError = vi.fn(async () => {
-			throw new Error("unexpected fatal error");
+		const fixture = createTransferFixture({ importFromJsonl });
+
+		await fixture.controller.handleImportCommand("/import /tmp/missing-session.jsonl");
+
+		expect(fixture.showError).toHaveBeenCalledWith(
+			"Failed to import session: File not found: /tmp/missing-session.jsonl",
+		);
+		expect(fixture.showStatus).not.toHaveBeenCalled();
+		expect(fixture.handleFatalRuntimeError).not.toHaveBeenCalled();
+	});
+
+	it("retries in the selected cwd when the stored cwd is missing", async () => {
+		const missingCwdError = new MissingSessionCwdError({
+			sessionFile: "session.jsonl",
+			sessionCwd: "missing-cwd",
+			fallbackCwd: "current-cwd",
 		});
+		const importFromJsonl = vi
+			.fn<AgentSessionRuntime["importFromJsonl"]>()
+			.mockRejectedValueOnce(missingCwdError)
+			.mockResolvedValueOnce({ cancelled: false });
+		const fixture = createTransferFixture({ importFromJsonl, selectedCwd: "current-cwd" });
 
-		const context: ImportCommandContext = {
-			statusContainer: { clear: vi.fn() },
-			runtimeHost: { importFromJsonl },
-			showError,
-			showStatus,
-			showExtensionConfirm,
-			handleRuntimeSessionChange: vi.fn(async () => {}),
-			renderCurrentSessionState: vi.fn(),
-			handleFatalRuntimeError,
-			promptForMissingSessionCwd: vi.fn(async () => undefined),
-			getPathCommandArgument: interactiveModePrototype.getPathCommandArgument,
-		};
+		await fixture.controller.handleImportCommand("/import session.jsonl");
 
-		await interactiveModePrototype.handleImportCommand.call(context, "/import /tmp/missing-session.jsonl");
-
-		expect(showError).toHaveBeenCalledWith("Failed to import session: File not found: /tmp/missing-session.jsonl");
-		expect(showStatus).not.toHaveBeenCalled();
-		expect(handleFatalRuntimeError).not.toHaveBeenCalled();
+		expect(fixture.promptForMissingSessionCwd).toHaveBeenCalledWith(missingCwdError);
+		expect(fixture.importFromJsonl).toHaveBeenNthCalledWith(1, "session.jsonl");
+		expect(fixture.importFromJsonl).toHaveBeenNthCalledWith(2, "session.jsonl", "current-cwd");
+		expect(fixture.renderCurrentSessionState).toHaveBeenCalledOnce();
+		expect(fixture.showStatus).toHaveBeenCalledWith("Session imported from: session.jsonl");
 	});
 });

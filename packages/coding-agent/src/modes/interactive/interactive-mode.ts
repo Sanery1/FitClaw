@@ -37,9 +37,9 @@ import {
 	visibleWidth,
 } from "@fitclaw/tui";
 import { spawn, spawnSync } from "child_process";
-import { APP_NAME, APP_TITLE, getAgentDir, getDebugLogPath, getShareViewerUrl, VERSION } from "../../config.js";
+import { APP_NAME, APP_TITLE, getAgentDir, getDebugLogPath, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
-import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
+import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type {
 	AutocompleteProviderFactory,
 	ExtensionContext,
@@ -53,20 +53,18 @@ import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.j
 import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
-import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
+import { formatMissingSessionCwdPrompt, type MissingSessionCwdError } from "../../core/session-cwd.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
-import { copyToClipboard } from "../../utils/clipboard.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { ArminComponent } from "./components/armin.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
-import { BorderedLoader } from "./components/bordered-loader.js";
 import { CustomEditor } from "./components/custom-editor.js";
 import { DaxnutsComponent } from "./components/daxnuts.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
@@ -84,6 +82,7 @@ import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
+import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
@@ -154,6 +153,7 @@ export class InteractiveMode {
 	private readonly authController: InteractiveAuthController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
+	private readonly sessionTransferController: InteractiveSessionTransferController;
 	private readonly sessionViewController: InteractiveSessionViewController;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
@@ -281,6 +281,20 @@ export class InteractiveMode {
 			getDequeueKeyDisplay: () => this.getAppKeyDisplay("app.message.dequeue"),
 			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
+		});
+		this.sessionTransferController = new InteractiveSessionTransferController({
+			getSession: () => this.session,
+			runtimeHost: this.runtimeHost,
+			ui: this.ui,
+			editorContainer: this.editorContainer,
+			getEditor: () => this.editor,
+			showConfirm: (title, message) => this.showExtensionConfirm(title, message),
+			promptForMissingSessionCwd: (error) => this.promptForMissingSessionCwd(error),
+			stopWorkingLoader: () => this.stopWorkingLoader(),
+			renderCurrentSessionState: () => this.renderCurrentSessionState(),
+			showStatus: (message) => this.showStatus(message),
+			showError: (message) => this.showError(message),
+			handleFatalRuntimeError: (prefix, error) => this.handleFatalRuntimeError(prefix, error),
 		});
 		this.sessionNavigationController = new InteractiveSessionNavigationController({
 			getSession: () => this.session,
@@ -1906,22 +1920,22 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/export" || text.startsWith("/export ")) {
-				await this.handleExportCommand(text);
+				await this.sessionTransferController.handleExportCommand(text);
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/import" || text.startsWith("/import ")) {
-				await this.handleImportCommand(text);
+				await this.sessionTransferController.handleImportCommand(text);
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/share") {
-				await this.handleShareCommand();
+				await this.sessionTransferController.handleShareCommand();
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/copy") {
-				await this.handleCopyCommand();
+				await this.sessionTransferController.handleCopyCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -2808,211 +2822,6 @@ export class InteractiveMode {
 		} catch (error) {
 			dismissReloadBox(previousEditor as Component);
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	private async handleExportCommand(text: string): Promise<void> {
-		const outputPath = this.getPathCommandArgument(text, "/export");
-
-		try {
-			if (outputPath?.endsWith(".jsonl")) {
-				const filePath = this.session.exportToJsonl(outputPath);
-				this.showStatus(`Session exported to: ${filePath}`);
-			} else {
-				const filePath = await this.session.exportToHtml(outputPath);
-				this.showStatus(`Session exported to: ${filePath}`);
-			}
-		} catch (error: unknown) {
-			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
-		}
-	}
-
-	private getPathCommandArgument(text: string, command: "/export" | "/import"): string | undefined {
-		if (text === command) {
-			return undefined;
-		}
-		if (!text.startsWith(`${command} `)) {
-			return undefined;
-		}
-
-		const argsString = text.slice(command.length + 1).trimStart();
-		if (!argsString) {
-			return undefined;
-		}
-
-		const firstChar = argsString[0];
-		if (firstChar === '"' || firstChar === "'") {
-			const closingQuoteIndex = argsString.indexOf(firstChar, 1);
-			if (closingQuoteIndex < 0) {
-				return undefined;
-			}
-			return argsString.slice(1, closingQuoteIndex);
-		}
-
-		const firstWhitespaceIndex = argsString.search(/\s/);
-		if (firstWhitespaceIndex < 0) {
-			return argsString;
-		}
-		return argsString.slice(0, firstWhitespaceIndex);
-	}
-
-	private async handleImportCommand(text: string): Promise<void> {
-		const inputPath = this.getPathCommandArgument(text, "/import");
-		if (!inputPath) {
-			this.showError("Usage: /import <path.jsonl>");
-			return;
-		}
-
-		const confirmed = await this.showExtensionConfirm("Import session", `Replace current session with ${inputPath}?`);
-		if (!confirmed) {
-			this.showStatus("Import cancelled");
-			return;
-		}
-
-		try {
-			if (this.loadingAnimation) {
-				this.loadingAnimation.stop();
-				this.loadingAnimation = undefined;
-			}
-			this.statusContainer.clear();
-			const result = await this.runtimeHost.importFromJsonl(inputPath);
-			if (result.cancelled) {
-				this.showStatus("Import cancelled");
-				return;
-			}
-			this.renderCurrentSessionState();
-			this.showStatus(`Session imported from: ${inputPath}`);
-		} catch (error: unknown) {
-			if (error instanceof MissingSessionCwdError) {
-				const selectedCwd = await this.promptForMissingSessionCwd(error);
-				if (!selectedCwd) {
-					this.showStatus("Import cancelled");
-					return;
-				}
-				const result = await this.runtimeHost.importFromJsonl(inputPath, selectedCwd);
-				if (result.cancelled) {
-					this.showStatus("Import cancelled");
-					return;
-				}
-				this.renderCurrentSessionState();
-				this.showStatus(`Session imported from: ${inputPath}`);
-				return;
-			}
-			if (error instanceof SessionImportFileNotFoundError) {
-				this.showError(`Failed to import session: ${error.message}`);
-				return;
-			}
-			await this.handleFatalRuntimeError("Failed to import session", error);
-		}
-	}
-
-	private async handleShareCommand(): Promise<void> {
-		// Check if gh is available and logged in
-		try {
-			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
-			if (authResult.status !== 0) {
-				this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
-				return;
-			}
-		} catch {
-			this.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
-			return;
-		}
-
-		// Export to a temp file
-		const tmpFile = path.join(os.tmpdir(), "session.html");
-		try {
-			await this.session.exportToHtml(tmpFile);
-		} catch (error: unknown) {
-			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
-			return;
-		}
-
-		// Show cancellable loader, replacing the editor
-		const loader = new BorderedLoader(this.ui, theme, "Creating gist...");
-		this.editorContainer.clear();
-		this.editorContainer.addChild(loader);
-		this.ui.setFocus(loader);
-		this.ui.requestRender();
-
-		const restoreEditor = () => {
-			loader.dispose();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			try {
-				fs.unlinkSync(tmpFile);
-			} catch {
-				// Ignore cleanup errors
-			}
-		};
-
-		// Create a secret gist asynchronously
-		let proc: ReturnType<typeof spawn> | null = null;
-
-		loader.onAbort = () => {
-			proc?.kill();
-			restoreEditor();
-			this.showStatus("Share cancelled");
-		};
-
-		try {
-			const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
-				proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
-				let stdout = "";
-				let stderr = "";
-				proc.stdout?.on("data", (data) => {
-					stdout += data.toString();
-				});
-				proc.stderr?.on("data", (data) => {
-					stderr += data.toString();
-				});
-				proc.on("close", (code) => resolve({ stdout, stderr, code }));
-			});
-
-			if (loader.signal.aborted) return;
-
-			restoreEditor();
-
-			if (result.code !== 0) {
-				const errorMsg = result.stderr?.trim() || "Unknown error";
-				this.showError(`Failed to create gist: ${errorMsg}`);
-				return;
-			}
-
-			// Extract gist ID from the URL returned by gh
-			// gh returns something like: https://gist.github.com/username/GIST_ID
-			const gistUrl = result.stdout?.trim();
-			const gistId = gistUrl?.split("/").pop();
-			if (!gistId) {
-				this.showError("Failed to parse gist ID from gh output");
-				return;
-			}
-
-			// Create the preview URL
-			const previewUrl = getShareViewerUrl(gistId);
-			const viewerLine = previewUrl ? `\nPreview: ${previewUrl}` : "";
-			this.showStatus(`Share URL: ${gistUrl}${viewerLine}`);
-		} catch (error: unknown) {
-			if (!loader.signal.aborted) {
-				restoreEditor();
-				this.showError(`Failed to create gist: ${error instanceof Error ? error.message : "Unknown error"}`);
-			}
-		}
-	}
-
-	private async handleCopyCommand(): Promise<void> {
-		const text = this.session.getLastAssistantText();
-		if (!text) {
-			this.showError("No agent messages to copy yet.");
-			return;
-		}
-
-		try {
-			await copyToClipboard(text);
-			this.showStatus("Copied last agent message to clipboard");
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
 		}
 	}
 
