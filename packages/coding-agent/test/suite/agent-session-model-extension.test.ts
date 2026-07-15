@@ -54,10 +54,13 @@ describe("AgentSession model and extension characterization", () => {
 		harnesses.push(harness);
 		const modelOne = harness.getModel("faux-1")!;
 		const modelTwo = harness.getModel("faux-2")!;
-		harness.session.setScopedModels([{ model: modelOne, thinkingLevel: "high" }, { model: modelTwo }] as Array<{
+		const scopedModels = [{ model: modelOne, thinkingLevel: "high" }, { model: modelTwo }] as Array<{
 			model: Model<string>;
 			thinkingLevel?: ThinkingLevel;
-		}>);
+		}>;
+		harness.session.setScopedModels(scopedModels);
+		scopedModels.length = 0;
+		expect(harness.session.scopedModels).toHaveLength(2);
 		harness.session.setThinkingLevel("high");
 
 		await harness.session.cycleModel();
