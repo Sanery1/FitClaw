@@ -3,9 +3,14 @@ import * as path from "node:path";
 import { type AutocompleteProvider, CombinedAutocompleteProvider, Container } from "@fitclaw/tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AutocompleteProviderFactory } from "../src/core/extensions/types.js";
-import type { SourceInfo } from "../src/core/source-info.js";
+import type { ResourceDiagnostic } from "../src/core/resource-loader.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import {
+	type LoadedResourcesDisplayOptions,
+	renderLoadedResources,
+} from "../src/modes/interactive/loaded-resources-view.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { createExtensionFixtures, createSourceInfo, type ExtensionFixture } from "./loaded-resources-view-fixtures.js";
 
 function renderLastLine(container: Container, width = 120): string {
 	const last = container.children[container.children.length - 1];
@@ -26,11 +31,6 @@ function normalizeRenderedOutput(container: Container, width = 220): string {
 		.join("\n")
 		.trim();
 }
-
-type ExtensionFixture = {
-	path: string;
-	sourceInfo?: SourceInfo;
-};
 
 describe("InteractiveMode.showStatus", () => {
 	beforeAll(() => {
@@ -217,12 +217,12 @@ describe("InteractiveMode.setupAutocompleteProvider", () => {
 	});
 });
 
-describe("InteractiveMode.showLoadedResources", () => {
+describe("renderLoadedResources", () => {
 	beforeAll(() => {
 		initTheme("dark");
 	});
 
-	function createShowLoadedResourcesThis(options: {
+	function createLoadedResourcesView(options: {
 		quietStartup: boolean;
 		verbose?: boolean;
 		toolOutputExpanded?: boolean;
@@ -230,238 +230,96 @@ describe("InteractiveMode.showLoadedResources", () => {
 		contextFiles?: Array<{ path: string; content?: string }>;
 		extensions?: ExtensionFixture[];
 		skills?: Array<{ filePath: string; name: string }>;
-		skillDiagnostics?: Array<{ type: "warning" | "error" | "collision"; message: string }>;
-		useRealScopeGroups?: boolean;
+		skillDiagnostics?: ResourceDiagnostic[];
 	}) {
-		const fakeThis: any = {
-			options: { verbose: options.verbose ?? false },
-			toolOutputExpanded: options.toolOutputExpanded ?? false,
-			chatContainer: new Container(),
-			settingsManager: {
-				getQuietStartup: () => options.quietStartup,
-			},
-			sessionManager: {
-				getCwd: () => options.cwd ?? "/tmp/project",
-			},
-			session: {
-				promptTemplates: [],
-				extensionRunner: {
-					getCommandDiagnostics: () => [],
-					getShortcutDiagnostics: () => [],
-				},
-				resourceLoader: {
-					getPathMetadata: () => new Map(),
-					getAgentsFiles: () => ({ agentsFiles: options.contextFiles ?? [] }),
-					getSkills: () => ({
-						skills: options.skills ?? [],
-						diagnostics: options.skillDiagnostics ?? [],
-					}),
-					getPrompts: () => ({ prompts: [], diagnostics: [] }),
-					getExtensions: () => ({ extensions: options.extensions ?? [], errors: [], runtime: {} }),
-					getThemes: () => ({ themes: [], diagnostics: [] }),
-				},
-			},
-			formatDisplayPath: (p: string) => (InteractiveMode as any).prototype.formatDisplayPath.call(fakeThis, p),
-			formatExtensionDisplayPath: (p: string) =>
-				(InteractiveMode as any).prototype.formatExtensionDisplayPath.call(fakeThis, p),
-			formatContextPath: (p: string) => (InteractiveMode as any).prototype.formatContextPath.call(fakeThis, p),
-			getStartupExpansionState: () => (InteractiveMode as any).prototype.getStartupExpansionState.call(fakeThis),
-			buildScopeGroups: () => [],
-			formatScopeGroups: () => "resource-list",
-			isPackageSource: (sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.isPackageSource.call(fakeThis, sourceInfo),
-			getShortPath: (p: string, sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getShortPath.call(fakeThis, p, sourceInfo),
-			getCompactPathLabel: (p: string, sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactPathLabel.call(fakeThis, p, sourceInfo),
-			getCompactPackageSourceLabel: (sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactPackageSourceLabel.call(fakeThis, sourceInfo),
-			getCompactExtensionLabel: (p: string, sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactExtensionLabel.call(fakeThis, p, sourceInfo),
-			getCompactDisplayPathSegments: (p: string) =>
-				(InteractiveMode as any).prototype.getCompactDisplayPathSegments.call(fakeThis, p),
-			getCompactNonPackageExtensionLabel: (
-				p: string,
-				index: number,
-				allPaths: Array<{ path: string; segments: string[] }>,
-			) => (InteractiveMode as any).prototype.getCompactNonPackageExtensionLabel.call(fakeThis, p, index, allPaths),
-			getCompactExtensionLabels: (extensions: ExtensionFixture[]) =>
-				(InteractiveMode as any).prototype.getCompactExtensionLabels.call(fakeThis, extensions),
-			formatDiagnostics: () => "diagnostics",
-			getBuiltInCommandConflictDiagnostics: () => [],
-		};
-
-		if (options.useRealScopeGroups) {
-			fakeThis.getScopeGroup = (sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getScopeGroup.call(fakeThis, sourceInfo);
-			fakeThis.buildScopeGroups = (items: Array<{ path: string; sourceInfo?: SourceInfo }>) =>
-				(InteractiveMode as any).prototype.buildScopeGroups.call(fakeThis, items);
-			fakeThis.formatScopeGroups = (groups: unknown, formatOptions: unknown) =>
-				(InteractiveMode as any).prototype.formatScopeGroups.call(fakeThis, groups, formatOptions);
-		}
-
-		return fakeThis;
-	}
-
-	function createSourceInfo(
-		filePath: string,
-		options: {
-			source: string;
-			scope: "user" | "project" | "temporary";
-			origin: "package" | "top-level";
-			baseDir?: string;
-		},
-	): SourceInfo {
+		const chatContainer = new Container();
 		return {
-			path: filePath,
-			source: options.source,
-			scope: options.scope,
-			origin: options.origin,
-			baseDir: options.baseDir,
+			chatContainer,
+			show(displayOptions?: LoadedResourcesDisplayOptions & { extensions?: ExtensionFixture[] }): void {
+				const { extensions = options.extensions ?? [], ...renderOptions } = displayOptions ?? {};
+				renderLoadedResources(
+					{
+						chatContainer,
+						cwd: options.cwd ?? "/tmp/project",
+						isVerbose: options.verbose ?? false,
+						isExpanded: (options.verbose ?? false) || (options.toolOutputExpanded ?? false),
+						isQuietStartup: options.quietStartup,
+						resources: {
+							contextFiles: options.contextFiles ?? [],
+							skills: options.skills ?? [],
+							promptTemplates: [],
+							extensions,
+							themes: [],
+							skillDiagnostics: options.skillDiagnostics ?? [],
+							promptDiagnostics: [],
+							extensionDiagnostics: [],
+							themeDiagnostics: [],
+						},
+					},
+					renderOptions,
+				);
+			},
 		};
-	}
-
-	function createExtensionFixtures(): ExtensionFixture[] {
-		return [
-			{
-				path: "/tmp/project/.pi/extensions/answer.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.pi/extensions/answer.ts", {
-					source: "local",
-					scope: "project",
-					origin: "top-level",
-					baseDir: "/tmp/project/.pi/extensions",
-				}),
-			},
-			{
-				path: "/tmp/project/.pi/extensions/local-index/index.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.pi/extensions/local-index/index.ts", {
-					source: "local",
-					scope: "project",
-					origin: "top-level",
-					baseDir: "/tmp/project/.pi/extensions",
-				}),
-			},
-			{
-				path: "/tmp/agent/extensions/user-index/index.ts",
-				sourceInfo: createSourceInfo("/tmp/agent/extensions/user-index/index.ts", {
-					source: "local",
-					scope: "user",
-					origin: "top-level",
-					baseDir: "/tmp/agent/extensions",
-				}),
-			},
-			{
-				path: "/tmp/project/.pi/npm/node_modules/pi-markdown-preview/extensions/index.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.pi/npm/node_modules/pi-markdown-preview/extensions/index.ts", {
-					source: "npm:pi-markdown-preview",
-					scope: "project",
-					origin: "package",
-					baseDir: "/tmp/project/.pi/npm/node_modules/pi-markdown-preview",
-				}),
-			},
-			{
-				path: "/tmp/project/.pi/npm/node_modules/@scope/pi-scoped/extensions/index.ts",
-				sourceInfo: createSourceInfo("/tmp/project/.pi/npm/node_modules/@scope/pi-scoped/extensions/index.ts", {
-					source: "npm:@scope/pi-scoped",
-					scope: "project",
-					origin: "package",
-					baseDir: "/tmp/project/.pi/npm/node_modules/@scope/pi-scoped",
-				}),
-			},
-			{
-				path: "/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents/extensions/index.ts",
-				sourceInfo: createSourceInfo(
-					"/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents/extensions/index.ts",
-					{
-						source: "git:github.com/HazAT/pi-interactive-subagents",
-						scope: "project",
-						origin: "package",
-						baseDir: "/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents",
-					},
-				),
-			},
-			{
-				path: "/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents/extensions/subagents/index.ts",
-				sourceInfo: createSourceInfo(
-					"/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents/extensions/subagents/index.ts",
-					{
-						source: "git:github.com/HazAT/pi-interactive-subagents",
-						scope: "project",
-						origin: "package",
-						baseDir: "/tmp/project/.pi/git/github.com/HazAT/pi-interactive-subagents",
-					},
-				),
-			},
-			{
-				path: "/tmp/temp/cli-extension.ts",
-				sourceInfo: createSourceInfo("/tmp/temp/cli-extension.ts", {
-					source: "cli",
-					scope: "temporary",
-					origin: "top-level",
-					baseDir: "/tmp/temp",
-				}),
-			},
-		];
 	}
 
 	test("shows a compact resource listing by default", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
 		const output = renderAll(fakeThis.chatContainer);
 		expect(output).toContain("[Skills]");
 		expect(output).toContain("commit");
-		expect(output).not.toContain("resource-list");
+		expect(output).not.toContain("/tmp/skill/SKILL.md");
 	});
 
 	test("shows full resource listing when expanded", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			toolOutputExpanded: true,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
 		const output = renderAll(fakeThis.chatContainer);
 		expect(output).toContain("[Skills]");
-		expect(output).toContain("resource-list");
+		expect(output).toContain("/tmp/skill/SKILL.md");
 		expect(output).not.toContain("commit");
 	});
 
 	test("shows full resource listing on verbose startup even when tool output is collapsed", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: true,
 			verbose: true,
 			toolOutputExpanded: false,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
 		const output = renderAll(fakeThis.chatContainer);
 		expect(output).toContain("[Skills]");
-		expect(output).toContain("resource-list");
+		expect(output).toContain("/tmp/skill/SKILL.md");
 		expect(output).not.toContain("commit");
 	});
 
 	test("abbreviates extensions in compact listing", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions: [{ path: "/tmp/extensions/answer.ts" }, { path: "/tmp/extensions/btw.ts" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -472,13 +330,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 	});
 
 	test("captures mixed extension layouts in compact output", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions: createExtensionFixtures(),
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -518,13 +375,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -546,13 +402,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -574,13 +429,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -611,13 +465,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -648,13 +501,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -685,13 +537,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -713,13 +564,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -741,13 +591,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 		];
 
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			extensions,
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -756,14 +605,13 @@ describe("InteractiveMode.showLoadedResources", () => {
   pi-markdown-preview"`);
 	});
 	test("captures mixed extension layouts in expanded output", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			toolOutputExpanded: true,
 			extensions: createExtensionFixtures(),
-			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -788,13 +636,13 @@ describe("InteractiveMode.showLoadedResources", () => {
 	test("shows context paths relative to cwd while preserving full external paths", () => {
 		const home = homedir();
 		const cwd = path.join(home, "Development", "pi-mono");
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			cwd,
 			contextFiles: [{ path: path.join(home, ".pi", "agent", "AGENTS.md") }, { path: path.join(cwd, "AGENTS.md") }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -807,14 +655,14 @@ describe("InteractiveMode.showLoadedResources", () => {
 	test("shows full context paths when expanded", () => {
 		const home = homedir();
 		const cwd = path.join(home, "Development", "pi-mono");
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: false,
 			toolOutputExpanded: true,
 			cwd,
 			contextFiles: [{ path: path.join(home, ".pi", "agent", "AGENTS.md") }, { path: path.join(cwd, "AGENTS.md") }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 		});
 
@@ -826,12 +674,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 	});
 
 	test("does not show verbose listing on quiet startup during reload", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: true,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			extensions: [{ path: "/tmp/ext/index.ts" }],
 			force: false,
 			showDiagnosticsWhenQuiet: true,
@@ -841,13 +689,13 @@ describe("InteractiveMode.showLoadedResources", () => {
 	});
 
 	test("still shows diagnostics on quiet startup when requested", () => {
-		const fakeThis = createShowLoadedResourcesThis({
+		const fakeThis = createLoadedResourcesView({
 			quietStartup: true,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 			skillDiagnostics: [{ type: "warning", message: "duplicate skill name" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		fakeThis.show({
 			force: false,
 			showDiagnosticsWhenQuiet: true,
 		});
