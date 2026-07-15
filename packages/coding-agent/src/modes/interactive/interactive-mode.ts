@@ -8,16 +8,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent } from "@fitclaw/ai";
-import type { EditorComponent, KeyId, MarkdownTheme } from "@fitclaw/tui";
-import { Container, matchesKey, ProcessTerminal, Spacer, setKeybindings, Text, TUI } from "@fitclaw/tui";
+import type { EditorComponent, MarkdownTheme } from "@fitclaw/tui";
+import { Container, ProcessTerminal, Spacer, setKeybindings, Text, TUI } from "@fitclaw/tui";
 import { APP_NAME, APP_TITLE, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
-import type { ExtensionContext, ExtensionRunner, ExtensionUIContext } from "../../core/extensions/index.js";
 import { FooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
-import type { ResourceDiagnostic } from "../../core/resource-loader.js";
-import type { SourceInfo } from "../../core/source-info.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { CustomEditor } from "./components/custom-editor.js";
@@ -29,6 +26,7 @@ import { InteractiveAutocompleteController } from "./interactive-autocomplete-co
 import { InteractiveBashController } from "./interactive-bash-controller.js";
 import { InteractiveExtensionChromeController } from "./interactive-extension-chrome-controller.js";
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
+import { InteractiveExtensionRuntimeController } from "./interactive-extension-runtime-controller.js";
 import { InteractiveExtensionSurfaceController } from "./interactive-extension-surface-controller.js";
 import { InteractiveFeedbackController } from "./interactive-feedback-controller.js";
 import { InteractiveInfoController } from "./interactive-info-controller.js";
@@ -42,19 +40,13 @@ import { InteractiveSettingsController } from "./interactive-settings-controller
 import { InteractiveStartupController } from "./interactive-startup-controller.js";
 import { InteractiveTerminalController } from "./interactive-terminal-controller.js";
 import { InteractiveWorkingController } from "./interactive-working-controller.js";
-import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
-	getAvailableThemesWithPaths,
 	getEditorTheme,
 	getMarkdownTheme,
-	getThemeByName,
 	initTheme,
 	onThemeChange,
 	setRegisteredThemes,
-	setTheme,
-	setThemeInstance,
 	stopThemeWatcher,
-	Theme,
 	theme,
 } from "./theme/theme.js";
 
@@ -91,8 +83,6 @@ export class InteractiveMode {
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
-	private readonly defaultHiddenThinkingLabel = "Thinking...";
-	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
 	private lastEscapeTime = 0;
 	private readonly autocompleteController: InteractiveAutocompleteController;
@@ -100,6 +90,7 @@ export class InteractiveMode {
 	private readonly bashController: InteractiveBashController;
 	private readonly extensionChromeController: InteractiveExtensionChromeController;
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
+	private readonly extensionRuntimeController: InteractiveExtensionRuntimeController;
 	private readonly extensionSurfaceController: InteractiveExtensionSurfaceController;
 	private readonly feedbackController: InteractiveFeedbackController;
 	private readonly infoController: InteractiveInfoController;
@@ -145,7 +136,7 @@ export class InteractiveMode {
 	) {
 		this.runtimeHost = runtimeHost;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
-			this.resetExtensionUI();
+			this.extensionRuntimeController.reset();
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession();
@@ -200,6 +191,26 @@ export class InteractiveMode {
 			ui: this.ui,
 			statusContainer: this.statusContainer,
 			isStreaming: () => this.session.isStreaming,
+		});
+		this.extensionRuntimeController = new InteractiveExtensionRuntimeController({
+			getSession: () => this.session,
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+			defaultEditor: this.defaultEditor,
+			keybindings: this.keybindings,
+			autocompleteController: this.autocompleteController,
+			chromeController: this.extensionChromeController,
+			dialogController: this.extensionDialogController,
+			surfaceController: this.extensionSurfaceController,
+			workingController: this.workingController,
+			isVerbose: () => this.options.verbose === true,
+			getToolOutputExpanded: () => this.toolOutputExpanded,
+			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
+			deferShutdown: () => this.terminalController.deferShutdown(),
+			updateTerminalTitle: () => this.updateTerminalTitle(),
+			updateHiddenThinkingLabel: (label) => this.sessionViewController.updateHiddenThinkingLabel(label),
+			showNotification: (message, type) => this.feedbackController.showExtensionNotification(message, type),
+			showError: (message) => this.showError(message),
 		});
 		this.startupController = new InteractiveStartupController({
 			getSession: () => this.session,
@@ -274,11 +285,11 @@ export class InteractiveMode {
 			setHeaderExpanded: (expanded) => this.extensionChromeController.setHeaderExpanded(expanded),
 			refreshSettings: () => this.settingsController.refresh(),
 			setupAutocomplete: () => this.autocompleteController.setup(),
-			setupExtensionShortcuts: (runner) => this.setupExtensionShortcuts(runner),
-			resetExtensionUI: () => this.resetExtensionUI(),
+			setupExtensionShortcuts: (runner) => this.extensionRuntimeController.setupShortcuts(runner),
+			resetExtensionUI: () => this.extensionRuntimeController.reset(),
 			rebuildChatFromMessages: () => this.rebuildChatFromMessages(),
 			showLoadedResources: () =>
-				this.showLoadedResources({
+				this.extensionRuntimeController.showLoadedResources({
 					force: false,
 					showDiagnosticsWhenQuiet: true,
 				}),
@@ -371,7 +382,7 @@ export class InteractiveMode {
 			showStatus: (message) => this.showStatus(message),
 			flushCompactionQueue: (options) => this.messageQueueController.flushCompactionQueue(options),
 			getHideThinkingBlock: () => this.settingsController.hideThinkingBlock,
-			getHiddenThinkingLabel: () => this.hiddenThinkingLabel,
+			getHiddenThinkingLabel: () => this.extensionRuntimeController.hiddenThinkingLabel,
 			getToolOutputExpanded: () => this.toolOutputExpanded,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
@@ -587,66 +598,11 @@ export class InteractiveMode {
 		return this.options.verbose || this.toolOutputExpanded;
 	}
 
-	private showLoadedResources(
-		options?: LoadedResourcesDisplayOptions & {
-			extensions?: Array<{ path: string; sourceInfo?: SourceInfo }>;
-		},
-	): void {
-		const isQuietStartup = this.settingsManager.getQuietStartup();
-		const shouldShowListing = options?.force === true || this.options.verbose === true || !isQuietStartup;
-		if (!shouldShowListing && options?.showDiagnosticsWhenQuiet !== true) {
-			return;
-		}
-
-		const skillsResult = this.session.resourceLoader.getSkills();
-		const promptsResult = this.session.resourceLoader.getPrompts();
-		const themesResult = this.session.resourceLoader.getThemes();
-		const extensionsResult = this.session.resourceLoader.getExtensions();
-		const extensions =
-			options?.extensions ??
-			extensionsResult.extensions.map((extension) => ({
-				path: extension.path,
-				sourceInfo: extension.sourceInfo,
-			}));
-		const extensionDiagnostics: ResourceDiagnostic[] = extensionsResult.errors.map((error) => ({
-			type: "error",
-			message: error.error,
-			path: error.path,
-		}));
-		extensionDiagnostics.push(...this.session.extensionRunner.getCommandDiagnostics());
-		extensionDiagnostics.push(
-			...this.autocompleteController.getBuiltInCommandConflictDiagnostics(this.session.extensionRunner),
-		);
-		extensionDiagnostics.push(...this.session.extensionRunner.getShortcutDiagnostics());
-
-		renderLoadedResources(
-			{
-				chatContainer: this.chatContainer,
-				cwd: this.sessionManager.getCwd(),
-				isVerbose: this.options.verbose === true,
-				isExpanded: this.getStartupExpansionState(),
-				isQuietStartup,
-				resources: {
-					contextFiles: this.session.resourceLoader.getAgentsFiles().agentsFiles,
-					skills: skillsResult.skills,
-					promptTemplates: this.session.promptTemplates,
-					extensions,
-					themes: themesResult.themes,
-					skillDiagnostics: skillsResult.diagnostics,
-					promptDiagnostics: promptsResult.diagnostics,
-					extensionDiagnostics,
-					themeDiagnostics: themesResult.diagnostics,
-				},
-			},
-			options,
-		);
-	}
-
 	/**
 	 * Initialize the extension system with TUI-based UI context.
 	 */
 	private async bindCurrentSessionExtensions(): Promise<void> {
-		const uiContext = this.createExtensionUIContext();
+		const uiContext = this.extensionRuntimeController.createUIContext();
 		await this.session.bindExtensions({
 			uiContext,
 			commandContextActions: {
@@ -716,8 +672,8 @@ export class InteractiveMode {
 		this.autocompleteController.setup();
 
 		const extensionRunner = this.session.extensionRunner;
-		this.setupExtensionShortcuts(extensionRunner);
-		this.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
+		this.extensionRuntimeController.setupShortcuts(extensionRunner);
+		this.extensionRuntimeController.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
 		this.startupController.showNotices();
 	}
 
@@ -746,131 +702,6 @@ export class InteractiveMode {
 		this.messageQueueController.clearCompactionQueue();
 		this.sessionViewController.resetSessionState();
 		this.renderInitialMessages();
-	}
-
-	/**
-	 * Set up keyboard shortcuts registered by extensions.
-	 */
-	private setupExtensionShortcuts(extensionRunner: ExtensionRunner): void {
-		const shortcuts = extensionRunner.getShortcuts(this.keybindings.getEffectiveConfig());
-		if (shortcuts.size === 0) return;
-
-		// Create a context for shortcut handlers
-		const createContext = (): ExtensionContext => ({
-			ui: this.createExtensionUIContext(),
-			hasUI: true,
-			cwd: this.sessionManager.getCwd(),
-			sessionManager: this.sessionManager,
-			modelRegistry: this.session.modelRegistry,
-			model: this.session.model,
-			isIdle: () => !this.session.isStreaming,
-			signal: this.session.agent.signal,
-			abort: () => this.session.abort(),
-			hasPendingMessages: () => this.session.pendingMessageCount > 0,
-			shutdown: () => {
-				this.terminalController.deferShutdown();
-			},
-			getContextUsage: () => this.session.getContextUsage(),
-			compact: (options) => {
-				void (async () => {
-					try {
-						const result = await this.session.compact(options?.customInstructions);
-						options?.onComplete?.(result);
-					} catch (error) {
-						const err = error instanceof Error ? error : new Error(String(error));
-						options?.onError?.(err);
-					}
-				})();
-			},
-			getSystemPrompt: () => this.session.systemPrompt,
-		});
-
-		// Set up the extension shortcut handler on the default editor
-		this.defaultEditor.onExtensionShortcut = (data: string) => {
-			for (const [shortcutStr, shortcut] of shortcuts) {
-				// Cast to KeyId - extension shortcuts use the same format
-				if (matchesKey(data, shortcutStr as KeyId)) {
-					// Run handler async, don't block input
-					Promise.resolve(shortcut.handler(createContext())).catch((err) => {
-						this.showError(`Shortcut handler error: ${err instanceof Error ? err.message : String(err)}`);
-					});
-					return true;
-				}
-			}
-			return false;
-		};
-	}
-
-	private setHiddenThinkingLabel(label?: string): void {
-		this.hiddenThinkingLabel = label ?? this.defaultHiddenThinkingLabel;
-		this.sessionViewController.updateHiddenThinkingLabel(this.hiddenThinkingLabel);
-	}
-
-	private resetExtensionUI(): void {
-		this.extensionDialogController.reset();
-		this.extensionSurfaceController.hideOverlay();
-		this.extensionSurfaceController.clearTerminalInputListeners();
-		this.extensionChromeController.reset();
-		this.autocompleteController.clearProviders();
-		this.extensionSurfaceController.setCustomEditor(undefined);
-		this.autocompleteController.setup();
-		this.defaultEditor.onExtensionShortcut = undefined;
-		this.updateTerminalTitle();
-		this.workingController.reset();
-		this.setHiddenThinkingLabel();
-	}
-
-	/**
-	 * Create the ExtensionUIContext for extensions.
-	 */
-	private createExtensionUIContext(): ExtensionUIContext {
-		return {
-			select: (title, options, opts) => this.extensionDialogController.select(title, options, opts),
-			confirm: (title, message, opts) => this.extensionDialogController.confirm(title, message, opts),
-			input: (title, placeholder, opts) => this.extensionDialogController.input(title, placeholder, opts),
-			notify: (message, type) => this.feedbackController.showExtensionNotification(message, type),
-			onTerminalInput: (handler) => this.extensionSurfaceController.addTerminalInputListener(handler),
-			setStatus: (key, text) => this.extensionChromeController.setStatus(key, text),
-			setWorkingMessage: (message) => this.workingController.setMessage(message),
-			setWorkingVisible: (visible) => this.workingController.setVisible(visible),
-			setWorkingIndicator: (options) => this.workingController.setIndicator(options),
-			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
-			setWidget: (key, content, options) => this.extensionChromeController.setWidget(key, content, options),
-			setFooter: (factory) => this.extensionChromeController.setFooter(factory),
-			setHeader: (factory) => this.extensionChromeController.setHeader(factory),
-			setTitle: (title) => this.ui.terminal.setTitle(title),
-			custom: (factory, options) => this.extensionSurfaceController.showCustom(factory, options),
-			pasteToEditor: (text) => this.extensionSurfaceController.pasteToEditor(text),
-			setEditorText: (text) => this.extensionSurfaceController.setEditorText(text),
-			getEditorText: () => this.extensionSurfaceController.getEditorText(),
-			editor: (title, prefill) => this.extensionDialogController.editor(title, prefill),
-			addAutocompleteProvider: (factory) => {
-				this.autocompleteController.addProvider(factory);
-			},
-			setEditorComponent: (factory) => this.extensionSurfaceController.setCustomEditor(factory),
-			get theme() {
-				return theme;
-			},
-			getAllThemes: () => getAvailableThemesWithPaths(),
-			getTheme: (name) => getThemeByName(name),
-			setTheme: (themeOrName) => {
-				if (themeOrName instanceof Theme) {
-					setThemeInstance(themeOrName);
-					this.ui.requestRender();
-					return { success: true };
-				}
-				const result = setTheme(themeOrName, true);
-				if (result.success) {
-					if (this.settingsManager.getTheme() !== themeOrName) {
-						this.settingsManager.setTheme(themeOrName);
-					}
-					this.ui.requestRender();
-				}
-				return result;
-			},
-			getToolsExpanded: () => this.toolOutputExpanded,
-			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
-		};
 	}
 
 	// =========================================================================

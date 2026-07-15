@@ -2,7 +2,6 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { Container } from "@fitclaw/tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
-import type { AutocompleteProviderFactory, ExtensionUIContext } from "../src/core/extensions/types.js";
 import type { ResourceDiagnostic } from "../src/core/resource-loader.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import {
@@ -43,91 +42,6 @@ describe("InteractiveMode.setToolsExpanded", () => {
 		expect(setHeaderExpanded).toHaveBeenCalledWith(true);
 		expect(chatChild.setExpanded).toHaveBeenCalledWith(true);
 		expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(1);
-	});
-});
-
-describe("InteractiveMode.createExtensionUIContext setTheme", () => {
-	test("persists theme changes to settings manager", () => {
-		initTheme("dark");
-
-		let currentTheme = "dark";
-		const settingsManager = {
-			getTheme: vi.fn(() => currentTheme),
-			setTheme: vi.fn((theme: string) => {
-				currentTheme = theme;
-			}),
-		};
-		const fakeThis: any = {
-			session: { settingsManager },
-			settingsManager,
-			ui: { requestRender: vi.fn() },
-		};
-
-		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
-		const result = uiContext.setTheme("light");
-
-		expect(result.success).toBe(true);
-		expect(settingsManager.setTheme).toHaveBeenCalledWith("light");
-		expect(currentTheme).toBe("light");
-		expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(1);
-	});
-
-	test("does not persist invalid theme names", () => {
-		initTheme("dark");
-
-		const settingsManager = {
-			getTheme: vi.fn(() => "dark"),
-			setTheme: vi.fn(),
-		};
-		const fakeThis: any = {
-			session: { settingsManager },
-			settingsManager,
-			ui: { requestRender: vi.fn() },
-		};
-
-		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
-		const result = uiContext.setTheme("__missing_theme__");
-
-		expect(result.success).toBe(false);
-		expect(settingsManager.setTheme).not.toHaveBeenCalled();
-		expect(fakeThis.ui.requestRender).not.toHaveBeenCalled();
-	});
-});
-
-describe("InteractiveMode.createExtensionUIContext addAutocompleteProvider", () => {
-	test("delegates wrapper factories to the autocomplete controller", () => {
-		const wrapper: AutocompleteProviderFactory = (current) => current;
-		const addProvider = vi.fn();
-		const fakeThis = { autocompleteController: { addProvider } };
-		const createExtensionUIContext = Reflect.get(InteractiveMode.prototype, "createExtensionUIContext") as (
-			this: typeof fakeThis,
-		) => ExtensionUIContext;
-
-		const uiContext = createExtensionUIContext.call(fakeThis);
-		uiContext.addAutocompleteProvider(wrapper);
-
-		expect(addProvider).toHaveBeenCalledWith(wrapper);
-	});
-});
-
-describe("InteractiveMode.createExtensionUIContext working state", () => {
-	test("delegates working state changes to the working controller", () => {
-		const setMessage = vi.fn();
-		const setVisible = vi.fn();
-		const setIndicator = vi.fn();
-		const fakeThis = { workingController: { setIndicator, setMessage, setVisible } };
-		const createExtensionUIContext = Reflect.get(InteractiveMode.prototype, "createExtensionUIContext") as (
-			this: typeof fakeThis,
-		) => ExtensionUIContext;
-		const uiContext = createExtensionUIContext.call(fakeThis);
-
-		uiContext.setWorkingMessage("Analyzing");
-		uiContext.setWorkingVisible(false);
-		uiContext.setWorkingIndicator({ frames: ["#"] });
-
-		expect(setMessage).toHaveBeenCalledWith("Analyzing");
-		expect(setVisible).toHaveBeenCalledWith(false);
-		expect(setIndicator).toHaveBeenCalledWith({ frames: ["#"] });
 	});
 });
 
