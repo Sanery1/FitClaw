@@ -6,10 +6,10 @@ import {
 	loadSkillsFromDir,
 	type Skill,
 } from "@fitclaw/runtime";
-import { dirname, join, posix, resolve, win32 } from "path";
+import { dirname, join } from "path";
 import type { Executor } from "../sandbox.js";
-import type { AllowedCommand } from "../tools/bash.js";
 import { createCoachTools } from "../tools/index.js";
+import { createAllowedCommands } from "./permissions.js";
 
 export function resolveCoachHostWorkspacePath(channelDir: string, channelId: string): string {
 	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
@@ -64,32 +64,13 @@ export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): 
 
 export function createCoachActiveTools(executor: Executor, channelDir: string, skills: Skill[]): AgentTool[] {
 	return [
-		...createCoachTools(executor, createCoachReadRoots(skills), createCoachAllowedCommands(skills)),
+		...createCoachTools(executor, createCoachReadRoots(skills), createAllowedCommands(skills)),
 		...createCoachSkillDataTools(channelDir, skills),
 	];
 }
 
 export function createCoachReadRoots(skills: readonly Skill[]): string[] {
 	return Array.from(new Set(skills.map((skill) => skill.baseDir)));
-}
-
-export function createCoachAllowedCommands(skills: readonly Skill[]): AllowedCommand[] {
-	const commands = new Map<string, AllowedCommand>();
-
-	for (const skill of skills) {
-		for (const permission of skill.permissions?.commands?.allow ?? []) {
-			const argumentPrefix = permission.args.map((argument, index) => {
-				if (index !== 0) return argument;
-				if (skill.baseDir.startsWith("/")) return posix.resolve(skill.baseDir, argument.replace(/\\/g, "/"));
-				if (win32.isAbsolute(skill.baseDir)) return win32.resolve(skill.baseDir, argument);
-				return resolve(skill.baseDir, argument);
-			});
-			const command = { executable: permission.executable, argumentPrefix };
-			commands.set(JSON.stringify(command), command);
-		}
-	}
-
-	return Array.from(commands.values());
 }
 
 export function configureCoachSkillDataRoot(channelDir: string): void {

@@ -1,9 +1,47 @@
 services:
+  fitclaw-skill-runner:
+    build: .
+    container_name: fitclaw-skill-runner
+    restart: unless-stopped
+    init: true
+    entrypoint:
+      - node
+      - /opt/fitclaw/node_modules/@fitclaw/coach-bot/dist/skill-runner-main.js
+    environment:
+      FITCLAW_SKILL_RUNNER_SOCKET: /run/fitclaw-skill-runner/runner.sock
+      FITCLAW_SKILL_RUNNER_WORKSPACE: /opt/fitclaw/feishu-workspace
+      PYTHONDONTWRITEBYTECODE: "1"
+    network_mode: none
+    read_only: true
+    volumes:
+      - ./feishu-workspace:/opt/fitclaw/feishu-workspace:ro
+      - skill-runner-socket:/run/fitclaw-skill-runner
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - /opt/fitclaw/node_modules/@fitclaw/coach-bot/dist/skill-runner-main.js
+        - --healthcheck
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   fitclaw-bot:
     build: .
     container_name: fitclaw-bot
     restart: unless-stopped
+    depends_on:
+      fitclaw-skill-runner:
+        condition: service_healthy
     env_file:
       - .env
+    environment:
+      FITCLAW_SKILL_RUNNER_SOCKET: /run/fitclaw-skill-runner/runner.sock
     volumes:
       - ./feishu-workspace:/opt/fitclaw/feishu-workspace
+      - skill-runner-socket:/run/fitclaw-skill-runner
+
+volumes:
+  skill-runner-socket:

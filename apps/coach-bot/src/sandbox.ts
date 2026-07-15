@@ -1,11 +1,15 @@
 import { readFile as readHostFile, realpath, stat } from "node:fs/promises";
 import { spawn } from "child_process";
+import { DEFAULT_MAX_PROCESS_OUTPUT_BYTES, runProcess } from "./runtime/process.js";
+import { executeSkillRunnerCommand } from "./runtime/skill-runner-client.js";
 
-const DEFAULT_MAX_PROCESS_OUTPUT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_PROCESS_ERROR_BYTES = 1024 * 1024;
 
 export type SandboxConfig = { type: "host" } | { type: "docker"; container: string };
+
+export interface ExecutorOptions {
+	skillRunnerSocketPath?: string | null;
+}
 
 export function parseSandboxArg(value: string): SandboxConfig {
 	if (value === "host") {
@@ -75,11 +79,15 @@ function execSimple(cmd: string, args: string[]): Promise<string> {
 /**
  * Create an executor that runs commands either on host or in Docker container
  */
-export function createExecutor(config: SandboxConfig): Executor {
+export function createExecutor(config: SandboxConfig, options: ExecutorOptions = {}): Executor {
+	const skillRunnerSocketPath =
+		options.skillRunnerSocketPath === undefined
+			? process.env.FITCLAW_SKILL_RUNNER_SOCKET
+			: (options.skillRunnerSocketPath ?? undefined);
 	if (config.type === "host") {
-		return new HostExecutor();
+		return new HostExecutor(skillRunnerSocketPath);
 	}
-	return new DockerExecutor(config.container);
+	return new DockerExecutor(config.container, skillRunnerSocketPath);
 }
 
 export interface Executor {
@@ -108,6 +116,7 @@ export interface Executor {
 export interface ExecOptions {
 	timeout?: number;
 	signal?: AbortSignal;
+	network?: "inherit" | "deny";
 }
 
 export interface ReadFileOptions extends ExecOptions {
@@ -121,13 +130,28 @@ export interface ExecResult {
 }
 
 class HostExecutor implements Executor {
+	constructor(private readonly skillRunnerSocketPath?: string) {}
+
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
+		if (options?.network === "deny") {
+			throw new Error("NETWORK_ISOLATION_UNAVAILABLE: shell commands cannot use the Skill Runner");
+		}
 		const shell = process.platform === "win32" ? "cmd" : "sh";
 		const shellArgs = process.platform === "win32" ? ["/c", command] : ["-c", command];
 		return this.spawnProcess(shell, shellArgs, options);
 	}
 
 	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
+		if (options?.network === "deny") {
+			if (!this.skillRunnerSocketPath) {
+				throw new Error("NETWORK_ISOLATION_UNAVAILABLE: FITCLAW_SKILL_RUNNER_SOCKET is not configured");
+			}
+			return executeSkillRunnerCommand(
+				this.skillRunnerSocketPath,
+				{ executable, args: [...args], timeout: options.timeout },
+				{ signal: options.signal },
+			);
+		}
 		return this.spawnProcess(executable, args, options);
 	}
 
@@ -162,15 +186,24 @@ class HostExecutor implements Executor {
 }
 
 class DockerExecutor implements Executor {
-	constructor(private container: string) {}
+	constructor(
+		private readonly container: string,
+		private readonly skillRunnerSocketPath?: string,
+	) {}
 
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
-		const hostExecutor = new HostExecutor();
+		if (options?.network === "deny") {
+			throw new Error("NETWORK_ISOLATION_UNAVAILABLE: shell commands cannot use the Skill Runner");
+		}
+		const hostExecutor = new HostExecutor(this.skillRunnerSocketPath);
 		return hostExecutor.execFile("docker", ["exec", this.container, "sh", "-c", command], options);
 	}
 
 	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
-		const hostExecutor = new HostExecutor();
+		const hostExecutor = new HostExecutor(this.skillRunnerSocketPath);
+		if (options?.network === "deny") {
+			return hostExecutor.execFile(executable, args, options);
+		}
 		return hostExecutor.execFile("docker", ["exec", this.container, executable, ...args], options);
 	}
 
@@ -196,12 +229,6 @@ class DockerExecutor implements Executor {
 	}
 }
 
-interface BufferedProcessResult {
-	stdout: Buffer;
-	stderr: Buffer;
-	code: number;
-}
-
 function getMaxFileBytes(options?: ReadFileOptions): number {
 	const maxBytes = options?.maxBytes ?? DEFAULT_MAX_FILE_BYTES;
 	if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
@@ -220,122 +247,4 @@ async function readProcessOutput(
 		throw new Error(result.stderr.toString("utf-8") || `${executable} exited with code ${result.code}`);
 	}
 	return result.stdout;
-}
-
-function runProcess(
-	executable: string,
-	args: readonly string[],
-	options: ExecOptions | undefined,
-	maxStdoutBytes: number,
-): Promise<BufferedProcessResult> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(executable, args, {
-			detached: true,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		const stdoutChunks: Buffer[] = [];
-		const stderrChunks: Buffer[] = [];
-		let stdoutBytes = 0;
-		let stderrBytes = 0;
-		let hasExceededOutput = false;
-		let isTimedOut = false;
-		let isSettled = false;
-
-		const timeoutHandle =
-			options?.timeout && options.timeout > 0
-				? setTimeout(() => {
-						isTimedOut = true;
-						if (child.pid) killProcessTree(child.pid);
-					}, options.timeout * 1000)
-				: undefined;
-		const onAbort = () => {
-			if (child.pid) killProcessTree(child.pid);
-		};
-		const cleanup = () => {
-			if (timeoutHandle) clearTimeout(timeoutHandle);
-			if (options?.signal) options.signal.removeEventListener("abort", onAbort);
-		};
-		const fail = (error: Error) => {
-			if (isSettled) return;
-			isSettled = true;
-			cleanup();
-			reject(error);
-		};
-
-		if (options?.signal) {
-			if (options.signal.aborted) onAbort();
-			else options.signal.addEventListener("abort", onAbort, { once: true });
-		}
-
-		child.stdout?.on("data", (data: Buffer) => {
-			if (hasExceededOutput) return;
-			const remainingBytes = maxStdoutBytes - stdoutBytes;
-			if (data.length > remainingBytes) {
-				if (remainingBytes > 0) stdoutChunks.push(data.subarray(0, remainingBytes));
-				stdoutBytes = maxStdoutBytes;
-				hasExceededOutput = true;
-				if (child.pid) killProcessTree(child.pid);
-				return;
-			}
-			stdoutChunks.push(data);
-			stdoutBytes += data.length;
-		});
-
-		child.stderr?.on("data", (data: Buffer) => {
-			const remainingBytes = MAX_PROCESS_ERROR_BYTES - stderrBytes;
-			if (remainingBytes <= 0) return;
-			const chunk = data.length > remainingBytes ? data.subarray(0, remainingBytes) : data;
-			stderrChunks.push(chunk);
-			stderrBytes += chunk.length;
-		});
-
-		child.on("error", (error) => fail(new Error(`Failed to start ${executable}: ${error.message}`)));
-		child.on("close", (code) => {
-			if (isSettled) return;
-			const stdout = Buffer.concat(stdoutChunks, stdoutBytes);
-			const stderr = Buffer.concat(stderrChunks, stderrBytes);
-			if (options?.signal?.aborted) {
-				fail(new Error(`${stdout.toString("utf-8")}\n${stderr.toString("utf-8")}\nCommand aborted`.trim()));
-				return;
-			}
-			if (isTimedOut) {
-				fail(
-					new Error(
-						`${stdout.toString("utf-8")}\n${stderr.toString("utf-8")}\nCommand timed out after ${options?.timeout} seconds`.trim(),
-					),
-				);
-				return;
-			}
-			if (hasExceededOutput) {
-				fail(new Error(`Process output exceeded ${maxStdoutBytes} byte limit: ${executable}`));
-				return;
-			}
-			isSettled = true;
-			cleanup();
-			resolve({ stdout, stderr, code: code ?? 0 });
-		});
-	});
-}
-
-function killProcessTree(pid: number): void {
-	if (process.platform === "win32") {
-		try {
-			spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
-				stdio: "ignore",
-				detached: true,
-			});
-		} catch {
-			// Ignore errors
-		}
-	} else {
-		try {
-			process.kill(-pid, "SIGKILL");
-		} catch {
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch {
-				// Process already dead
-			}
-		}
-	}
 }

@@ -227,6 +227,7 @@ describe("skills", () => {
 			});
 
 			expect(skills).toHaveLength(1);
+			expect(skills[0].permissions?.network).toBe(false);
 			expect(skills[0].permissions?.commands?.allow).toEqual([
 				{ executable: "python", args: ["scripts/query.py"] },
 				{ executable: "python3", args: ["scripts/query.py"] },
@@ -241,8 +242,19 @@ describe("skills", () => {
 			});
 
 			expect(skills).toHaveLength(1);
-			expect(skills[0].permissions).toBeUndefined();
+			expect(skills[0].permissions).toEqual({ network: false });
 			expect(diagnostics.some((diagnostic) => diagnostic.message.includes("permissions.commands.allow"))).toBe(true);
+		});
+
+		it("should reject command permissions that request network access", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "permissions-network-enabled"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].permissions).toBeUndefined();
+			expect(diagnostics.some((diagnostic) => diagnostic.message.includes("permissions.network"))).toBe(true);
 		});
 
 		it("should default disableModelInvocation to false when not specified", () => {

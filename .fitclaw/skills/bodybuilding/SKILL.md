@@ -26,6 +26,7 @@ data:
   progression: {type: array}
   personal_records: {type: array}
 permissions:
+  network: false
   commands:
     allow:
       - executable: python

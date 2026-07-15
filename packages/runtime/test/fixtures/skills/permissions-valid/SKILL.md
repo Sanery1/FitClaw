@@ -2,6 +2,7 @@
 name: permissions-valid
 description: A skill with allowlisted commands.
 permissions:
+  network: false
   commands:
     allow:
       - executable: python

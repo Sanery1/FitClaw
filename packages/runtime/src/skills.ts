@@ -83,6 +83,7 @@ export interface SkillCommandPermission {
 }
 
 export interface SkillPermissions {
+	network: false;
 	commands?: {
 		allow: readonly SkillCommandPermission[];
 	};
@@ -190,14 +191,24 @@ function parseSkillPermissions(
 		return undefined;
 	}
 
-	if (value.commands === undefined) return undefined;
+	if (value.commands === undefined && value.network === undefined) return undefined;
+	if (value.network !== false) {
+		diagnostics.push({
+			type: "warning",
+			message: "permissions.network must be false; network-enabled Skill commands are not supported",
+			path: filePath,
+		});
+		return undefined;
+	}
+
+	if (value.commands === undefined) return { network: false };
 	if (!isRecord(value.commands) || !Array.isArray(value.commands.allow)) {
 		diagnostics.push({
 			type: "warning",
 			message: "permissions.commands.allow must be an array",
 			path: filePath,
 		});
-		return undefined;
+		return { network: false };
 	}
 
 	const allow: SkillCommandPermission[] = [];
@@ -252,7 +263,7 @@ function parseSkillPermissions(
 		allow.push({ executable: entry.executable, args: [...entry.args] });
 	}
 
-	return allow.length > 0 ? { commands: { allow } } : undefined;
+	return allow.length > 0 ? { network: false, commands: { allow } } : { network: false };
 }
 
 export interface LoadSkillsFromDirOptions {

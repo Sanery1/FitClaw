@@ -166,6 +166,7 @@ describe("coach bot skill loading", () => {
 				"name: bodybuilding",
 				"description: Bodybuilding coaching skill.",
 				"permissions:",
+				"  network: false",
 				"  commands:",
 				"    allow:",
 				"      - executable: python",

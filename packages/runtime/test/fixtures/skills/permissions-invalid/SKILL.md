@@ -2,6 +2,7 @@
 name: permissions-invalid
 description: A skill with invalid command permissions.
 permissions:
+  network: false
   commands:
     allow:
       - executable: python

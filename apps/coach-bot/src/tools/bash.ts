@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
+import { type AllowedCommand, findAllowedCommand } from "../runtime/permissions.js";
 import type { Executor } from "../sandbox.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
 
@@ -25,24 +26,6 @@ const bashSchema = Type.Object({
 interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
-}
-
-export interface AllowedCommand {
-	readonly executable: string;
-	readonly argumentPrefix: readonly string[];
-}
-
-function isAllowedCommand(
-	command: string,
-	args: readonly string[],
-	allowedCommands: readonly AllowedCommand[],
-): boolean {
-	return allowedCommands.some(
-		(allowed) =>
-			allowed.executable === command &&
-			args.length >= allowed.argumentPrefix.length &&
-			allowed.argumentPrefix.every((argument, index) => args[index] === argument),
-	);
 }
 
 export function createBashTool(
@@ -67,11 +50,12 @@ export function createBashTool(
 			let tempFilePath: string | undefined;
 			let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
 
-			if (args.some((argument) => argument.includes("\0")) || !isAllowedCommand(command, args, allowedCommands)) {
+			const allowedCommand = findAllowedCommand(command, args, allowedCommands);
+			if (args.some((argument) => argument.includes("\0")) || !allowedCommand) {
 				throw new Error(`SECURITY_BLOCKED: Command does not match a Skill allowlist: ${command}`);
 			}
 
-			const result = await executor.execFile(command, args, { timeout, signal });
+			const result = await executor.execFile(command, args, { network: allowedCommand.network, timeout, signal });
 			let output = "";
 			if (result.stdout) output += result.stdout;
 			if (result.stderr) {

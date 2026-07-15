@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { createExecutor, type ExecOptions, type ExecResult, type Executor } from "../src/sandbox.js";
+import type { ExecOptions, ExecResult, Executor } from "../src/sandbox.js";
 import { createBashTool } from "../src/tools/bash.js";
 
 class RecordingExecutor implements Executor {
 	commands: string[] = [];
-	fileCommands: Array<{ executable: string; args: readonly string[] }> = [];
+	fileCommands: Array<{ executable: string; args: readonly string[]; options?: ExecOptions }> = [];
 
 	async exec(command: string, _options?: ExecOptions): Promise<ExecResult> {
 		this.commands.push(command);
 		return { stdout: "ok", stderr: "", code: 0 };
 	}
 
-	async execFile(executable: string, args: readonly string[], _options?: ExecOptions): Promise<ExecResult> {
-		this.fileCommands.push({ executable, args });
+	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
+		this.fileCommands.push({ executable, args, options });
 		return { stdout: "ok", stderr: "", code: 0 };
 	}
 
@@ -30,7 +30,9 @@ class RecordingExecutor implements Executor {
 }
 
 describe("coach bot bash tool", () => {
-	const allowedCommands = [{ executable: "python", argumentPrefix: ["/workspace/scripts/query.py"] }];
+	const allowedCommands = [
+		{ executable: "python", argumentPrefix: ["/workspace/scripts/query.py"], network: "deny" as const },
+	];
 
 	it("executes an allowlisted command as a single process", async () => {
 		const executor = new RecordingExecutor();
@@ -46,6 +48,7 @@ describe("coach bot bash tool", () => {
 			{
 				executable: "python",
 				args: ["/workspace/scripts/query.py", "--muscle", "chest; rm -rf /"],
+				options: { network: "deny", signal: undefined, timeout: undefined },
 			},
 		]);
 		expect(executor.commands).toEqual([]);
@@ -65,18 +68,5 @@ describe("coach bot bash tool", () => {
 
 		expect(executor.commands).toEqual([]);
 		expect(executor.fileCommands).toEqual([]);
-	});
-
-	it("passes metacharacters literally through the host executor", async () => {
-		const argumentPrefix = ["-e", "process.stdout.write(process.argv[1])"];
-		const tool = createBashTool(createExecutor({ type: "host" }), [{ executable: process.execPath, argumentPrefix }]);
-
-		const result = await tool.execute("host", {
-			label: "literal argument",
-			command: process.execPath,
-			args: [...argumentPrefix, "value && echo unsafe"],
-		});
-
-		expect(result.content[0]).toEqual({ type: "text", text: "value && echo unsafe" });
 	});
 });
