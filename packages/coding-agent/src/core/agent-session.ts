@@ -13,10 +13,8 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { basename, dirname } from "node:path";
 import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@fitclaw/agent-core";
 import type { AssistantMessage, ImageContent, Model, TextContent } from "@fitclaw/ai";
-import { resetApiProviders } from "@fitclaw/ai";
 import {
 	AgentCompactionController,
 	type AgentCompactionEvent,
@@ -26,35 +24,23 @@ import {
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.js";
 import type { BashResult } from "./bash-executor.js";
 import { type CompactionResult, compact, prepareCompaction } from "./compaction/index.js";
-import {
-	type ContextUsage,
-	type ExtensionCommandContextActions,
-	type ExtensionErrorListener,
+import type {
+	ContextUsage,
 	ExtensionRunner,
-	type ExtensionUIContext,
-	type MessageEndEvent,
-	type MessageStartEvent,
-	type MessageUpdateEvent,
-	type ReplacedSessionContext,
-	type SessionBeforeCompactResult,
-	type SessionStartEvent,
-	type ShutdownHandler,
-	type ToolDefinition,
-	type ToolExecutionEndEvent,
-	type ToolExecutionStartEvent,
-	type ToolExecutionUpdateEvent,
-	type ToolInfo,
-	type TurnEndEvent,
-	type TurnStartEvent,
+	ReplacedSessionContext,
+	SessionBeforeCompactResult,
+	SessionStartEvent,
+	ToolDefinition,
+	ToolInfo,
 } from "./extensions/index.js";
-import { emitSessionShutdownEvent } from "./extensions/runner.js";
 import { ManualCompactionController, type ManualCompactionEvent } from "./manual-compaction-controller.js";
 import type { CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import type { PromptTemplate } from "./prompt-templates.js";
-import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
+import type { ResourceLoader } from "./resource-loader.js";
 import { SessionBashController, type SessionBashExecutionOptions } from "./session-bash-controller.js";
 import { SessionEventController } from "./session-event-controller.js";
+import { type ExtensionBindings, SessionExtensionController } from "./session-extension-controller.js";
 import type { SessionManager } from "./session-manager.js";
 import { SessionMessageQueueController } from "./session-message-queue-controller.js";
 import { type ModelCycleResult, SessionModelController, type SessionScopedModel } from "./session-model-controller.js";
@@ -75,8 +61,8 @@ import {
 	type SessionTreeNavigationResult,
 } from "./session-tree-controller.js";
 import type { SettingsManager } from "./settings-manager.js";
-import type { SlashCommandInfo } from "./slash-commands.js";
 
+export type { ExtensionBindings } from "./session-extension-controller.js";
 export type { ModelCycleResult } from "./session-model-controller.js";
 export type { PromptOptions } from "./session-prompt-controller.js";
 export type { SessionStats } from "./session-reporting.js";
@@ -132,13 +118,6 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 }
 
-export interface ExtensionBindings {
-	uiContext?: ExtensionUIContext;
-	commandContextActions?: ExtensionCommandContextActions;
-	shutdownHandler?: ShutdownHandler;
-	onError?: ExtensionErrorListener;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -160,6 +139,7 @@ export class AgentSession {
 	private readonly _messageQueueController: SessionMessageQueueController;
 	private readonly _promptController: SessionPromptController;
 	private readonly _toolController: SessionToolController;
+	private readonly _extensionController: SessionExtensionController;
 
 	// Compaction state
 	private readonly _compactionController: AgentCompactionController;
@@ -171,20 +151,6 @@ export class AgentSession {
 
 	private readonly _bashController: SessionBashController;
 
-	// Extension system
-	private _extensionRunner!: ExtensionRunner;
-	private _turnIndex = 0;
-
-	private _resourceLoader: ResourceLoader;
-	private _cwd: string;
-	private _extensionRunnerRef?: { current?: ExtensionRunner };
-	private _sessionStartEvent: SessionStartEvent;
-	private _extensionUIContext?: ExtensionUIContext;
-	private _extensionCommandContextActions?: ExtensionCommandContextActions;
-	private _extensionShutdownHandler?: ShutdownHandler;
-	private _extensionErrorListener?: ExtensionErrorListener;
-	private _extensionErrorUnsubscriber?: () => void;
-
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
 
@@ -192,20 +158,16 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
-		this._resourceLoader = config.resourceLoader;
-		this._cwd = config.cwd;
 		this._modelRegistry = config.modelRegistry;
-		this._extensionRunnerRef = config.extensionRunnerRef;
-		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._toolController = new SessionToolController({
 			agent: this.agent,
 			settingsManager: this.settingsManager,
-			cwd: this._cwd,
+			cwd: config.cwd,
 			customTools: config.customTools,
 			allowedToolNames: config.allowedToolNames,
 			baseToolsOverride: config.baseToolsOverride,
-			getExtensionRunner: () => this._extensionRunner,
-			getResourceLoader: () => this._resourceLoader,
+			getExtensionRunner: () => this._extensionController.runner,
+			getResourceLoader: () => this._extensionController.resourceLoader,
 		});
 		this._retryController = new AgentRetryController({
 			agent: this.agent,
@@ -222,8 +184,8 @@ export class AgentSession {
 			prepareCompaction,
 			requestCompaction: (reason, willRetry) => this._runAutoCompaction(reason, willRetry),
 			beforeCompact: async ({ preparation, branchEntries, signal }) => {
-				if (!this._extensionRunner.hasHandlers("session_before_compact")) return undefined;
-				const extensionResult = (await this._extensionRunner.emit({
+				if (!this._extensionController.runner.hasHandlers("session_before_compact")) return undefined;
+				const extensionResult = (await this._extensionController.runner.emit({
 					type: "session_before_compact",
 					preparation,
 					branchEntries,
@@ -237,7 +199,7 @@ export class AgentSession {
 				};
 			},
 			afterCompact: async ({ compactionEntry, fromHook }) => {
-				await this._extensionRunner.emit({
+				await this._extensionController.runner.emit({
 					type: "session_compact",
 					compactionEntry,
 					fromExtension: fromHook,
@@ -250,7 +212,7 @@ export class AgentSession {
 			settingsManager: this.settingsManager,
 			getModel: () => this.model,
 			getRequiredRequestAuth: (model) => this._getRequiredRequestAuth(model),
-			getExtensionRunner: () => this._extensionRunner,
+			getExtensionRunner: () => this._extensionController.runner,
 			emit: (event) => this._emit(event),
 		});
 		this._treeController = new SessionTreeController({
@@ -259,7 +221,7 @@ export class AgentSession {
 			settingsManager: this.settingsManager,
 			getModel: () => this.model,
 			getRequiredRequestAuth: (model) => this._getRequiredRequestAuth(model),
-			getExtensionRunner: () => this._extensionRunner,
+			getExtensionRunner: () => this._extensionController.runner,
 		});
 		this._bashController = new SessionBashController({
 			agent: this.agent,
@@ -271,7 +233,7 @@ export class AgentSession {
 			sessionManager: this.sessionManager,
 			settingsManager: this.settingsManager,
 			modelRegistry: this._modelRegistry,
-			getExtensionRunner: () => this._extensionRunner,
+			getExtensionRunner: () => this._extensionController.runner,
 			scopedModels: config.scopedModels,
 		});
 		this._messageQueueController = new SessionMessageQueueController({
@@ -286,7 +248,7 @@ export class AgentSession {
 			retryController: this._retryController,
 			compactionController: this._compactionController,
 			messageQueueController: this._messageQueueController,
-			emitExtensionEvent: (event) => this._emitExtensionEvent(event),
+			emitExtensionEvent: (event) => this._extensionController.emitAgentEvent(event),
 			emit: (event) => this._emit(event),
 			checkCompaction: (message) => this._checkCompaction(message),
 		});
@@ -297,22 +259,37 @@ export class AgentSession {
 			bashController: this._bashController,
 			messageQueueController: this._messageQueueController,
 			retryController: this._retryController,
-			getExtensionRunner: () => this._extensionRunner,
-			getResourceLoader: () => this._resourceLoader,
+			getExtensionRunner: () => this._extensionController.runner,
+			getResourceLoader: () => this._extensionController.resourceLoader,
 			getBaseSystemPrompt: () => this._toolController.getBaseSystemPrompt(),
 			checkCompaction: (message, skipAbortedCheck) => this._checkCompaction(message, skipAbortedCheck),
+			waitForPendingEvents: () => this._eventController.waitForPendingEvents(),
 			emit: (event) => this._emit(event),
 		});
+		this._extensionController = new SessionExtensionController({
+			agent: this.agent,
+			sessionManager: this.sessionManager,
+			settingsManager: this.settingsManager,
+			modelRegistry: this._modelRegistry,
+			modelController: this._modelController,
+			promptController: this._promptController,
+			toolController: this._toolController,
+			resourceLoader: config.resourceLoader,
+			cwd: config.cwd,
+			extensionRunnerRef: config.extensionRunnerRef,
+			sessionStartEvent: config.sessionStartEvent,
+			waitForPendingEvents: () => this._eventController.waitForPendingEvents(),
+			abort: () => this.abort(),
+			getPendingMessageCount: () => this.pendingMessageCount,
+			setSessionName: (name) => this.setSessionName(name),
+			getContextUsage: () => this.getContextUsage(),
+			compact: (customInstructions) => this.compact(customInstructions),
+		});
+		this._extensionController.initialize(config.initialActiveToolNames);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._eventController.connect();
-		this._installAgentToolHooks();
-
-		this._buildRuntime({
-			activeToolNames: config.initialActiveToolNames,
-			includeAllExtensionTools: true,
-		});
 	}
 
 	/** Model registry for API key resolution and model discovery */
@@ -346,66 +323,6 @@ export class AgentSession {
 		throw new Error(formatNoApiKeyFoundMessage(model.provider));
 	}
 
-	/**
-	 * Install tool hooks once on the Agent instance.
-	 *
-	 * The callbacks read `this._extensionRunner` at execution time, so extension reload swaps in the
-	 * new runner without reinstalling hooks. Extension-specific tool wrappers are still used to adapt
-	 * registered tool execution to the extension context. Tool call and tool result interception now
-	 * happens here instead of in wrappers.
-	 */
-	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_call")) {
-				return undefined;
-			}
-
-			await this._eventController.waitForPendingEvents();
-
-			try {
-				return await runner.emitToolCall({
-					type: "tool_call",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-				});
-			} catch (err) {
-				if (err instanceof Error) {
-					throw err;
-				}
-				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
-			}
-		};
-
-		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_result")) {
-				return undefined;
-			}
-
-			const hookResult = await runner.emitToolResult({
-				type: "tool_result",
-				toolName: toolCall.name,
-				toolCallId: toolCall.id,
-				input: args as Record<string, unknown>,
-				content: result.content,
-				details: result.details,
-				isError,
-			});
-
-			if (!hookResult) {
-				return undefined;
-			}
-
-			return {
-				content: hookResult.content,
-				details: hookResult.details,
-				isError: hookResult.isError ?? isError,
-			};
-		};
-	}
-
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -414,77 +331,6 @@ export class AgentSession {
 	private _emit(event: AgentSessionEvent): void {
 		for (const l of this._eventListeners) {
 			l(event);
-		}
-	}
-
-	/** Emit extension events based on agent events */
-	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
-		if (event.type === "agent_start") {
-			this._turnIndex = 0;
-			await this._extensionRunner.emit({ type: "agent_start" });
-		} else if (event.type === "agent_end") {
-			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
-		} else if (event.type === "turn_start") {
-			const extensionEvent: TurnStartEvent = {
-				type: "turn_start",
-				turnIndex: this._turnIndex,
-				timestamp: Date.now(),
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "turn_end") {
-			const extensionEvent: TurnEndEvent = {
-				type: "turn_end",
-				turnIndex: this._turnIndex,
-				message: event.message,
-				toolResults: event.toolResults,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-			this._turnIndex++;
-		} else if (event.type === "message_start") {
-			const extensionEvent: MessageStartEvent = {
-				type: "message_start",
-				message: event.message,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "message_update") {
-			const extensionEvent: MessageUpdateEvent = {
-				type: "message_update",
-				message: event.message,
-				assistantMessageEvent: event.assistantMessageEvent,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "message_end") {
-			const extensionEvent: MessageEndEvent = {
-				type: "message_end",
-				message: event.message,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "tool_execution_start") {
-			const extensionEvent: ToolExecutionStartEvent = {
-				type: "tool_execution_start",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				args: event.args,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "tool_execution_update") {
-			const extensionEvent: ToolExecutionUpdateEvent = {
-				type: "tool_execution_update",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				args: event.args,
-				partialResult: event.partialResult,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "tool_execution_end") {
-			const extensionEvent: ToolExecutionEndEvent = {
-				type: "tool_execution_end",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				result: event.result,
-				isError: event.isError,
-			};
-			await this._extensionRunner.emit(extensionEvent);
 		}
 	}
 
@@ -515,9 +361,7 @@ export class AgentSession {
 		this._manualCompactionController.abort();
 		this._treeController.abort();
 		this._bashController.abort();
-		this._extensionRunner.invalidate(
-			"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
-		);
+		this._extensionController.dispose();
 		this._eventController.disconnect();
 		this._eventListeners = [];
 	}
@@ -636,7 +480,7 @@ export class AgentSession {
 
 	/** File-based prompt templates */
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
-		return this._resourceLoader.getPrompts().prompts;
+		return this._extensionController.resourceLoader.getPrompts().prompts;
 	}
 
 	// =========================================================================
@@ -737,7 +581,7 @@ export class AgentSession {
 	}
 
 	get resourceLoader(): ResourceLoader {
-		return this._resourceLoader;
+		return this._extensionController.resourceLoader;
 	}
 
 	/**
@@ -906,248 +750,11 @@ export class AgentSession {
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
-		if (bindings.uiContext !== undefined) {
-			this._extensionUIContext = bindings.uiContext;
-		}
-		if (bindings.commandContextActions !== undefined) {
-			this._extensionCommandContextActions = bindings.commandContextActions;
-		}
-		if (bindings.shutdownHandler !== undefined) {
-			this._extensionShutdownHandler = bindings.shutdownHandler;
-		}
-		if (bindings.onError !== undefined) {
-			this._extensionErrorListener = bindings.onError;
-		}
-
-		this._applyExtensionBindings(this._extensionRunner);
-		await this._extensionRunner.emit(this._sessionStartEvent);
-		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
-	}
-
-	private async extendResourcesFromExtensions(reason: "startup" | "reload"): Promise<void> {
-		if (!this._extensionRunner.hasHandlers("resources_discover")) {
-			return;
-		}
-
-		const { skillPaths, promptPaths, themePaths } = await this._extensionRunner.emitResourcesDiscover(
-			this._cwd,
-			reason,
-		);
-
-		if (skillPaths.length === 0 && promptPaths.length === 0 && themePaths.length === 0) {
-			return;
-		}
-
-		const extensionPaths: ResourceExtensionPaths = {
-			skillPaths: this.buildExtensionResourcePaths(skillPaths),
-			promptPaths: this.buildExtensionResourcePaths(promptPaths),
-			themePaths: this.buildExtensionResourcePaths(themePaths),
-		};
-
-		this._resourceLoader.extendResources(extensionPaths);
-		this._toolController.rebuildSystemPrompt(this.getActiveToolNames());
-	}
-
-	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
-		path: string;
-		metadata: { source: string; scope: "temporary"; origin: "top-level"; baseDir?: string };
-	}> {
-		return entries.map((entry) => {
-			const source = this.getExtensionSourceLabel(entry.extensionPath);
-			const baseDir = entry.extensionPath.startsWith("<") ? undefined : dirname(entry.extensionPath);
-			return {
-				path: entry.path,
-				metadata: {
-					source,
-					scope: "temporary",
-					origin: "top-level",
-					baseDir,
-				},
-			};
-		});
-	}
-
-	private getExtensionSourceLabel(extensionPath: string): string {
-		if (extensionPath.startsWith("<")) {
-			return `extension:${extensionPath.replace(/[<>]/g, "")}`;
-		}
-		const base = basename(extensionPath);
-		const name = base.replace(/\.(ts|js)$/, "");
-		return `extension:${name}`;
-	}
-
-	private _applyExtensionBindings(runner: ExtensionRunner): void {
-		runner.setUIContext(this._extensionUIContext);
-		runner.bindCommandContext(this._extensionCommandContextActions);
-
-		this._extensionErrorUnsubscriber?.();
-		this._extensionErrorUnsubscriber = this._extensionErrorListener
-			? runner.onError(this._extensionErrorListener)
-			: undefined;
-	}
-
-	private _bindExtensionCore(runner: ExtensionRunner): void {
-		const getCommands = (): SlashCommandInfo[] => {
-			const extensionCommands: SlashCommandInfo[] = runner.getRegisteredCommands().map((command) => ({
-				name: command.invocationName,
-				description: command.description,
-				source: "extension",
-				sourceInfo: command.sourceInfo,
-			}));
-
-			const templates: SlashCommandInfo[] = this.promptTemplates.map((template) => ({
-				name: template.name,
-				description: template.description,
-				source: "prompt",
-				sourceInfo: template.sourceInfo,
-			}));
-
-			const skills: SlashCommandInfo[] = this._resourceLoader.getSkills().skills.map((skill) => ({
-				name: `skill:${skill.name}`,
-				description: skill.description,
-				source: "skill",
-				sourceInfo: skill.sourceInfo,
-			}));
-
-			return [...extensionCommands, ...templates, ...skills];
-		};
-
-		runner.bindCore(
-			{
-				sendMessage: (message, options) => {
-					this.sendCustomMessage(message, options).catch((err) => {
-						runner.emitError({
-							extensionPath: "<runtime>",
-							event: "send_message",
-							error: err instanceof Error ? err.message : String(err),
-						});
-					});
-				},
-				sendUserMessage: (content, options) => {
-					this.sendUserMessage(content, options).catch((err) => {
-						runner.emitError({
-							extensionPath: "<runtime>",
-							event: "send_user_message",
-							error: err instanceof Error ? err.message : String(err),
-						});
-					});
-				},
-				appendEntry: (customType, data) => {
-					this.sessionManager.appendCustomEntry(customType, data);
-				},
-				setSessionName: (name) => {
-					this.setSessionName(name);
-				},
-				getSessionName: () => {
-					return this.sessionManager.getSessionName();
-				},
-				setLabel: (entryId, label) => {
-					this.sessionManager.appendLabelChange(entryId, label);
-				},
-				getActiveTools: () => this.getActiveToolNames(),
-				getAllTools: () => this.getAllTools(),
-				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
-				refreshTools: () => this._toolController.refresh(),
-				getCommands,
-				setModel: async (model) => {
-					if (!this.modelRegistry.hasConfiguredAuth(model)) return false;
-					await this.setModel(model);
-					return true;
-				},
-				getThinkingLevel: () => this.thinkingLevel,
-				setThinkingLevel: (level) => this.setThinkingLevel(level),
-			},
-			{
-				getModel: () => this.model,
-				isIdle: () => !this.isStreaming,
-				getSignal: () => this.agent.signal,
-				abort: () => this.abort(),
-				hasPendingMessages: () => this.pendingMessageCount > 0,
-				shutdown: () => {
-					this._extensionShutdownHandler?.();
-				},
-				getContextUsage: () => this.getContextUsage(),
-				compact: (options) => {
-					void (async () => {
-						try {
-							const result = await this.compact(options?.customInstructions);
-							options?.onComplete?.(result);
-						} catch (error) {
-							const err = error instanceof Error ? error : new Error(String(error));
-							options?.onError?.(err);
-						}
-					})();
-				},
-				getSystemPrompt: () => this.systemPrompt,
-			},
-			{
-				registerProvider: (name, config) => {
-					this._modelRegistry.registerProvider(name, config);
-					this._modelController.refreshCurrentModelFromRegistry();
-				},
-				unregisterProvider: (name) => {
-					this._modelRegistry.unregisterProvider(name);
-					this._modelController.refreshCurrentModelFromRegistry();
-				},
-			},
-		);
-	}
-
-	private _buildRuntime(options: {
-		activeToolNames?: string[];
-		flagValues?: Map<string, boolean | string>;
-		includeAllExtensionTools?: boolean;
-	}): void {
-		this._toolController.buildBaseToolDefinitions();
-
-		const extensionsResult = this._resourceLoader.getExtensions();
-		if (options.flagValues) {
-			for (const [name, value] of options.flagValues) {
-				extensionsResult.runtime.flagValues.set(name, value);
-			}
-		}
-
-		this._extensionRunner = new ExtensionRunner(
-			extensionsResult.extensions,
-			extensionsResult.runtime,
-			this._cwd,
-			this.sessionManager,
-			this._modelRegistry,
-		);
-		if (this._extensionRunnerRef) {
-			this._extensionRunnerRef.current = this._extensionRunner;
-		}
-		this._bindExtensionCore(this._extensionRunner);
-		this._applyExtensionBindings(this._extensionRunner);
-
-		const baseActiveToolNames = options.activeToolNames ?? this._toolController.getDefaultActiveToolNames();
-		this._toolController.refresh({
-			activeToolNames: baseActiveToolNames,
-			includeAllExtensionTools: options.includeAllExtensionTools,
-		});
+		await this._extensionController.bindExtensions(bindings);
 	}
 
 	async reload(): Promise<void> {
-		const previousFlagValues = this._extensionRunner.getFlagValues();
-		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
-		await this.settingsManager.reload();
-		resetApiProviders();
-		await this._resourceLoader.reload();
-		this._buildRuntime({
-			activeToolNames: this.getActiveToolNames(),
-			flagValues: previousFlagValues,
-			includeAllExtensionTools: true,
-		});
-
-		const hasBindings =
-			this._extensionUIContext ||
-			this._extensionCommandContextActions ||
-			this._extensionShutdownHandler ||
-			this._extensionErrorListener;
-		if (hasBindings) {
-			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
-			await this.extendResourcesFromExtensions("reload");
-		}
+		await this._extensionController.reload();
 	}
 
 	// =========================================================================
@@ -1318,26 +925,20 @@ export class AgentSession {
 	// =========================================================================
 
 	createReplacedSessionContext(): ReplacedSessionContext {
-		const context = Object.defineProperties(
-			{},
-			Object.getOwnPropertyDescriptors(this._extensionRunner.createCommandContext()),
-		) as ReplacedSessionContext;
-		context.sendMessage = (message, options) => this.sendCustomMessage(message, options);
-		context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
-		return context;
+		return this._extensionController.createReplacedSessionContext();
 	}
 
 	/**
 	 * Check if extensions have handlers for a specific event type.
 	 */
 	hasExtensionHandlers(eventType: string): boolean {
-		return this._extensionRunner.hasHandlers(eventType);
+		return this._extensionController.hasHandlers(eventType);
 	}
 
 	/**
 	 * Get the extension runner (for setting UI context and error handlers).
 	 */
 	get extensionRunner(): ExtensionRunner {
-		return this._extensionRunner;
+		return this._extensionController.runner;
 	}
 }

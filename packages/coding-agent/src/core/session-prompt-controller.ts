@@ -38,6 +38,7 @@ interface SessionPromptControllerOptions {
 	getResourceLoader: () => ResourceLoader;
 	getBaseSystemPrompt: () => { prompt: string; options: BuildSystemPromptOptions };
 	checkCompaction: (message: AssistantMessage, skipAbortedCheck: boolean) => Promise<boolean>;
+	waitForPendingEvents: () => Promise<void>;
 	emit: (event: AgentEvent) => void;
 }
 
@@ -52,6 +53,7 @@ export class SessionPromptController {
 	private readonly getResourceLoader: SessionPromptControllerOptions["getResourceLoader"];
 	private readonly getBaseSystemPrompt: SessionPromptControllerOptions["getBaseSystemPrompt"];
 	private readonly checkCompaction: SessionPromptControllerOptions["checkCompaction"];
+	private readonly waitForPendingEvents: SessionPromptControllerOptions["waitForPendingEvents"];
 	private readonly emit: SessionPromptControllerOptions["emit"];
 
 	constructor(options: SessionPromptControllerOptions) {
@@ -65,6 +67,7 @@ export class SessionPromptController {
 		this.getResourceLoader = options.getResourceLoader;
 		this.getBaseSystemPrompt = options.getBaseSystemPrompt;
 		this.checkCompaction = options.checkCompaction;
+		this.waitForPendingEvents = options.waitForPendingEvents;
 		this.emit = options.emit;
 	}
 
@@ -167,6 +170,7 @@ export class SessionPromptController {
 		preflightResult?.(true);
 		await this.agent.prompt(messages);
 		await this.retryController.waitForRetry();
+		await this.waitForPendingEvents();
 	}
 
 	async steer(text: string, images?: ImageContent[]): Promise<void> {
