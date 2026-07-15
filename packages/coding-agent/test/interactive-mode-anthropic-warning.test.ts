@@ -1,106 +1,60 @@
 import { describe, expect, test, vi } from "vitest";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { AnthropicAuthWarning } from "../src/modes/interactive/anthropic-auth-warning.js";
 
-function createSettingsManager(warnings: { anthropicExtraUsage?: boolean } = {}) {
-	return {
-		getWarnings: vi.fn().mockReturnValue(warnings),
-	};
+function createWarning(options?: {
+	warnings?: { anthropicExtraUsage?: boolean };
+	storedCredential?: { type: string };
+	apiKey?: string;
+}) {
+	const getWarnings = vi.fn(() => options?.warnings ?? {});
+	const getStoredCredential = vi.fn(() => options?.storedCredential);
+	const getApiKeyForProvider = vi.fn(async () => options?.apiKey);
+	const showWarning = vi.fn();
+	const warning = new AnthropicAuthWarning({
+		getWarnings,
+		getStoredCredential,
+		getApiKeyForProvider,
+		showWarning,
+	});
+	return { warning, getStoredCredential, getApiKeyForProvider, showWarning };
 }
 
-describe("InteractiveMode.maybeWarnAboutAnthropicSubscriptionAuth", () => {
+describe("AnthropicAuthWarning", () => {
 	test("warns once when Anthropic subscription auth is detected", async () => {
-		const fakeThis: any = {
-			anthropicSubscriptionWarningShown: false,
-			settingsManager: createSettingsManager(),
-			session: {
-				modelRegistry: {
-					authStorage: {
-						get: vi.fn().mockReturnValue(undefined),
-					},
-					getApiKeyForProvider: vi.fn().mockResolvedValue("sk-ant-oat01-test"),
-				},
-			},
-			showWarning: vi.fn(),
-		};
+		const harness = createWarning({ apiKey: "sk-ant-oat01-test" });
 
-		await (InteractiveMode as any).prototype.maybeWarnAboutAnthropicSubscriptionAuth.call(fakeThis, {
-			provider: "anthropic",
-		});
-		await (InteractiveMode as any).prototype.maybeWarnAboutAnthropicSubscriptionAuth.call(fakeThis, {
-			provider: "anthropic",
-		});
+		await harness.warning.maybeWarn({ provider: "anthropic" });
+		await harness.warning.maybeWarn({ provider: "anthropic" });
 
-		expect(fakeThis.showWarning).toHaveBeenCalledTimes(1);
-		expect(fakeThis.session.modelRegistry.getApiKeyForProvider).toHaveBeenCalledTimes(1);
+		expect(harness.showWarning).toHaveBeenCalledTimes(1);
+		expect(harness.getApiKeyForProvider).toHaveBeenCalledTimes(1);
 	});
 
 	test("warns when Anthropic OAuth is stored even if token refresh lookup would fail", async () => {
-		const fakeThis: any = {
-			anthropicSubscriptionWarningShown: false,
-			settingsManager: createSettingsManager(),
-			session: {
-				modelRegistry: {
-					authStorage: {
-						get: vi.fn().mockReturnValue({ type: "oauth" }),
-					},
-					getApiKeyForProvider: vi.fn().mockResolvedValue(undefined),
-				},
-			},
-			showWarning: vi.fn(),
-		};
+		const harness = createWarning({ storedCredential: { type: "oauth" } });
 
-		await (InteractiveMode as any).prototype.maybeWarnAboutAnthropicSubscriptionAuth.call(fakeThis, {
-			provider: "anthropic",
-		});
+		await harness.warning.maybeWarn({ provider: "anthropic" });
 
-		expect(fakeThis.showWarning).toHaveBeenCalledTimes(1);
-		expect(fakeThis.session.modelRegistry.getApiKeyForProvider).not.toHaveBeenCalled();
+		expect(harness.showWarning).toHaveBeenCalledTimes(1);
+		expect(harness.getApiKeyForProvider).not.toHaveBeenCalled();
 	});
 
 	test("does not warn for non-Anthropic models", async () => {
-		const fakeThis: any = {
-			anthropicSubscriptionWarningShown: false,
-			settingsManager: createSettingsManager(),
-			session: {
-				modelRegistry: {
-					authStorage: {
-						get: vi.fn(),
-					},
-					getApiKeyForProvider: vi.fn(),
-				},
-			},
-			showWarning: vi.fn(),
-		};
+		const harness = createWarning();
 
-		await (InteractiveMode as any).prototype.maybeWarnAboutAnthropicSubscriptionAuth.call(fakeThis, {
-			provider: "openai",
-		});
+		await harness.warning.maybeWarn({ provider: "openai" });
 
-		expect(fakeThis.showWarning).not.toHaveBeenCalled();
-		expect(fakeThis.session.modelRegistry.getApiKeyForProvider).not.toHaveBeenCalled();
+		expect(harness.showWarning).not.toHaveBeenCalled();
+		expect(harness.getApiKeyForProvider).not.toHaveBeenCalled();
 	});
 
 	test("does not warn when Anthropic extra usage warning is disabled", async () => {
-		const fakeThis: any = {
-			anthropicSubscriptionWarningShown: false,
-			settingsManager: createSettingsManager({ anthropicExtraUsage: false }),
-			session: {
-				modelRegistry: {
-					authStorage: {
-						get: vi.fn(),
-					},
-					getApiKeyForProvider: vi.fn(),
-				},
-			},
-			showWarning: vi.fn(),
-		};
+		const harness = createWarning({ warnings: { anthropicExtraUsage: false } });
 
-		await (InteractiveMode as any).prototype.maybeWarnAboutAnthropicSubscriptionAuth.call(fakeThis, {
-			provider: "anthropic",
-		});
+		await harness.warning.maybeWarn({ provider: "anthropic" });
 
-		expect(fakeThis.showWarning).not.toHaveBeenCalled();
-		expect(fakeThis.session.modelRegistry.authStorage.get).not.toHaveBeenCalled();
-		expect(fakeThis.session.modelRegistry.getApiKeyForProvider).not.toHaveBeenCalled();
+		expect(harness.showWarning).not.toHaveBeenCalled();
+		expect(harness.getStoredCredential).not.toHaveBeenCalled();
+		expect(harness.getApiKeyForProvider).not.toHaveBeenCalled();
 	});
 });
