@@ -76,12 +76,25 @@ export interface SkillDataDeclaration {
 	type?: "object" | "array";
 }
 
+export interface SkillCommandPermission {
+	executable: string;
+	/** Fixed argument prefix. The first argument must be a file inside the Skill directory. */
+	args: readonly string[];
+}
+
+export interface SkillPermissions {
+	commands?: {
+		allow: readonly SkillCommandPermission[];
+	};
+}
+
 export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
 	/** Data namespaces for persistence (Model B). key → { type: "object" | "array" } */
 	data?: Record<string, SkillDataDeclaration>;
+	permissions?: unknown;
 	[key: string]: unknown;
 }
 
@@ -107,6 +120,8 @@ export interface Skill {
 	knowledgeEntries?: KnowledgeEntryMeta[];
 	/** Data namespaces declared in SKILL.md frontmatter (Model B persistence) */
 	dataNamespaces?: Map<string, SkillDataDeclaration>;
+	/** Explicit runtime capabilities declared by the Skill. */
+	permissions?: SkillPermissions;
 }
 
 export interface LoadSkillsResult {
@@ -157,6 +172,87 @@ function validateDescription(description: string | undefined): string[] {
 	}
 
 	return errors;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseSkillPermissions(
+	value: unknown,
+	skillDir: string,
+	filePath: string,
+	diagnostics: ResourceDiagnostic[],
+): SkillPermissions | undefined {
+	if (value === undefined) return undefined;
+	if (!isRecord(value)) {
+		diagnostics.push({ type: "warning", message: "permissions must be an object", path: filePath });
+		return undefined;
+	}
+
+	if (value.commands === undefined) return undefined;
+	if (!isRecord(value.commands) || !Array.isArray(value.commands.allow)) {
+		diagnostics.push({
+			type: "warning",
+			message: "permissions.commands.allow must be an array",
+			path: filePath,
+		});
+		return undefined;
+	}
+
+	const allow: SkillCommandPermission[] = [];
+	for (const [index, entry] of value.commands.allow.entries()) {
+		const prefix = `permissions.commands.allow[${index}]`;
+		if (!isRecord(entry)) {
+			diagnostics.push({ type: "warning", message: `${prefix} must be an object`, path: filePath });
+			continue;
+		}
+
+		if (typeof entry.executable !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(entry.executable)) {
+			diagnostics.push({
+				type: "warning",
+				message: `${prefix}.executable must be a command name without a path`,
+				path: filePath,
+			});
+			continue;
+		}
+
+		if (
+			!Array.isArray(entry.args) ||
+			entry.args.length === 0 ||
+			!entry.args.every(
+				(argument) => typeof argument === "string" && argument.length > 0 && !argument.includes("\0"),
+			)
+		) {
+			diagnostics.push({
+				type: "warning",
+				message: `${prefix}.args must be a non-empty string array`,
+				path: filePath,
+			});
+			continue;
+		}
+
+		const targetPath = resolve(skillDir, entry.args[0]);
+		const canonicalSkillDir = canonicalizePath(skillDir);
+		const canonicalTargetPath = canonicalizePath(targetPath);
+		const relativeTarget = relative(canonicalSkillDir, canonicalTargetPath);
+		let isFile = false;
+		try {
+			isFile = statSync(targetPath).isFile();
+		} catch {}
+		if (isAbsolute(entry.args[0]) || relativeTarget.startsWith("..") || isAbsolute(relativeTarget) || !isFile) {
+			diagnostics.push({
+				type: "warning",
+				message: `${prefix}.args[0] must reference a file inside the Skill directory`,
+				path: filePath,
+			});
+			continue;
+		}
+
+		allow.push({ executable: entry.executable, args: [...entry.args] });
+	}
+
+	return allow.length > 0 ? { commands: { allow } } : undefined;
 }
 
 export interface LoadSkillsFromDirOptions {
@@ -375,6 +471,7 @@ function loadSkillFromFile(
 
 		// Build knowledge index from references/ directory
 		const knowledgeEntries = buildKnowledgeEntries(skillDir);
+		const permissions = parseSkillPermissions(frontmatter.permissions, skillDir, filePath, diagnostics);
 
 		// Parse data: declarations (Model B persistence namespaces)
 		let dataNamespaces: Map<string, SkillDataDeclaration> | undefined;
@@ -408,6 +505,7 @@ function loadSkillFromFile(
 				toolsPath: hasTools ? toolsPath : undefined,
 				knowledgeEntries: knowledgeEntries.length > 0 ? knowledgeEntries : undefined,
 				dataNamespaces: dataNamespaces && dataNamespaces.size > 0 ? dataNamespaces : undefined,
+				permissions,
 			},
 			diagnostics,
 		};

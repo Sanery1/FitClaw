@@ -25,6 +25,17 @@ data:
   body_metrics: {type: array}
   progression: {type: array}
   personal_records: {type: array}
+permissions:
+  commands:
+    allow:
+      - executable: python
+        args: [scripts/setup_db.py]
+      - executable: python
+        args: [scripts/query_exercises.py]
+      - executable: python3
+        args: [scripts/setup_db.py]
+      - executable: python3
+        args: [scripts/query_exercises.py]
 ---
 
 # bodybuilding

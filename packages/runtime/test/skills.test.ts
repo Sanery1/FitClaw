@@ -20,6 +20,7 @@ function createTestSkill(options: {
 	baseDir: string;
 	disableModelInvocation?: boolean;
 	dataNamespaces?: Skill["dataNamespaces"];
+	permissions?: Skill["permissions"];
 	source?: string;
 }): Skill {
 	return {
@@ -31,6 +32,7 @@ function createTestSkill(options: {
 		disableModelInvocation: options.disableModelInvocation ?? false,
 		hasTools: false,
 		dataNamespaces: options.dataNamespaces,
+		permissions: options.permissions,
 	};
 }
 
@@ -216,6 +218,31 @@ describe("skills", () => {
 			expect(diagnostics.some((d: ResourceDiagnostic) => d.message.includes("unknown frontmatter field"))).toBe(
 				false,
 			);
+		});
+
+		it("should parse allowlisted command prefixes", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "permissions-valid"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].permissions?.commands?.allow).toEqual([
+				{ executable: "python", args: ["scripts/query.py"] },
+				{ executable: "python3", args: ["scripts/query.py"] },
+			]);
+			expect(diagnostics).toHaveLength(0);
+		});
+
+		it("should ignore invalid command permissions with diagnostics", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "permissions-invalid"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].permissions).toBeUndefined();
+			expect(diagnostics.some((diagnostic) => diagnostic.message.includes("permissions.commands.allow"))).toBe(true);
 		});
 
 		it("should default disableModelInvocation to false when not specified", () => {

@@ -4,10 +4,26 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	configureCoachSkillDataRoot,
+	createCoachActiveTools,
 	createCoachSkillDataTools,
 	loadCoachSkills,
 	resolveCoachHostWorkspacePath,
 } from "../src/runtime/skills.js";
+import type { ExecOptions, ExecResult, Executor } from "../src/sandbox.js";
+
+class RecordingExecutor implements Executor {
+	async exec(_command: string, _options?: ExecOptions): Promise<ExecResult> {
+		return { stdout: "", stderr: "", code: 0 };
+	}
+
+	async execFile(_executable: string, _args: readonly string[], _options?: ExecOptions): Promise<ExecResult> {
+		return { stdout: "", stderr: "", code: 0 };
+	}
+
+	getWorkspacePath(hostPath: string): string {
+		return hostPath;
+	}
+}
 
 function toPosixPath(path: string): string {
 	return path.replace(/\\/g, "/");
@@ -121,6 +137,44 @@ describe("coach bot skill loading", () => {
 		const toolNames = createCoachSkillDataTools(channelDir, refreshedSkills).map((tool) => tool.name);
 
 		expect(toolNames).toEqual(["data_bodybuilding_read", "data_bodybuilding_write"]);
+	});
+
+	it("only exposes command execution when a skill declares an allowlist", () => {
+		const channelDir = join(workspaceDir, "chat-1");
+		mkdirSync(channelDir, { recursive: true });
+		const executor = new RecordingExecutor();
+
+		const initialSkills = loadCoachSkills(channelDir, workspaceDir, workspaceDir);
+		expect(createCoachActiveTools(executor, channelDir, initialSkills).map((tool) => tool.name)).toEqual(["read"]);
+
+		const skillDir = join(workspaceDir, "skills", "bodybuilding");
+		const scriptsDir = join(skillDir, "scripts");
+		mkdirSync(scriptsDir, { recursive: true });
+		writeFileSync(join(scriptsDir, "query.py"), "print('ok')\n", "utf-8");
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			[
+				"---",
+				"name: bodybuilding",
+				"description: Bodybuilding coaching skill.",
+				"permissions:",
+				"  commands:",
+				"    allow:",
+				"      - executable: python",
+				"        args: [scripts/query.py]",
+				"data:",
+				"  training_log:",
+				"    type: array",
+				"---",
+				"# Bodybuilding",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const refreshedSkills = loadCoachSkills(channelDir, workspaceDir, workspaceDir);
+		const toolNames = createCoachActiveTools(executor, channelDir, refreshedSkills).map((tool) => tool.name);
+
+		expect(toolNames).toEqual(["read", "bash", "data_bodybuilding_read", "data_bodybuilding_write"]);
 	});
 
 	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {

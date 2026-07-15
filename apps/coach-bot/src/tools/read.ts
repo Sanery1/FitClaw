@@ -112,9 +112,9 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 			let details: ReadToolDetails | undefined;
 
 			if (truncation.firstLineExceedsLimit) {
-				// First line at offset exceeds 50KB - tell model to use bash
+				// First line at offset exceeds the tool limit.
 				const firstLineSize = formatSize(Buffer.byteLength(selectedContent.split("\n")[0], "utf-8"));
-				outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${path} | head -c ${DEFAULT_MAX_BYTES}]`;
+				outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit.]`;
 				details = { truncation };
 			} else if (truncation.truncated) {
 				// Truncation occurred - build actionable notice

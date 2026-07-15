@@ -1,10 +1,12 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import type { Executor } from "../sandbox.js";
-import { createBashTool } from "./bash.js";
-import { createEditTool } from "./edit.js";
+import { type AllowedCommand, createBashTool } from "./bash.js";
 import { createReadTool } from "./read.js";
-import { createWriteTool } from "./write.js";
 
-export function createCoachTools(executor: Executor): AgentTool[] {
-	return [createReadTool(executor), createBashTool(executor), createEditTool(executor), createWriteTool(executor)];
+export function createCoachTools(executor: Executor, allowedCommands: readonly AllowedCommand[]): AgentTool[] {
+	const tools: AgentTool[] = [createReadTool(executor)];
+	if (allowedCommands.length > 0) {
+		tools.push(createBashTool(executor, allowedCommands));
+	}
+	return tools;
 }

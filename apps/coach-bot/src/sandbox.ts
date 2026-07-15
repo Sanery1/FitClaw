@@ -82,6 +82,9 @@ export interface Executor {
 	 */
 	exec(command: string, options?: ExecOptions): Promise<ExecResult>;
 
+	/** Execute one process directly without shell interpretation. */
+	execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult>;
+
 	/**
 	 * Get the workspace path prefix for this executor
 	 * Host: returns the actual path
@@ -103,11 +106,18 @@ export interface ExecResult {
 
 class HostExecutor implements Executor {
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
-		return new Promise((resolve, reject) => {
-			const shell = process.platform === "win32" ? "cmd" : "sh";
-			const shellArgs = process.platform === "win32" ? ["/c"] : ["-c"];
+		const shell = process.platform === "win32" ? "cmd" : "sh";
+		const shellArgs = process.platform === "win32" ? ["/c", command] : ["-c", command];
+		return this.spawnProcess(shell, shellArgs, options);
+	}
 
-			const child = spawn(shell, [...shellArgs, command], {
+	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
+		return this.spawnProcess(executable, args, options);
+	}
+
+	private spawnProcess(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
+		return new Promise((resolve, reject) => {
+			const child = spawn(executable, args, {
 				detached: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
@@ -126,6 +136,12 @@ class HostExecutor implements Executor {
 
 			const onAbort = () => {
 				if (child.pid) killProcessTree(child.pid);
+			};
+			const cleanup = () => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (options?.signal) {
+					options.signal.removeEventListener("abort", onAbort);
+				}
 			};
 
 			if (options?.signal) {
@@ -150,11 +166,13 @@ class HostExecutor implements Executor {
 				}
 			});
 
+			child.on("error", (error) => {
+				cleanup();
+				reject(new Error(`Failed to start ${executable}: ${error.message}`));
+			});
+
 			child.on("close", (code) => {
-				if (timeoutHandle) clearTimeout(timeoutHandle);
-				if (options?.signal) {
-					options.signal.removeEventListener("abort", onAbort);
-				}
+				cleanup();
 
 				if (options?.signal?.aborted) {
 					reject(new Error(`${stdout}\n${stderr}\nCommand aborted`.trim()));
@@ -184,6 +202,11 @@ class DockerExecutor implements Executor {
 		const dockerCmd = `docker exec ${this.container} sh -c ${shellEscape(command)}`;
 		const hostExecutor = new HostExecutor();
 		return hostExecutor.exec(dockerCmd, options);
+	}
+
+	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
+		const hostExecutor = new HostExecutor();
+		return hostExecutor.execFile("docker", ["exec", this.container, executable, ...args], options);
 	}
 
 	getWorkspacePath(_hostPath: string): string {

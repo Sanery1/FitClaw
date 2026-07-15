@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **Coach Skill 命令边界 (2026-07-15)**: Skill 可通过 `permissions.commands.allow` 声明固定本地脚本前缀；Coach 默认只暴露 `read` 和 Skill data 工具，仅在存在有效声明时提供 `bash`，并以单进程参数执行代替任意 shell 字符串。`edit` / `write` 不再进入 Coach 工具集。
 - **Coach 会话运行时解耦 (2026-07-15)**: auth、model、settings、JSONL session、compaction 和 `ManagedAgentSession` 已迁入 `@fitclaw/runtime`；`apps/coach-bot` 删除 `@fitclaw/claw` 依赖，同时保留持久化、自动重试和自动压缩测试。
 - **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
 - **Bot Skill 完整修复 (2026-05-03)**: 修复 6 个问题打通 Bot 本地数据库查询链路：
@@ -95,7 +96,7 @@ Skill 作者**不接触任何框架类型**。Skill = SKILL.md + references/ + s
 Skill 目录结构：
 - `SKILL.md` — 必须，frontmatter + 正文（可含 `data:` 声明）
 - `references/*.md` — 可选，渐进式知识库
-- `scripts/*` — 可选，任意语言脚本（Python/bash/Node），LLM 通过 bash 调用
+- `scripts/*` — 可选，本地脚本；Coach 使用前必须在 `permissions.commands.allow` 中声明可执行文件和固定脚本参数前缀
 - `assets/*` — 可选，静态数据
 
 **安装位置**：`~/.fitclaw/agent/skills/`（用户级）或 `.fitclaw/skills/`（项目级）
@@ -117,6 +118,20 @@ data:
 1. 初始化 namespace JSON 文件（`{dataDir}/sport-data/{skillName}/{namespace}.json`）
 2. 注册 `data_<skillName>_read` / `data_<skillName>_write` Agent Tool
 3. 设置 `FITCLAW_DATA_DIR` 环境变量 → `{dataDir}/sport-data`
+
+### `permissions.commands.allow` 声明（Coach 命令执行）
+
+Coach 不接受任意 shell 字符串。需要执行本地脚本的 Skill 必须声明可执行文件和固定参数前缀：
+
+```yaml
+permissions:
+  commands:
+    allow:
+      - executable: python
+        args: [scripts/query_exercises.py]
+```
+
+`args[0]` 必须指向 Skill 目录内已存在的文件。调用时只允许在此前缀后追加参数，进程参数不会经过 shell 解析。未声明 permissions 的 Skill 不会获得 `bash` 工具。
 
 ### 已安装 Skill
 

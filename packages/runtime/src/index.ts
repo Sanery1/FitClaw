@@ -42,7 +42,9 @@ export {
 	loadSkills,
 	loadSkillsFromDir,
 	type Skill,
+	type SkillCommandPermission,
 	type SkillDataDeclaration,
 	type SkillFrontmatter,
+	type SkillPermissions,
 } from "./skills.js";
 export * from "./system/index.js";

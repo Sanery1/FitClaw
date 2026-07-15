@@ -17,7 +17,8 @@ function getTempFilePath(): string {
 
 const bashSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what this command does (shown to user)" }),
-	command: Type.String({ description: "Bash command to execute" }),
+	command: Type.String({ description: "Allowlisted executable name" }),
+	args: Type.Array(Type.String(), { description: "Arguments passed directly to the executable without a shell" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
 });
 
@@ -26,52 +27,51 @@ interface BashToolDetails {
 	fullOutputPath?: string;
 }
 
-const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-	{ pattern: /\brm\s+-rf\s+\/(\s|$|;|&)/i, reason: "rm -rf / destroys the filesystem" },
-	{ pattern: /\brm\s+-rf\s+\/\*/i, reason: "rm -rf /* destroys the filesystem" },
-	{ pattern: /\bdd\s+.*of=\/dev\/(sda|sdb|nvme|hd|xvd|vd)/i, reason: "dd to block devices overwrites disk" },
-	{ pattern: /\bmkfs\./i, reason: "mkfs formats filesystems destructively" },
-	{ pattern: /\bchmod\s+-R\s+777\s+\/(\s|$|;|&)/i, reason: "chmod 777 / breaks system permissions" },
-	{ pattern: /\bchmod\s+-R\s+000\s+\/(\s|$|;|&)/i, reason: "chmod 000 / locks out the system" },
-	{ pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/i, reason: "fork bomb crashes the system" },
-	{ pattern: /\bmv\s+.*\/\s+\/dev\/null/i, reason: "moving root to /dev/null destroys data" },
-	{ pattern: />\s*\/dev\/sda/i, reason: "redirecting to block device destroys disk" },
-	{
-		pattern: />\s*\/dev\/null.*\b(\/etc|\/usr|\/var|\/home|\/bin|\/sbin|\/lib)/i,
-		reason: "redirecting system paths to null destroys data",
-	},
-	{ pattern: /\bwget\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
-	{ pattern: /\bcurl\b.*\|\s*\bsh\b/i, reason: "piping curl/wget output to shell executes arbitrary remote code" },
-];
-
-function validateCommand(command: string): void {
-	const normalized = command.replace(/\\\n/g, " ");
-	for (const { pattern, reason } of DANGEROUS_PATTERNS) {
-		if (pattern.test(normalized)) {
-			throw new Error(
-				`SECURITY_BLOCKED: This command was blocked because it matches a dangerous pattern (${reason}). If you believe this is a false positive, restructure the command to avoid the pattern.`,
-			);
-		}
-	}
+export interface AllowedCommand {
+	readonly executable: string;
+	readonly argumentPrefix: readonly string[];
 }
 
-export function createBashTool(executor: Executor): AgentTool<typeof bashSchema> {
+function isAllowedCommand(
+	command: string,
+	args: readonly string[],
+	allowedCommands: readonly AllowedCommand[],
+): boolean {
+	return allowedCommands.some(
+		(allowed) =>
+			allowed.executable === command &&
+			args.length >= allowed.argumentPrefix.length &&
+			allowed.argumentPrefix.every((argument, index) => args[index] === argument),
+	);
+}
+
+export function createBashTool(
+	executor: Executor,
+	allowedCommands: readonly AllowedCommand[],
+): AgentTool<typeof bashSchema> {
+	const allowedCommandList = allowedCommands
+		.map(({ executable, argumentPrefix }) => [executable, ...argumentPrefix].join(" "))
+		.join(", ");
+
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute one allowlisted process without a shell. Allowed command prefixes: ${allowedCommandList}. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
 		parameters: bashSchema,
 		execute: async (
 			_toolCallId: string,
-			{ command, timeout }: { label: string; command: string; timeout?: number },
+			{ command, args, timeout }: { label: string; command: string; args: string[]; timeout?: number },
 			signal?: AbortSignal,
 		) => {
 			// Track output for potential temp file writing
 			let tempFilePath: string | undefined;
 			let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
 
-			validateCommand(command);
-			const result = await executor.exec(command, { timeout, signal });
+			if (args.some((argument) => argument.includes("\0")) || !isAllowedCommand(command, args, allowedCommands)) {
+				throw new Error(`SECURITY_BLOCKED: Command does not match a Skill allowlist: ${command}`);
+			}
+
+			const result = await executor.execFile(command, args, { timeout, signal });
 			let output = "";
 			if (result.stdout) output += result.stdout;
 			if (result.stderr) {
