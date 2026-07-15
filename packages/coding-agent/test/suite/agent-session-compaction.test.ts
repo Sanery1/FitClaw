@@ -1,6 +1,6 @@
 import { type AssistantMessage, fauxAssistantMessage, type Model } from "@fitclaw/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createHarness, type Harness } from "./harness.js";
+import { createHarness, getAssistantTexts, type Harness } from "./harness.js";
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<void>;
@@ -78,6 +78,10 @@ describe("AgentSession compaction characterization", () => {
 		expect(result.summary).toBe("summary from extension");
 		expect(compactionEntries).toHaveLength(1);
 		expect(harness.session.messages[0]?.role).toBe("compactionSummary");
+
+		harness.setResponses([fauxAssistantMessage("continued after compaction")]);
+		await harness.session.prompt("three");
+		expect(getAssistantTexts(harness)).toContain("continued after compaction");
 	});
 
 	it("throws when compacting without a model", async () => {
