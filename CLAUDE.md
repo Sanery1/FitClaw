@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **飞书动作媒体链路 (2026-07-15)**: Coach 在每次运行时注入频道级 `attach`，仅允许读取已加载 Skill realpath 内的文件；飞书适配器按媒体类型上传图片或文件并回复原消息，不再保留全局上传回调或空 `uploadFile` stub。真实飞书应用 smoke test 尚待执行。
 - **Coach Skill 工具边界 (2026-07-15)**: Skill 通过 `permissions.network: false` 与 `permissions.commands.allow` 声明离线脚本；Coach 只为已加载 Skill 提供限定根目录的 `read`。脚本交给独立无网络、只读文件系统的 Skill Runner 容器执行，`edit` / `write` 和任意 shell 不再进入 Coach 工具集。
 - **Coach 会话运行时解耦 (2026-07-15)**: auth、model、settings、JSONL session、compaction 和 `ManagedAgentSession` 已迁入 `@fitclaw/runtime`；`apps/coach-bot` 删除 `@fitclaw/claw` 依赖，同时保留持久化、自动重试和自动压缩测试。
 - **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
@@ -64,7 +65,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 待完成
 
-1. **飞书图片上传** — `apps/coach-bot/src/main.ts` `uploadFile` 是空 stub，即使 `read` 工具能读图片也无法发送给用户。动作图片在数据库中存在但 Bot 无法传递
+1. **飞书动作图片 smoke** — `attach`、绝对 `imagePaths` 与飞书媒体上传已实现并通过确定性测试，仍需在真实飞书应用确认图片实际送达
 2. **live Feishu 审计** — 当前确定性 eval 不能代替真实模型和真实飞书闭环验证
 
 ## 运动数据架构（Model B 纯 Skill）

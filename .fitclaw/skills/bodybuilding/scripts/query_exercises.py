@@ -40,6 +40,32 @@ def check_db_exists() -> bool:
     """检查数据库是否存在"""
     return get_exercises_path().exists() or get_dist_path().exists()
 
+def add_image_paths(exercise: Dict[str, Any]) -> Dict[str, Any]:
+    """将数据库中的相对图片路径转换为 Skill 内的绝对路径"""
+    if exercise.get("imagePaths"):
+        return exercise
+
+    images = exercise.get("images", [])
+    if not isinstance(images, list):
+        return exercise
+
+    exercises_path = get_exercises_path().resolve()
+    image_paths = []
+    for image in images:
+        if not isinstance(image, str):
+            continue
+        image_path = (exercises_path / image).resolve()
+        try:
+            image_path.relative_to(exercises_path)
+        except ValueError:
+            continue
+        if image_path.is_file():
+            image_paths.append(str(image_path))
+
+    if not image_paths:
+        return exercise
+    return {**exercise, "imagePaths": image_paths}
+
 def load_all_exercises() -> List[Dict[str, Any]]:
     """加载所有动作数据"""
     exercises = []
@@ -353,6 +379,7 @@ def main():
         name=args.name,
         exercise_id=args.exercise_id
     )
+    filtered = [add_image_paths(exercise) for exercise in filtered]
     
     # 输出
     if not filtered:

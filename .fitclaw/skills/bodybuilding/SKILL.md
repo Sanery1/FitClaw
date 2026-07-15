@@ -272,9 +272,9 @@ JSON 格式用于导入训练 App：
    - **示范图片路径**（从数据库获取）
 
 3. **图片展示**：
-   - 动作数据库包含图片路径（0.jpg, 1.jpg 等）
-   - 路径格式：`free-exercise-db/exercises/[动作ID]/images/0.jpg`
-   - 在支持的平台上直接发送图片
+   - 查询结果的 `imagePaths` 是 Skill 目录内已校验的绝对路径
+   - 实际目录格式：`free-exercise-db/exercises/[动作ID]/0.jpg`
+   - 用户要求示范图时，使用 `attach` 发送第一张 `imagePaths`，不要把本地路径作为文字回复
 
 ### 安全规范（必须遵守）
 

@@ -64,6 +64,10 @@ Key modules:
 Durable fitness facts must use Skill-declared data namespaces. Conversation
 history is session context, not a second fitness database.
 
+The `attach` tool can send images or files only from currently loaded Skill
+directories. Requested paths and final realpaths are both checked before file
+bytes are passed to the Feishu media upload API.
+
 Skills that execute local scripts must declare `permissions.network: false`
 and an explicit `permissions.commands.allow` prefix. Network-enabled Skill
 commands are not supported.

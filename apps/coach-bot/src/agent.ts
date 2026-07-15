@@ -150,7 +150,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// Update the system prompt and tools with freshly loaded skills
 			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildCoachSystemPrompt(skills);
-			const activeTools = createCoachActiveTools(executor, channelDir, skills);
+			const activeTools = createCoachActiveTools(executor, channelDir, skills, ctx.uploadFile);
 			session.updateRuntime(systemPrompt, activeTools);
 
 			// Reset per-run state

@@ -1,47 +1,47 @@
+import { basename } from "node:path";
 import type { AgentTool } from "@fitclaw/agent-core";
-import { basename, resolve as resolvePath } from "path";
 import { Type } from "typebox";
+import { createSkillFileResolver } from "../runtime/skill-files.js";
+import type { Executor } from "../sandbox.js";
+import type { BotContext } from "../types.js";
 
-// This will be set by the agent before running
-let uploadFn: ((filePath: string, title?: string) => Promise<void>) | null = null;
-
-export function setUploadFunction(fn: (filePath: string, title?: string) => Promise<void>): void {
-	uploadFn = fn;
-}
+const MAX_UPLOAD_FILE_BYTES = 30 * 1024 * 1024;
 
 const attachSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're sharing (shown to user)" }),
-	path: Type.String({ description: "Path to the file to attach" }),
-	title: Type.Optional(Type.String({ description: "Title for the file (defaults to filename)" })),
+	path: Type.String({ description: "Absolute path inside one of the available Skill directories" }),
+	title: Type.Optional(Type.String({ description: "Display title for the file (defaults to filename)" })),
 });
 
-export const attachTool: AgentTool<typeof attachSchema> = {
-	name: "attach",
-	label: "attach",
-	description:
-		"Attach a file to your response. Use this to share files, images, or documents with the user. Only files from /workspace/ can be attached.",
-	parameters: attachSchema,
-	execute: async (
-		_toolCallId: string,
-		{ path, title }: { label: string; path: string; title?: string },
-		signal?: AbortSignal,
-	) => {
-		if (!uploadFn) {
-			throw new Error("Upload function not configured");
-		}
+export function createAttachTool(
+	executor: Executor,
+	allowedRoots: readonly string[],
+	uploadFile: BotContext["uploadFile"],
+): AgentTool<typeof attachSchema> {
+	const resolveSkillFile = createSkillFileResolver(executor, allowedRoots);
+	const allowedRootList = allowedRoots.join(", ");
 
-		if (signal?.aborted) {
-			throw new Error("Operation aborted");
-		}
+	return {
+		name: "attach",
+		label: "attach",
+		description: `Attach an image or file from an available Skill directory: ${allowedRootList}.`,
+		parameters: attachSchema,
+		execute: async (
+			_toolCallId: string,
+			{ path, title }: { label: string; path: string; title?: string },
+			signal?: AbortSignal,
+		) => {
+			const resolvedPath = await resolveSkillFile(path, signal);
+			const data = await executor.readFile(resolvedPath, { signal, maxBytes: MAX_UPLOAD_FILE_BYTES });
+			const fileName = basename(resolvedPath);
+			const normalizedTitle = title?.trim() || undefined;
 
-		const absolutePath = resolvePath(path);
-		const fileName = title || basename(absolutePath);
+			await uploadFile({ data, fileName, title: normalizedTitle });
 
-		await uploadFn(absolutePath, fileName);
-
-		return {
-			content: [{ type: "text" as const, text: `Attached file: ${fileName}` }],
-			details: undefined,
-		};
-	},
-};
+			return {
+				content: [{ type: "text" as const, text: `Attached file: ${normalizedTitle || fileName}` }],
+				details: undefined,
+			};
+		},
+	};
+}

@@ -6,8 +6,9 @@
 
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { mkdir } from "fs/promises";
-import { join } from "path";
+import { basename, extname, join } from "path";
 import * as log from "./log.js";
+import type { BotUpload } from "./types.js";
 
 // ============================================================================
 // Types
@@ -38,33 +39,59 @@ export interface FeishuConfig {
 	botName?: string;
 }
 
+export interface FeishuBotDependencies {
+	client?: Lark.Client;
+	wsClient?: Lark.WSClient;
+}
+
+type FeishuFileType = "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream";
+
+const FEISHU_IMAGE_EXTENSIONS = new Set([".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"]);
+const FEISHU_FILE_TYPES: Readonly<Record<string, FeishuFileType>> = {
+	".doc": "doc",
+	".docx": "doc",
+	".mp4": "mp4",
+	".opus": "opus",
+	".pdf": "pdf",
+	".ppt": "ppt",
+	".pptx": "ppt",
+	".xls": "xls",
+	".xlsx": "xls",
+};
+const MAX_FEISHU_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024;
+
 // ============================================================================
 // FeishuBot
 // ============================================================================
 
 export class FeishuBot {
-	private client: Lark.Client;
-	private wsClient: Lark.WSClient;
+	private readonly client: Lark.Client;
+	private readonly wsClient: Lark.WSClient;
 	private handler?: (event: FeishuEvent) => Promise<void>;
 	private readonly downloadDir: string;
 	private readonly botName: string;
 	private seenEventIds = new Set<string>();
 
-	constructor(config: FeishuConfig, workingDir: string) {
+	constructor(config: FeishuConfig, workingDir: string, dependencies: FeishuBotDependencies = {}) {
 		this.botName = config.botName || "FitCoach";
 		this.downloadDir = join(workingDir, "feishu-downloads");
 
-		this.client = new Lark.Client({
-			appId: config.appId,
-			appSecret: config.appSecret,
-			domain: Lark.Domain.Feishu,
-		});
+		this.client =
+			dependencies.client ??
+			new Lark.Client({
+				appId: config.appId,
+				appSecret: config.appSecret,
+				domain: Lark.Domain.Feishu,
+			});
 
-		this.wsClient = new Lark.WSClient({
-			appId: config.appId,
-			appSecret: config.appSecret,
-			domain: Lark.Domain.Feishu,
-		});
+		this.wsClient =
+			dependencies.wsClient ??
+			new Lark.WSClient({
+				appId: config.appId,
+				appSecret: config.appSecret,
+				domain: Lark.Domain.Feishu,
+			});
 	}
 
 	onMessage(handler: (event: FeishuEvent) => Promise<void>): void {
@@ -162,6 +189,52 @@ export class FeishuBot {
 			});
 		} catch (err) {
 			log.logWarning("Feishu updateCardMessage error", err instanceof Error ? err.message : String(err));
+		}
+	}
+
+	async sendMediaReply(parentMessageId: string, upload: BotUpload): Promise<void> {
+		if (!parentMessageId) throw new Error("Feishu media reply requires a parent message ID");
+		if (upload.data.length === 0) throw new Error("Feishu cannot upload an empty file");
+
+		const extension = extname(upload.fileName).toLowerCase();
+		let msgType: "image" | "file";
+		let content: string;
+
+		if (FEISHU_IMAGE_EXTENSIONS.has(extension)) {
+			if (upload.data.length > MAX_FEISHU_IMAGE_BYTES) {
+				throw new Error(`Feishu image exceeds the ${MAX_FEISHU_IMAGE_BYTES} byte limit`);
+			}
+			const response = await this.client.im.v1.image.create({
+				data: { image_type: "message", image: upload.data },
+			});
+			if (!response?.image_key) throw new Error("Feishu image upload returned no image_key");
+			msgType = "image";
+			content = JSON.stringify({ image_key: response.image_key });
+		} else {
+			if (upload.data.length > MAX_FEISHU_FILE_BYTES) {
+				throw new Error(`Feishu file exceeds the ${MAX_FEISHU_FILE_BYTES} byte limit`);
+			}
+			const requestedTitle = upload.title?.trim().replace(/\\/g, "/");
+			const fileName = basename(requestedTitle || upload.fileName);
+			if (!fileName) throw new Error("Feishu file upload requires a filename");
+			const response = await this.client.im.v1.file.create({
+				data: {
+					file_type: FEISHU_FILE_TYPES[extension] ?? "stream",
+					file_name: fileName,
+					file: upload.data,
+				},
+			});
+			if (!response?.file_key) throw new Error("Feishu file upload returned no file_key");
+			msgType = "file";
+			content = JSON.stringify({ file_key: response.file_key });
+		}
+
+		const response = await this.client.im.message.reply({
+			path: { message_id: parentMessageId },
+			data: { content, msg_type: msgType },
+		});
+		if (response.code !== undefined && response.code !== 0) {
+			throw new Error(`Feishu media reply failed with code ${response.code}: ${response.msg || "unknown error"}`);
 		}
 	}
 

@@ -9,6 +9,7 @@ import {
 import { dirname, join } from "path";
 import type { Executor } from "../sandbox.js";
 import { createCoachTools } from "../tools/index.js";
+import type { BotContext } from "../types.js";
 import { createAllowedCommands } from "./permissions.js";
 
 export function resolveCoachHostWorkspacePath(channelDir: string, channelId: string): string {
@@ -62,9 +63,14 @@ export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): 
 	return tools;
 }
 
-export function createCoachActiveTools(executor: Executor, channelDir: string, skills: Skill[]): AgentTool[] {
+export function createCoachActiveTools(
+	executor: Executor,
+	channelDir: string,
+	skills: Skill[],
+	uploadFile?: BotContext["uploadFile"],
+): AgentTool[] {
 	return [
-		...createCoachTools(executor, createCoachReadRoots(skills), createAllowedCommands(skills)),
+		...createCoachTools(executor, createCoachReadRoots(skills), createAllowedCommands(skills), uploadFile),
 		...createCoachSkillDataTools(channelDir, skills),
 	];
 }

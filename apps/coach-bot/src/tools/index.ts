@@ -1,6 +1,8 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import type { AllowedCommand } from "../runtime/permissions.js";
 import type { Executor } from "../sandbox.js";
+import type { BotContext } from "../types.js";
+import { createAttachTool } from "./attach.js";
 import { createBashTool } from "./bash.js";
 import { createReadTool } from "./read.js";
 
@@ -8,10 +10,12 @@ export function createCoachTools(
 	executor: Executor,
 	allowedReadRoots: readonly string[],
 	allowedCommands: readonly AllowedCommand[],
+	uploadFile?: BotContext["uploadFile"],
 ): AgentTool[] {
 	const tools: AgentTool[] = [];
 	if (allowedReadRoots.length > 0) {
 		tools.push(createReadTool(executor, allowedReadRoots));
+		if (uploadFile) tools.push(createAttachTool(executor, allowedReadRoots, uploadFile));
 	}
 	if (allowedCommands.length > 0) {
 		tools.push(createBashTool(executor, allowedCommands));

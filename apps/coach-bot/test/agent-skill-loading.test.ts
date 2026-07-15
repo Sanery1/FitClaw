@@ -182,8 +182,18 @@ describe("coach bot skill loading", () => {
 
 		const refreshedSkills = loadCoachSkills(channelDir, workspaceDir, workspaceDir);
 		const toolNames = createCoachActiveTools(executor, channelDir, refreshedSkills).map((tool) => tool.name);
+		const toolNamesWithUploads = createCoachActiveTools(executor, channelDir, refreshedSkills, async () => {}).map(
+			(tool) => tool.name,
+		);
 
 		expect(toolNames).toEqual(["read", "bash", "data_bodybuilding_read", "data_bodybuilding_write"]);
+		expect(toolNamesWithUploads).toEqual([
+			"read",
+			"attach",
+			"bash",
+			"data_bodybuilding_read",
+			"data_bodybuilding_write",
+		]);
 	});
 
 	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {

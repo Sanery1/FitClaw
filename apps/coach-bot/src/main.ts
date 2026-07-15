@@ -164,8 +164,8 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 			// Feishu text messages cannot be edited. No typing indicator.
 		},
 
-		uploadFile: async (_filePath: string, _title?: string) => {
-			// Feishu file upload not implemented in v1.
+		uploadFile: async (upload) => {
+			await bot.sendMediaReply(event.messageId, upload);
 		},
 
 		setWorking: async (working: boolean) => {

@@ -24,6 +24,12 @@ export interface BotUser {
 	displayName?: string;
 }
 
+export interface BotUpload {
+	data: Buffer;
+	fileName: string;
+	title?: string;
+}
+
 export interface BotContext {
 	message: BotMessage;
 	channels: BotChannel[];
@@ -32,7 +38,7 @@ export interface BotContext {
 	replaceMessage: (text: string) => Promise<void>;
 	respondInThread: (text: string) => Promise<void>;
 	setTyping: (isTyping: boolean) => Promise<void>;
-	uploadFile: (filePath: string, title?: string) => Promise<void>;
+	uploadFile: (upload: BotUpload) => Promise<void>;
 	setWorking: (working: boolean) => Promise<void>;
 	deleteMessage: () => Promise<void>;
 }

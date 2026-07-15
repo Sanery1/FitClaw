@@ -5344,7 +5344,7 @@ body only = 徒手
 
 ---
 
-#### 九、动作图片后续如何上传到飞书？
+#### 九、动作图片如何上传到飞书？
 
 当前动作库里已经有图片路径，例如：
 
@@ -5358,145 +5358,58 @@ body only = 徒手
 }
 ```
 
-`query_exercises.py --id ... --detailed` 也会把图片路径输出给 LLM。但 Bot 现在还不能把动作示范图发给用户，原因在 `packages/mom/src/main.ts`：
+截至 2026-07-15，这条链路已经在 `apps/coach-bot` 中打通：查询脚本生成 Skill 内的绝对 `imagePaths`，Agent 调用受限 `attach` 工具读取图片字节，Feishu 适配器上传后回复原消息。当前不再依赖 `packages/mom` 的旧 upload stub。
 
-```typescript
-uploadFile: async (_filePath: string, _title?: string) => {
-  // Feishu file upload not implemented in v1.
-},
-```
+实现分为三个边界：
 
-也就是说，当前链路缺的是“本地图片路径 -> 飞书 image_key -> 消息/卡片发送”这段。
+**第一步：查询脚本生成可用的绝对图片路径**
 
-推荐的改造方案分三步：
-
-**第一步：补齐 FeishuBot.uploadImage / uploadFile**
-
-在 `packages/mom/src/feishu.ts` 增加上传方法，职责是：
+`query_exercises.py` 从 `dist/exercises.json` 的相对 `images` 字段派生 `imagePaths`。每条路径必须仍位于 `free-exercise-db/exercises` 内且指向真实文件，路径逃逸和不存在的文件不会进入输出。
 
 ```text
-输入: 本地图片绝对路径
+images: Incline_Dumbbell_Press/0.jpg
   ↓
-校验文件存在、大小、扩展名、mime type
-  ↓
-调用飞书素材/图片上传 API
-  ↓
-返回 image_key
+imagePaths: /opt/fitclaw/feishu-workspace/skills/bodybuilding/
+            free-exercise-db/exercises/Incline_Dumbbell_Press/0.jpg
 ```
 
-接口形态可以设计成：
+**第二步：`attach` 复用 Skill 文件安全边界**
 
-```typescript
-async uploadImage(filePath: string): Promise<string> {
-  // 1. read file stream
-  // 2. call Feishu image upload API
-  // 3. return image_key
-}
-```
+Coach 每次运行时把当前飞书回复目标注入 `attach`，不再使用跨频道共享的全局上传回调。工具只接受已加载 Skill 目录内的绝对路径，并同时检查请求路径和最终 realpath；通过校验后由 Executor 读取有限大小的字节，不把任意宿主机路径交给飞书适配器。
 
-`BotContext.uploadFile(filePath, title)` 再调用 `bot.uploadImage(filePath)`，拿到 `image_key` 后发送图片消息或卡片。
+**第三步：Feishu 适配器上传并回复原消息**
 
-**第二步：把动作图片路径解析成绝对路径**
+`FeishuBot.sendMediaReply()` 根据原始文件扩展名选择飞书图片或文件 API。图片限制为 10 MiB，普通文件限制为 30 MiB；上传响应缺少 `image_key` / `file_key` 或回复 API 返回错误码时会显式失败。
 
-动作 JSON 里的 `images` 是相对路径，不能直接发给飞书。需要在 Bot 或 Skill 脚本侧统一解析：
+当前实际链路是：
 
 ```text
-free-exercise-db/
-  exercises/
-    Barbell_Bench_Press_-_Medium_Grip/
-      0.jpg
-      1.jpg
-
-image relative path:
-  Barbell_Bench_Press_-_Medium_Grip/0.jpg
-
-absolute path:
-  {skillDir}/free-exercise-db/exercises/Barbell_Bench_Press_-_Medium_Grip/0.jpg
+用户："上斜哑铃卧推怎么做，给我图"
+  ↓
+LLM 调 query_exercises.py --id Incline_Dumbbell_Press --format json
+  ↓
+工具结果返回 instructions + imagePaths
+  ↓
+LLM 调 attach(imagePaths[0])
+  ↓
+Skill realpath 校验 + Executor 读取字节
+  ↓
+Feishu image.create -> image_key -> message.reply(image)
+  ↓
+LLM 发送文字讲解
 ```
 
-建议让 `query_exercises.py --detailed --format json` 返回结构化字段：
+动作示范图片是发给用户的，不会作为 base64 再塞回 LLM 上下文。当前实现也不扫描最终文本猜测路径，而是要求模型显式调用 `attach`，因此上传行为可见、可审计，并受工具权限约束。
 
-```json
-{
-  "id": "Barbell_Bench_Press_-_Medium_Grip",
-  "name": "Barbell Bench Press - Medium Grip",
-  "imagePaths": [
-    "D:/Code/Project/FitClaw/.fitclaw/skills/bodybuilding/free-exercise-db/exercises/Barbell_Bench_Press_-_Medium_Grip/0.jpg"
-  ]
-}
-```
+需要注意的边界：
 
-这样 Agent 不需要自己拼路径，Bot 只负责上传。
-
-**第三步：发送策略不要把所有图片都塞进 LLM 上下文**
-
-动作示范图片是给用户看的，不一定要给 LLM 看。推荐链路是：
-
-```text
-LLM 调 query_exercises.py --id ... --detailed --format json
-  ↓
-工具结果返回动作说明 + imagePaths
-  ↓
-LLM 生成文字讲解
-  ↓
-Bot adapter 扫描最终回复或 tool result 中的 imagePaths
-  ↓
-uploadImage(imagePath) -> image_key
-  ↓
-发送飞书图片消息 / 交互卡片 image 元素
-```
-
-这样做的原因：
-
-- 避免把本地图片 base64 放进 LLM context，减少 token 和上下文溢出风险。
-- 图片发送失败不会影响动作查询本身，只影响展示增强。
-- 可以对同一张动作图片缓存 `image_key`，避免重复上传。
-
-建议增加一个简单缓存：
-
-```text
-image-upload-cache.json
-{
-  "absolute/path/to/0.jpg": {
-    "imageKey": "img_xxx",
-    "uploadedAt": "2026-05-10T..."
-  }
-}
-```
-
-飞书图片上传后的 key 如果长期有效，可以复用；如果有过期机制，则按错误码重新上传。
-
-最终演进链路可以设计成：
-
-```text
-用户："杠铃卧推怎么做，给我图"
-  ↓
-LLM 调 bash:
-  query_exercises.py --id Barbell_Bench_Press_-_Medium_Grip --detailed --format json
-  ↓
-stdout:
-  instructions + imagePaths
-  ↓
-LLM 回复动作步骤
-  ↓
-Mom Bot:
-  resolve imagePaths
-  uploadImage()
-  sendCardMessage({
-    text: 动作讲解,
-    images: image_key[]
-  })
-```
-
-需要注意权限和安全边界：
-
-| 风险 | 约束 |
-|------|------|
-| LLM 传任意本地路径要求上传 | 只允许上传 Skill 数据目录或工作目录白名单内的文件 |
-| 图片太大 | 上传前检查大小，必要时 resize/compress |
-| 重复上传 | 按文件 hash 或绝对路径缓存 image_key |
-| 飞书上传失败 | 降级为文字回复 + 图片路径不可用说明 |
-| 卡片过大 | 每次最多发 1-2 张示范图，更多图片用后续消息 |
+| 风险 | 当前约束 |
+|------|----------|
+| LLM 请求任意本地路径 | 请求路径和最终 realpath 都必须位于已加载 Skill 根目录 |
+| 图片或文件过大 | Executor 和 Feishu 适配器分别限制读取与上传大小 |
+| 上传 API 未返回媒体 key | 工具调用显式失败，不伪装成已发送 |
+| 重复上传 | 当前未缓存；只有真实使用数据证明有必要时再按文件 hash 缓存 |
+| 真实平台差异 | 单元测试已覆盖协议，仍需真实飞书应用 smoke test |
 
 ---
 
@@ -5532,7 +5445,7 @@ Mom Bot:
 | **查询结果无分页/limit** | `--muscle chest` 会输出所有胸部动作；无过滤条件会输出全库 | 脚本增加 `--limit/--offset/--summary/--export`，Skill 默认限制结果条数 |
 | **全量内存加载** | 每次查询都从磁盘读取 1MB JSON 并解析全部 873 条 | 毫秒级完成，用户无感知 |
 | **无缓存机制** | 重复查询（如连续问两次胸部动作）每次重新加载 | Python 脚本是短生命周期的（bash 调用后退出），无法缓存。但 LLM 自身会缓存对话上下文中的查询结果 |
-| **图片路径非绝对** | exercise JSON 中的 images 路径是相对的，Bot 场景下需要拼接完整路径才能发送 | 让脚本输出绝对 `imagePaths`，Bot 上传到飞书后发送 `image_key` |
+| **重复图片上传** | 每次 `attach` 都会重新调用飞书上传 API | 先通过真实使用数据确认开销，再考虑按文件 hash 缓存 `image_key` |
 | **dist/exercises.json 需手动维护** | 如果新增动作到 exercises/ 目录，dist 合并文件不会自动更新 | 当前数据是静态导入的，不需要增量更新 |
 
 ---
@@ -7052,10 +6965,10 @@ const channelStates = new Map<string, ChannelState>();
 
 | 瓶颈 | 当前实现 | 问题 | 解决方案 |
 |------|---------|------|---------|
-| 图片传输 | `read` 工具支持图片读取 + 自动 resize | 飞书图片需先 `downloadFile()` | 已支持，但 `uploadFile` 是空 stub |
+| 图片传输 | 入站使用 `downloadFile()`，出站使用受限 `attach` | 受飞书文件类型与大小限制 | 代码已支持，待真实应用 smoke test |
 | LLM 视觉能力 | `transformMessages` 检测非视觉模型并降级 | 需要视觉模型（GPT-4V、Claude Vision） | 配置视觉模型即可 |
 | 图片识别精度 | 无 | 需要微调模型或 RAG | 集成动作图片向量检索 |
-| 飞书图片发送 | `uploadFile` 是空 stub | Bot 无法发送动作示范图片 | 实现 `uploadFile` |
+| 飞书图片发送 | `attach` + `sendMediaReply()` | 当前每次都重新上传 | 根据真实使用数据决定是否增加 key 缓存 |
 | 响应延迟 | N/A | 图片识别增加 2-5s 延迟 | 异步处理 + 缓存 |
 
 **架构层面的瓶颈：**
@@ -7064,10 +6977,10 @@ const channelStates = new Map<string, ChannelState>();
 2. **无缓存层**：每次查询都读磁盘，无 Redis/内存缓存
 3. **无向量检索**：纯关键词匹配，无法语义搜索（如"练胸的动作"→需要理解 primaryMuscles 字段）
 4. **LLM 依赖**：动作推荐完全依赖 LLM 推理，无法利用推荐算法
-5. **图片管道缺失**：`uploadFile` 空 stub，Bot 无法传递动作图片给用户
+5. **图片上传无缓存**：媒体链路已打通，但重复发送同一图片会再次上传
 
 **推荐的架构演进路径：**
-1. 短期：引入 SQLite 索引 + 实现 `uploadFile`
+1. 短期：完成真实飞书动作图片 smoke test，并根据查询性能决定是否引入 SQLite 索引
 2. 中期：向量数据库（如 Qdrant）存储动作 embedding，支持语义搜索
 3. 长期：对象存储（S3/OSS）分离图片 + 分布式部署
 
