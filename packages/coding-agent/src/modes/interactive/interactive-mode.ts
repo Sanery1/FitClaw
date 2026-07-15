@@ -43,7 +43,6 @@ import type { AgentSession } from "../../core/agent-session.js";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
 import type {
 	AutocompleteProviderFactory,
-	ExtensionCommandContext,
 	ExtensionContext,
 	ExtensionRunner,
 	ExtensionUIContext,
@@ -56,7 +55,6 @@ import { findExactModelReferenceMatch, resolveModelScope } from "../../core/mode
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
-import { SessionManager } from "../../core/session-manager.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
@@ -82,12 +80,10 @@ import { FooterComponent } from "./components/footer.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
-import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
-import { TreeSelectorComponent } from "./components/tree-selector.js";
-import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
+import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
@@ -161,6 +157,7 @@ export class InteractiveMode {
 	private changelogMarkdown: string | undefined = undefined;
 	private startupNoticesShown = false;
 	private readonly authController: InteractiveAuthController;
+	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly sessionViewController: InteractiveSessionViewController;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
@@ -287,6 +284,28 @@ export class InteractiveMode {
 			invalidateFooter: () => this.footer.invalidate(),
 			updateEditorBorderColor: () => this.updateEditorBorderColor(),
 			checkModelEasterEgg: (model) => this.checkDaxnutsEasterEgg(model),
+		});
+		this.sessionNavigationController = new InteractiveSessionNavigationController({
+			getSession: () => this.session,
+			runtimeHost: this.runtimeHost,
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+			statusContainer: this.statusContainer,
+			defaultEditor: this.defaultEditor,
+			getEditor: () => this.editor,
+			keybindings: this.keybindings,
+			showSelector: (create) => this.showSelector(create),
+			showExtensionSelector: (title, options) => this.showExtensionSelector(title, options),
+			showExtensionEditor: (title) => this.showExtensionEditor(title),
+			promptForMissingSessionCwd: (error) => this.promptForMissingSessionCwd(error),
+			stopWorkingLoader: () => this.stopWorkingLoader(),
+			renderCurrentSessionState: () => this.renderCurrentSessionState(),
+			renderInitialMessages: () => this.renderInitialMessages(),
+			showStatus: (message) => this.showStatus(message),
+			showError: (message) => this.showError(message),
+			handleFatalRuntimeError: (prefix, error) => this.handleFatalRuntimeError(prefix, error),
+			flushCompactionQueue: (options) => this.flushCompactionQueue(options),
+			shutdown: () => this.shutdown(),
 		});
 		this.sessionViewController = new InteractiveSessionViewController({
 			getSession: () => this.session,
@@ -967,7 +986,7 @@ export class InteractiveMode {
 					return { cancelled: false };
 				},
 				switchSession: async (sessionPath, options) => {
-					return this.handleResumeSession(sessionPath, options);
+					return this.sessionNavigationController.handleResumeSession(sessionPath, options);
 				},
 				reload: async () => {
 					await this.handleReloadCommand();
@@ -1798,9 +1817,9 @@ export class InteractiveMode {
 					const now = Date.now();
 					if (now - this.lastEscapeTime < 500) {
 						if (action === "tree") {
-							this.showTreeSelector();
+							this.sessionNavigationController.showTreeSelector();
 						} else {
-							this.showUserMessageSelector();
+							this.sessionNavigationController.showUserMessageSelector();
 						}
 						this.lastEscapeTime = 0;
 					} else {
@@ -1827,9 +1846,9 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
-		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
-		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.session.tree", () => this.sessionNavigationController.showTreeSelector());
+		this.defaultEditor.onAction("app.session.fork", () => this.sessionNavigationController.showUserMessageSelector());
+		this.defaultEditor.onAction("app.session.resume", () => this.sessionNavigationController.showSessionSelector());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -1930,17 +1949,17 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/fork") {
-				this.showUserMessageSelector();
+				this.sessionNavigationController.showUserMessageSelector();
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/clone") {
 				this.editor.setText("");
-				await this.handleCloneCommand();
+				await this.sessionNavigationController.handleCloneCommand();
 				return;
 			}
 			if (text === "/tree") {
-				this.showTreeSelector();
+				this.sessionNavigationController.showTreeSelector();
 				this.editor.setText("");
 				return;
 			}
@@ -1986,7 +2005,7 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/resume") {
-				this.showSessionSelector();
+				this.sessionNavigationController.showSessionSelector();
 				this.editor.setText("");
 				return;
 			}
@@ -2929,274 +2948,6 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector };
 		});
-	}
-
-	private showUserMessageSelector(): void {
-		const userMessages = this.session.getUserMessagesForForking();
-
-		if (userMessages.length === 0) {
-			this.showStatus("No messages to fork from");
-			return;
-		}
-
-		const initialSelectedId = userMessages[userMessages.length - 1]?.entryId;
-
-		this.showSelector((done) => {
-			const selector = new UserMessageSelectorComponent(
-				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
-				async (entryId) => {
-					try {
-						const result = await this.runtimeHost.fork(entryId);
-						if (result.cancelled) {
-							done();
-							this.ui.requestRender();
-							return;
-						}
-
-						this.renderCurrentSessionState();
-						this.editor.setText(result.selectedText ?? "");
-						done();
-						this.showStatus("Forked to new session");
-					} catch (error: unknown) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
-					}
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-				initialSelectedId,
-			);
-			return { component: selector, focus: selector.getMessageList() };
-		});
-	}
-
-	private async handleCloneCommand(): Promise<void> {
-		const leafId = this.sessionManager.getLeafId();
-		if (!leafId) {
-			this.showStatus("Nothing to clone yet");
-			return;
-		}
-
-		try {
-			const result = await this.runtimeHost.fork(leafId, { position: "at" });
-			if (result.cancelled) {
-				this.ui.requestRender();
-				return;
-			}
-
-			this.renderCurrentSessionState();
-			this.editor.setText("");
-			this.showStatus("Cloned to new session");
-		} catch (error: unknown) {
-			this.showError(error instanceof Error ? error.message : String(error));
-		}
-	}
-
-	private showTreeSelector(initialSelectedId?: string): void {
-		const tree = this.sessionManager.getTree();
-		const realLeafId = this.sessionManager.getLeafId();
-		const initialFilterMode = this.settingsManager.getTreeFilterMode();
-
-		if (tree.length === 0) {
-			this.showStatus("No entries in session");
-			return;
-		}
-
-		this.showSelector((done) => {
-			const selector = new TreeSelectorComponent(
-				tree,
-				realLeafId,
-				this.ui.terminal.rows,
-				async (entryId) => {
-					// Selecting the current leaf is a no-op (already there)
-					if (entryId === realLeafId) {
-						done();
-						this.showStatus("Already at this point");
-						return;
-					}
-
-					// Ask about summarization
-					done(); // Close selector first
-
-					// Loop until user makes a complete choice or cancels to tree
-					let wantsSummary = false;
-					let customInstructions: string | undefined;
-
-					// Check if we should skip the prompt (user preference to always default to no summary)
-					if (!this.settingsManager.getBranchSummarySkipPrompt()) {
-						while (true) {
-							const summaryChoice = await this.showExtensionSelector("Summarize branch?", [
-								"No summary",
-								"Summarize",
-								"Summarize with custom prompt",
-							]);
-
-							if (summaryChoice === undefined) {
-								// User pressed escape - re-show tree selector with same selection
-								this.showTreeSelector(entryId);
-								return;
-							}
-
-							wantsSummary = summaryChoice !== "No summary";
-
-							if (summaryChoice === "Summarize with custom prompt") {
-								customInstructions = await this.showExtensionEditor("Custom summarization instructions");
-								if (customInstructions === undefined) {
-									// User cancelled - loop back to summary selector
-									continue;
-								}
-							}
-
-							// User made a complete choice
-							break;
-						}
-					}
-
-					// Set up escape handler and loader if summarizing
-					let summaryLoader: Loader | undefined;
-					const originalOnEscape = this.defaultEditor.onEscape;
-
-					if (wantsSummary) {
-						this.defaultEditor.onEscape = () => {
-							this.session.abortBranchSummary();
-						};
-						this.chatContainer.addChild(new Spacer(1));
-						summaryLoader = new Loader(
-							this.ui,
-							(spinner) => theme.fg("accent", spinner),
-							(text) => theme.fg("muted", text),
-							`Summarizing branch... (${keyText("app.interrupt")} to cancel)`,
-						);
-						this.statusContainer.addChild(summaryLoader);
-						this.ui.requestRender();
-					}
-
-					try {
-						const result = await this.session.navigateTree(entryId, {
-							summarize: wantsSummary,
-							customInstructions,
-						});
-
-						if (result.aborted) {
-							// Summarization aborted - re-show tree selector with same selection
-							this.showStatus("Branch summarization cancelled");
-							this.showTreeSelector(entryId);
-							return;
-						}
-						if (result.cancelled) {
-							this.showStatus("Navigation cancelled");
-							return;
-						}
-
-						// Update UI
-						this.chatContainer.clear();
-						this.renderInitialMessages();
-						if (result.editorText && !this.editor.getText().trim()) {
-							this.editor.setText(result.editorText);
-						}
-						this.showStatus("Navigated to selected point");
-						void this.flushCompactionQueue({ willRetry: false });
-					} catch (error) {
-						this.showError(error instanceof Error ? error.message : String(error));
-					} finally {
-						if (summaryLoader) {
-							summaryLoader.stop();
-							this.statusContainer.clear();
-						}
-						this.defaultEditor.onEscape = originalOnEscape;
-					}
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-				(entryId, label) => {
-					this.sessionManager.appendLabelChange(entryId, label);
-					this.ui.requestRender();
-				},
-				initialSelectedId,
-				initialFilterMode,
-			);
-			return { component: selector, focus: selector };
-		});
-	}
-
-	private showSessionSelector(): void {
-		this.showSelector((done) => {
-			const selector = new SessionSelectorComponent(
-				(onProgress) =>
-					SessionManager.list(this.sessionManager.getCwd(), this.sessionManager.getSessionDir(), onProgress),
-				SessionManager.listAll,
-				async (sessionPath) => {
-					done();
-					await this.handleResumeSession(sessionPath);
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-				() => {
-					void this.shutdown();
-				},
-				() => this.ui.requestRender(),
-				{
-					renameSession: async (sessionFilePath: string, nextName: string | undefined) => {
-						const next = (nextName ?? "").trim();
-						if (!next) return;
-						const mgr = SessionManager.open(sessionFilePath);
-						mgr.appendSessionInfo(next);
-					},
-					showRenameHint: true,
-					keybindings: this.keybindings,
-				},
-
-				this.sessionManager.getSessionFile(),
-			);
-			return { component: selector, focus: selector };
-		});
-	}
-
-	private async handleResumeSession(
-		sessionPath: string,
-		options?: Parameters<ExtensionCommandContext["switchSession"]>[1],
-	): Promise<{ cancelled: boolean }> {
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-		}
-		this.statusContainer.clear();
-		try {
-			const result = await this.runtimeHost.switchSession(sessionPath, {
-				withSession: options?.withSession,
-			});
-			if (result.cancelled) {
-				return result;
-			}
-			this.renderCurrentSessionState();
-			this.showStatus("Resumed session");
-			return result;
-		} catch (error: unknown) {
-			if (error instanceof MissingSessionCwdError) {
-				const selectedCwd = await this.promptForMissingSessionCwd(error);
-				if (!selectedCwd) {
-					this.showStatus("Resume cancelled");
-					return { cancelled: true };
-				}
-				const result = await this.runtimeHost.switchSession(sessionPath, {
-					cwdOverride: selectedCwd,
-					withSession: options?.withSession,
-				});
-				if (result.cancelled) {
-					return result;
-				}
-				this.renderCurrentSessionState();
-				this.showStatus("Resumed session in current cwd");
-				return result;
-			}
-			return this.handleFatalRuntimeError("Failed to resume session", error);
-		}
 	}
 
 	// =========================================================================
