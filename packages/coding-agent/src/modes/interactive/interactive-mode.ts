@@ -10,7 +10,6 @@ import * as path from "node:path";
 import type { ImageContent } from "@fitclaw/ai";
 import type { EditorComponent, KeyId, MarkdownTheme } from "@fitclaw/tui";
 import { Container, matchesKey, ProcessTerminal, Spacer, setKeybindings, Text, TUI, visibleWidth } from "@fitclaw/tui";
-import { spawnSync } from "child_process";
 import { APP_NAME, APP_TITLE, getDebugLogPath, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
@@ -20,7 +19,6 @@ import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.j
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
-import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { ArminComponent } from "./components/armin.js";
 import { CustomEditor } from "./components/custom-editor.js";
@@ -45,6 +43,7 @@ import { InteractiveSessionTransferController } from "./interactive-session-tran
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
 import { InteractiveSettingsController } from "./interactive-settings-controller.js";
 import { InteractiveStartupController } from "./interactive-startup-controller.js";
+import { InteractiveTerminalController } from "./interactive-terminal-controller.js";
 import { InteractiveWorkingController } from "./interactive-working-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
@@ -98,7 +97,6 @@ export class InteractiveMode {
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
-	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
 	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
@@ -115,6 +113,7 @@ export class InteractiveMode {
 	private readonly sessionTransferController: InteractiveSessionTransferController;
 	private readonly sessionViewController: InteractiveSessionViewController;
 	private readonly startupController: InteractiveStartupController;
+	private readonly terminalController: InteractiveTerminalController;
 	private readonly workingController: InteractiveWorkingController;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
@@ -126,13 +125,8 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
-	private signalCleanupHandlers: Array<() => void> = [];
-
 	// Track if editor is in bash mode (text starts with !)
 	private isBashMode = false;
-
-	// Shutdown state
-	private shutdownRequested = false;
 
 	// Convenience accessors
 	private get editor(): EditorComponent {
@@ -293,6 +287,17 @@ export class InteractiveMode {
 			showError: (message) => this.showError(message),
 			showStatus: (message) => this.showStatus(message),
 		});
+		this.terminalController = new InteractiveTerminalController({
+			runtimeHost: this.runtimeHost,
+			ui: this.ui,
+			getEditor: () => this.editor,
+			isStreaming: () => this.session.isStreaming,
+			clearEditor: () => this.clearEditor(),
+			stopInteractiveMode: () => this.stop(),
+			showStatus: (message) => this.showStatus(message),
+			showWarning: (message) => this.showWarning(message),
+			exitProcess: (code) => process.exit(code),
+		});
 		this.messageQueueController = new InteractiveMessageQueueController({
 			getSession: () => this.session,
 			getEditor: () => this.editor,
@@ -345,7 +350,7 @@ export class InteractiveMode {
 			showError: (message) => this.showError(message),
 			handleFatalRuntimeError: (prefix, error) => this.handleFatalRuntimeError(prefix, error),
 			flushCompactionQueue: (options) => this.messageQueueController.flushCompactionQueue(options),
-			shutdown: () => this.shutdown(),
+			shutdown: () => this.terminalController.shutdown(),
 		});
 		this.sessionViewController = new InteractiveSessionViewController({
 			getSession: () => this.session,
@@ -362,7 +367,7 @@ export class InteractiveMode {
 			stopAgentActivity: () => this.workingController.stopAgentActivity(),
 			updatePendingMessagesDisplay: () => this.messageQueueController.updatePendingMessagesDisplay(),
 			updateTerminalTitle: () => this.updateTerminalTitle(),
-			checkShutdownRequested: () => this.checkShutdownRequested(),
+			checkShutdownRequested: () => this.terminalController.checkShutdownRequested(),
 			showError: (message) => this.showError(message),
 			showStatus: (message) => this.showStatus(message),
 			flushCompactionQueue: (options) => this.messageQueueController.flushCompactionQueue(options),
@@ -376,7 +381,7 @@ export class InteractiveMode {
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
 
-		this.registerSignalHandlers();
+		this.terminalController.registerSignalHandlers();
 
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.startupController.prepareChangelog();
@@ -701,10 +706,7 @@ export class InteractiveMode {
 				},
 			},
 			shutdownHandler: () => {
-				this.shutdownRequested = true;
-				if (!this.session.isStreaming) {
-					void this.shutdown();
-				}
+				this.terminalController.requestShutdown();
 			},
 			onError: (error) => {
 				this.showExtensionError(error.extensionPath, error.error, error.stack);
@@ -767,7 +769,7 @@ export class InteractiveMode {
 			abort: () => this.session.abort(),
 			hasPendingMessages: () => this.session.pendingMessageCount > 0,
 			shutdown: () => {
-				this.shutdownRequested = true;
+				this.terminalController.deferShutdown();
 			},
 			getContextUsage: () => this.session.getContextUsage(),
 			compact: (options) => {
@@ -942,9 +944,9 @@ export class InteractiveMode {
 		};
 
 		// Register app action handlers
-		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
-		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
-		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
+		this.defaultEditor.onAction("app.clear", () => this.terminalController.handleInterruptKey());
+		this.defaultEditor.onCtrlD = () => this.terminalController.handleExitKey();
+		this.defaultEditor.onAction("app.suspend", () => this.terminalController.suspend());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.modelController.cycle("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.modelController.cycle("backward"));
@@ -954,7 +956,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.model.select", () => this.modelController.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
-		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
+		this.defaultEditor.onAction("app.editor.external", () => this.terminalController.openExternalEditor());
 		this.defaultEditor.onAction("app.message.followUp", () => this.messageQueueController.handleFollowUp());
 		this.defaultEditor.onAction("app.message.dequeue", () => this.messageQueueController.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
@@ -1123,7 +1125,7 @@ export class InteractiveMode {
 			}
 			if (text === "/quit") {
 				this.editor.setText("");
-				await this.shutdown();
+				await this.terminalController.shutdown();
 				return;
 			}
 
@@ -1229,116 +1231,6 @@ export class InteractiveMode {
 		this.sessionViewController.rebuildChatFromMessages();
 	}
 
-	// =========================================================================
-	// Key handlers
-	// =========================================================================
-
-	private handleCtrlC(): void {
-		const now = Date.now();
-		if (now - this.lastSigintTime < 500) {
-			void this.shutdown();
-		} else {
-			this.clearEditor();
-			this.lastSigintTime = now;
-		}
-	}
-
-	private handleCtrlD(): void {
-		// Only called when editor is empty (enforced by CustomEditor)
-		void this.shutdown();
-	}
-
-	/**
-	 * Gracefully shutdown the agent.
-	 * Stops the TUI before emitting shutdown events so extension UI cleanup cannot
-	 * repaint the final frame while the process is exiting.
-	 */
-	private isShuttingDown = false;
-
-	private async shutdown(): Promise<void> {
-		if (this.isShuttingDown) return;
-		this.isShuttingDown = true;
-		this.unregisterSignalHandlers();
-
-		// Drain any in-flight Kitty key release events before stopping.
-		// This prevents escape sequences from leaking to the parent shell over slow SSH.
-		await this.ui.terminal.drainInput(1000);
-
-		this.stop();
-		await this.runtimeHost.dispose();
-		process.exit(0);
-	}
-
-	/**
-	 * Check if shutdown was requested and perform shutdown if so.
-	 */
-	private async checkShutdownRequested(): Promise<void> {
-		if (!this.shutdownRequested) return;
-		await this.shutdown();
-	}
-
-	private registerSignalHandlers(): void {
-		this.unregisterSignalHandlers();
-
-		const signals: NodeJS.Signals[] = ["SIGTERM"];
-		if (process.platform !== "win32") {
-			signals.push("SIGHUP");
-		}
-
-		for (const signal of signals) {
-			const handler = () => {
-				killTrackedDetachedChildren();
-				void this.shutdown();
-			};
-			process.on(signal, handler);
-			this.signalCleanupHandlers.push(() => process.off(signal, handler));
-		}
-	}
-
-	private unregisterSignalHandlers(): void {
-		for (const cleanup of this.signalCleanupHandlers) {
-			cleanup();
-		}
-		this.signalCleanupHandlers = [];
-	}
-
-	private handleCtrlZ(): void {
-		if (process.platform === "win32") {
-			this.showStatus("Suspend to background is not supported on Windows");
-			return;
-		}
-
-		// Keep the event loop alive while suspended. Without this, stopping the TUI
-		// can leave Node with no ref'ed handles, causing the process to exit on fg
-		// before the SIGCONT handler gets a chance to restore the terminal.
-		const suspendKeepAlive = setInterval(() => {}, 2 ** 30);
-
-		// Ignore SIGINT while suspended so Ctrl+C in the terminal does not
-		// kill the backgrounded process. The handler is removed on resume.
-		const ignoreSigint = () => {};
-		process.on("SIGINT", ignoreSigint);
-
-		// Set up handler to restore TUI when resumed
-		process.once("SIGCONT", () => {
-			clearInterval(suspendKeepAlive);
-			process.removeListener("SIGINT", ignoreSigint);
-			this.ui.start();
-			this.ui.requestRender(true);
-		});
-
-		try {
-			// Stop the TUI (restore terminal to normal mode)
-			this.ui.stop();
-
-			// Send SIGTSTP to process group (pid=0 means all processes in group)
-			process.kill(0, "SIGTSTP");
-		} catch (error) {
-			clearInterval(suspendKeepAlive);
-			process.removeListener("SIGINT", ignoreSigint);
-			throw error;
-		}
-	}
-
 	private updateEditorBorderColor(): void {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
@@ -1377,54 +1269,6 @@ export class InteractiveMode {
 
 	private toggleThinkingBlockVisibility(): void {
 		this.settingsController.toggleThinkingVisibility();
-	}
-
-	private openExternalEditor(): void {
-		// Determine editor (respect $VISUAL, then $EDITOR)
-		const editorCmd = process.env.VISUAL || process.env.EDITOR;
-		if (!editorCmd) {
-			this.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");
-			return;
-		}
-
-		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `fitclaw-editor-${Date.now()}.md`);
-
-		try {
-			// Write current content to temp file
-			fs.writeFileSync(tmpFile, currentText, "utf-8");
-
-			// Stop TUI to release terminal
-			this.ui.stop();
-
-			// Split by space to support editor arguments (e.g., "code --wait")
-			const [editor, ...editorArgs] = editorCmd.split(" ");
-
-			// Spawn editor synchronously with inherited stdio for interactive editing
-			const result = spawnSync(editor, [...editorArgs, tmpFile], {
-				stdio: "inherit",
-				shell: process.platform === "win32",
-			});
-
-			// On successful exit (status 0), replace editor content
-			if (result.status === 0) {
-				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
-				this.editor.setText(newContent);
-			}
-			// On non-zero exit, keep original text (no action needed)
-		} finally {
-			// Clean up temp file
-			try {
-				fs.unlinkSync(tmpFile);
-			} catch {
-				// Ignore cleanup errors
-			}
-
-			// Restart TUI
-			this.ui.start();
-			// Force full re-render since external editor uses alternate screen
-			this.ui.requestRender(true);
-		}
 	}
 
 	// =========================================================================
@@ -1584,7 +1428,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
-		this.unregisterSignalHandlers();
+		this.terminalController.dispose();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}
