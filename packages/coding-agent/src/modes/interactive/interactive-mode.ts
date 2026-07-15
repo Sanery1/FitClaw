@@ -24,6 +24,7 @@ import { keyDisplay, keyHint, keyText, rawKeyHint } from "./components/keybindin
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
 import { InteractiveAutocompleteController } from "./interactive-autocomplete-controller.js";
 import { InteractiveBashController } from "./interactive-bash-controller.js";
+import { InteractiveCommandController } from "./interactive-command-controller.js";
 import { InteractiveExtensionChromeController } from "./interactive-extension-chrome-controller.js";
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
 import { InteractiveExtensionRuntimeController } from "./interactive-extension-runtime-controller.js";
@@ -82,12 +83,11 @@ export class InteractiveMode {
 	private keybindings: KeybindingsManager;
 	private version: string;
 	private isInitialized = false;
-	private onInputCallback?: (text: string) => void;
-
 	private lastEscapeTime = 0;
 	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
 	private readonly bashController: InteractiveBashController;
+	private readonly commandController: InteractiveCommandController;
 	private readonly extensionChromeController: InteractiveExtensionChromeController;
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
 	private readonly extensionRuntimeController: InteractiveExtensionRuntimeController;
@@ -386,6 +386,32 @@ export class InteractiveMode {
 			getToolOutputExpanded: () => this.toolOutputExpanded,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
+		this.commandController = new InteractiveCommandController({
+			getSession: () => this.session,
+			runtimeHost: this.runtimeHost,
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+			defaultEditor: this.defaultEditor,
+			getEditor: () => this.editor,
+			authController: this.authController,
+			bashController: this.bashController,
+			feedbackController: this.feedbackController,
+			infoController: this.infoController,
+			messageQueueController: this.messageQueueController,
+			modelController: this.modelController,
+			reloadController: this.reloadController,
+			sessionNavigationController: this.sessionNavigationController,
+			sessionTransferController: this.sessionTransferController,
+			settingsController: this.settingsController,
+			terminalController: this.terminalController,
+			workingController: this.workingController,
+			renderCurrentSessionState: () => this.renderCurrentSessionState(),
+			resetBashMode: () => {
+				this.isBashMode = false;
+				this.updateEditorBorderColor();
+			},
+			handleFatalRuntimeError: (prefix, error) => this.handleFatalRuntimeError(prefix, error),
+		});
 	}
 
 	async init(): Promise<void> {
@@ -478,7 +504,7 @@ export class InteractiveMode {
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
-		this.setupEditorSubmitHandler();
+		this.commandController.setup();
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
@@ -755,7 +781,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.editor.external", () => this.terminalController.openExternalEditor());
 		this.defaultEditor.onAction("app.message.followUp", () => this.messageQueueController.handleFollowUp());
 		this.defaultEditor.onAction("app.message.dequeue", () => this.messageQueueController.handleDequeue());
-		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
+		this.defaultEditor.onAction("app.session.new", () => this.commandController.handleNewSession());
 		this.defaultEditor.onAction("app.session.tree", () => this.sessionNavigationController.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.sessionNavigationController.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.sessionNavigationController.showSessionSelector());
@@ -796,187 +822,6 @@ export class InteractiveMode {
 		}
 	}
 
-	private setupEditorSubmitHandler(): void {
-		this.defaultEditor.onSubmit = async (text: string) => {
-			text = text.trim();
-			if (!text) return;
-
-			// Handle commands
-			if (text === "/settings") {
-				this.settingsController.show();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/scoped-models") {
-				this.editor.setText("");
-				await this.modelController.showScopedModelsSelector();
-				return;
-			}
-			if (text === "/model" || text.startsWith("/model ")) {
-				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.modelController.handleCommand(searchTerm);
-				return;
-			}
-			if (text === "/export" || text.startsWith("/export ")) {
-				await this.sessionTransferController.handleExportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/import" || text.startsWith("/import ")) {
-				await this.sessionTransferController.handleImportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/share") {
-				await this.sessionTransferController.handleShareCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/copy") {
-				await this.sessionTransferController.handleCopyCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/name" || text.startsWith("/name ")) {
-				this.infoController.handleNameCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/session") {
-				this.infoController.showSessionInfo();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/changelog") {
-				this.infoController.showChangelog();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/hotkeys") {
-				this.infoController.showHotkeys();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/fork") {
-				this.sessionNavigationController.showUserMessageSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/clone") {
-				this.editor.setText("");
-				await this.sessionNavigationController.handleCloneCommand();
-				return;
-			}
-			if (text === "/tree") {
-				this.sessionNavigationController.showTreeSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/login") {
-				this.authController.show("login");
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/logout") {
-				this.authController.show("logout");
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/new") {
-				this.editor.setText("");
-				await this.handleClearCommand();
-				return;
-			}
-			if (text === "/compact" || text.startsWith("/compact ")) {
-				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
-				this.editor.setText("");
-				await this.handleCompactCommand(customInstructions);
-				return;
-			}
-			if (text === "/reload") {
-				this.editor.setText("");
-				await this.reloadController.reload();
-				return;
-			}
-			if (text === "/debug") {
-				this.feedbackController.writeDebugLog();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/arminsayshi") {
-				this.feedbackController.showArmin();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/dementedelves") {
-				this.feedbackController.showDementedDelves();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/resume") {
-				this.sessionNavigationController.showSessionSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/quit") {
-				this.editor.setText("");
-				await this.terminalController.shutdown();
-				return;
-			}
-
-			// Handle bash command (! for normal, !! for excluded from context)
-			if (text.startsWith("!")) {
-				const isExcluded = text.startsWith("!!");
-				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
-				if (command) {
-					if (this.session.isBashRunning) {
-						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
-						this.editor.setText(text);
-						return;
-					}
-					this.editor.addToHistory?.(text);
-					await this.bashController.handle(command, isExcluded);
-					this.isBashMode = false;
-					this.updateEditorBorderColor();
-					return;
-				}
-			}
-
-			// Queue input during compaction (extension commands execute immediately)
-			if (this.session.isCompacting) {
-				if (this.messageQueueController.isExtensionCommand(text)) {
-					this.editor.addToHistory?.(text);
-					this.editor.setText("");
-					await this.session.prompt(text);
-				} else {
-					this.messageQueueController.queueCompactionMessage(text, "steer");
-				}
-				return;
-			}
-
-			// If streaming, use prompt() with steer behavior
-			// This handles extension commands (execute immediately), prompt template expansion, and queueing
-			if (this.session.isStreaming) {
-				this.editor.addToHistory?.(text);
-				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
-				this.messageQueueController.updatePendingMessagesDisplay();
-				this.ui.requestRender();
-				return;
-			}
-
-			// Normal message submission
-			// First, move any pending bash components to chat
-			this.messageQueueController.flushPendingBashComponents();
-
-			if (this.onInputCallback) {
-				this.onInputCallback(text);
-			}
-			this.editor.addToHistory?.(text);
-		};
-	}
-
 	private subscribeToAgent(): void {
 		this.unsubscribe = this.session.subscribe(async (event) => {
 			await this.sessionViewController.handle(event);
@@ -992,12 +837,7 @@ export class InteractiveMode {
 	}
 
 	async getUserInput(): Promise<string> {
-		return new Promise((resolve) => {
-			this.onInputCallback = (text: string) => {
-				this.onInputCallback = undefined;
-				resolve(text);
-			};
-		});
+		return this.commandController.getUserInput();
 	}
 
 	private rebuildChatFromMessages(): void {
@@ -1068,44 +908,6 @@ export class InteractiveMode {
 
 	showPackageUpdateNotification(packages: string[]): void {
 		this.feedbackController.showPackageUpdates(packages);
-	}
-
-	// =========================================================================
-	// Command handlers
-	// =========================================================================
-
-	private async handleClearCommand(): Promise<void> {
-		this.workingController.stop();
-		try {
-			const result = await this.runtimeHost.newSession();
-			if (result.cancelled) {
-				return;
-			}
-			this.renderCurrentSessionState();
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
-			this.ui.requestRender();
-		} catch (error: unknown) {
-			await this.handleFatalRuntimeError("Failed to create session", error);
-		}
-	}
-
-	private async handleCompactCommand(customInstructions?: string): Promise<void> {
-		const entries = this.sessionManager.getEntries();
-		const messageCount = entries.filter((e) => e.type === "message").length;
-
-		if (messageCount < 2) {
-			this.showWarning("Nothing to compact (no messages yet)");
-			return;
-		}
-
-		this.workingController.stop();
-
-		try {
-			await this.session.compact(customInstructions);
-		} catch {
-			// Ignore, will be emitted as an event
-		}
 	}
 
 	stop(): void {
