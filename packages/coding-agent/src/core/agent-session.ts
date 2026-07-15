@@ -58,6 +58,7 @@ import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import { SessionBashController, type SessionBashExecutionOptions } from "./session-bash-controller.js";
+import { SessionEventController } from "./session-event-controller.js";
 import type { SessionManager } from "./session-manager.js";
 import { SessionMessageQueueController } from "./session-message-queue-controller.js";
 import { type ModelCycleResult, SessionModelController, type SessionScopedModel } from "./session-model-controller.js";
@@ -177,10 +178,8 @@ export class AgentSession {
 
 	private readonly _modelController: SessionModelController;
 
-	// Event subscription state
-	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
-	private _agentEventQueue: Promise<void> = Promise.resolve();
+	private readonly _eventController: SessionEventController;
 
 	private readonly _messageQueueController: SessionMessageQueueController;
 
@@ -312,10 +311,20 @@ export class AgentSession {
 				this._emit({ type: "queue_update", steering, followUp });
 			},
 		});
+		this._eventController = new SessionEventController({
+			agent: this.agent,
+			sessionManager: this.sessionManager,
+			retryController: this._retryController,
+			compactionController: this._compactionController,
+			messageQueueController: this._messageQueueController,
+			emitExtensionEvent: (event) => this._emitExtensionEvent(event),
+			emit: (event) => this._emit(event),
+			checkCompaction: (message) => this._checkCompaction(message),
+		});
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
-		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
+		this._eventController.connect();
 		this._installAgentToolHooks();
 
 		this._buildRuntime({
@@ -370,7 +379,7 @@ export class AgentSession {
 				return undefined;
 			}
 
-			await this._agentEventQueue;
+			await this._eventController.waitForPendingEvents();
 
 			try {
 				return await runner.emitToolCall({
@@ -423,77 +432,6 @@ export class AgentSession {
 	private _emit(event: AgentSessionEvent): void {
 		for (const l of this._eventListeners) {
 			l(event);
-		}
-	}
-
-	// Track last assistant message for auto-compaction check
-	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
-
-	/** Internal handler for agent events - shared by subscribe and reconnect */
-	private _handleAgentEvent = (event: AgentEvent): void => {
-		// Register retry work synchronously so prompt() cannot miss a retry while
-		// slower extension events are still draining through the event queue.
-		this._retryController.prepareForAgentEvent(event);
-
-		this._agentEventQueue = this._agentEventQueue.then(
-			() => this._processAgentEvent(event),
-			() => this._processAgentEvent(event),
-		);
-
-		// Keep queue alive if an event handler fails
-		this._agentEventQueue.catch(() => {});
-	};
-
-	private async _processAgentEvent(event: AgentEvent): Promise<void> {
-		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
-		// This ensures the UI sees the updated queue state
-		if (event.type === "message_start" && event.message.role === "user") {
-			this._compactionController.resetOverflowRecovery();
-			this._messageQueueController.removeDeliveredUserMessage(event.message);
-		}
-
-		// Emit to extensions first
-		await this._emitExtensionEvent(event);
-
-		// Notify all listeners
-		this._emit(event);
-
-		// Handle session persistence
-		if (event.type === "message_end") {
-			// Check if this is a custom message from extensions
-			if (event.message.role === "custom") {
-				// Persist as CustomMessageEntry
-				this.sessionManager.appendCustomMessageEntry(
-					event.message.customType,
-					event.message.content,
-					event.message.display,
-					event.message.details,
-				);
-			} else if (
-				event.message.role === "user" ||
-				event.message.role === "assistant" ||
-				event.message.role === "toolResult"
-			) {
-				// Regular LLM message - persist as SessionMessageEntry
-				this.sessionManager.appendMessage(event.message);
-			}
-			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
-
-			// Track assistant message for auto-compaction (checked on agent_end)
-			if (event.message.role === "assistant") {
-				this._lastAssistantMessage = event.message;
-
-				this._retryController.onAssistantMessage(event.message as AssistantMessage);
-			}
-		}
-
-		// Check auto-retry and auto-compaction after agent completes
-		if (event.type === "agent_end" && this._lastAssistantMessage) {
-			const msg = this._lastAssistantMessage;
-			this._lastAssistantMessage = undefined;
-
-			if (await this._retryController.handleAgentEnd(msg)) return;
-			await this._checkCompaction(msg);
 		}
 	}
 
@@ -598,27 +536,6 @@ export class AgentSession {
 	}
 
 	/**
-	 * Temporarily disconnect from agent events.
-	 * User listeners are preserved and will receive events again after resubscribe().
-	 * Used internally during operations that need to pause event processing.
-	 */
-	private _disconnectFromAgent(): void {
-		if (this._unsubscribeAgent) {
-			this._unsubscribeAgent();
-			this._unsubscribeAgent = undefined;
-		}
-	}
-
-	/**
-	 * Reconnect to agent events after _disconnectFromAgent().
-	 * Preserves all existing listeners.
-	 */
-	private _reconnectToAgent(): void {
-		if (this._unsubscribeAgent) return; // Already connected
-		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
-	}
-
-	/**
 	 * Remove all listeners and disconnect from agent.
 	 * Call this when completely done with the session.
 	 */
@@ -631,7 +548,7 @@ export class AgentSession {
 		this._extensionRunner.invalidate(
 			"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 		);
-		this._disconnectFromAgent();
+		this._eventController.disconnect();
 		this._eventListeners = [];
 	}
 
@@ -1340,12 +1257,12 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		this._disconnectFromAgent();
+		this._eventController.disconnect();
 		try {
 			await this.abort();
 			return await this._manualCompactionController.compact(customInstructions);
 		} finally {
-			this._reconnectToAgent();
+			this._eventController.connect();
 		}
 	}
 
