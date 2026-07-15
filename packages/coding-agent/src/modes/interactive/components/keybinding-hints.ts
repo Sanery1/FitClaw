@@ -11,8 +11,24 @@ function formatKeys(keys: KeyId[]): string {
 	return keys.join("/");
 }
 
+export function formatKeyDisplay(key: string): string {
+	return key
+		.split("/")
+		.map((binding) =>
+			binding
+				.split("+")
+				.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+				.join("+"),
+		)
+		.join("/");
+}
+
 export function keyText(keybinding: Keybinding): string {
 	return formatKeys(getKeybindings().getKeys(keybinding));
+}
+
+export function keyDisplay(keybinding: Keybinding): string {
+	return formatKeyDisplay(keyText(keybinding));
 }
 
 export function keyHint(keybinding: Keybinding, description: string): string {
