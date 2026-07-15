@@ -9,8 +9,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent } from "@fitclaw/ai";
 import type { EditorComponent, KeyId, MarkdownTheme } from "@fitclaw/tui";
-import { Container, matchesKey, ProcessTerminal, Spacer, setKeybindings, Text, TUI, visibleWidth } from "@fitclaw/tui";
-import { APP_NAME, APP_TITLE, getDebugLogPath, VERSION } from "../../config.js";
+import { Container, matchesKey, ProcessTerminal, Spacer, setKeybindings, Text, TUI } from "@fitclaw/tui";
+import { APP_NAME, APP_TITLE, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type { ExtensionContext, ExtensionRunner, ExtensionUIContext } from "../../core/extensions/index.js";
@@ -20,11 +20,7 @@ import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { ensureTool } from "../../utils/tools-manager.js";
-import { ArminComponent } from "./components/armin.js";
 import { CustomEditor } from "./components/custom-editor.js";
-import { DaxnutsComponent } from "./components/daxnuts.js";
-import { DynamicBorder } from "./components/dynamic-border.js";
-import { EarendilAnnouncementComponent } from "./components/earendil-announcement.js";
 import { ExpandableText, isExpandable } from "./components/expandable-text.js";
 import { FooterComponent } from "./components/footer.js";
 import { keyDisplay, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
@@ -34,6 +30,7 @@ import { InteractiveBashController } from "./interactive-bash-controller.js";
 import { InteractiveExtensionChromeController } from "./interactive-extension-chrome-controller.js";
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
 import { InteractiveExtensionSurfaceController } from "./interactive-extension-surface-controller.js";
+import { InteractiveFeedbackController } from "./interactive-feedback-controller.js";
 import { InteractiveInfoController } from "./interactive-info-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
 import { InteractiveModelController } from "./interactive-model-controller.js";
@@ -104,6 +101,7 @@ export class InteractiveMode {
 	private readonly extensionChromeController: InteractiveExtensionChromeController;
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
 	private readonly extensionSurfaceController: InteractiveExtensionSurfaceController;
+	private readonly feedbackController: InteractiveFeedbackController;
 	private readonly infoController: InteractiveInfoController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
 	private readonly modelController: InteractiveModelController;
@@ -115,10 +113,6 @@ export class InteractiveMode {
 	private readonly startupController: InteractiveStartupController;
 	private readonly terminalController: InteractiveTerminalController;
 	private readonly workingController: InteractiveWorkingController;
-
-	// Status line tracking (for mutating immediately-sequential status updates)
-	private lastStatusSpacer: Spacer | undefined = undefined;
-	private lastStatusText: Text | undefined = undefined;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -162,6 +156,11 @@ export class InteractiveMode {
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
+		this.feedbackController = new InteractiveFeedbackController({
+			getSession: () => this.session,
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+		});
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -239,7 +238,7 @@ export class InteractiveMode {
 			updateAvailableProviderCount: () => this.modelController.updateAvailableProviderCount(),
 			invalidateFooter: () => this.footer.invalidate(),
 			updateEditorBorderColor: () => this.updateEditorBorderColor(),
-			checkModelEasterEgg: (model) => this.checkDaxnutsEasterEgg(model),
+			checkModelEasterEgg: (model) => this.feedbackController.checkModelEasterEgg(model),
 		});
 		this.modelController = new InteractiveModelController({
 			getSession: () => this.session,
@@ -250,7 +249,7 @@ export class InteractiveMode {
 			updateEditorBorderColor: () => this.updateEditorBorderColor(),
 			warnAboutAnthropicSubscriptionAuth: (model) =>
 				this.authController.maybeWarnAboutAnthropicSubscriptionAuth(model),
-			checkModelEasterEgg: (model) => this.checkDaxnutsEasterEgg(model),
+			checkModelEasterEgg: (model) => this.feedbackController.checkModelEasterEgg(model),
 			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
 		});
@@ -709,7 +708,7 @@ export class InteractiveMode {
 				this.terminalController.requestShutdown();
 			},
 			onError: (error) => {
-				this.showExtensionError(error.extensionPath, error.error, error.stack);
+				this.feedbackController.showExtensionError(error.extensionPath, error.error, error.stack);
 			},
 		});
 
@@ -829,7 +828,7 @@ export class InteractiveMode {
 			select: (title, options, opts) => this.extensionDialogController.select(title, options, opts),
 			confirm: (title, message, opts) => this.extensionDialogController.confirm(title, message, opts),
 			input: (title, placeholder, opts) => this.extensionDialogController.input(title, placeholder, opts),
-			notify: (message, type) => this.showExtensionNotify(message, type),
+			notify: (message, type) => this.feedbackController.showExtensionNotification(message, type),
 			onTerminalInput: (handler) => this.extensionSurfaceController.addTerminalInputListener(handler),
 			setStatus: (key, text) => this.extensionChromeController.setStatus(key, text),
 			setWorkingMessage: (message) => this.workingController.setMessage(message),
@@ -872,40 +871,6 @@ export class InteractiveMode {
 			getToolsExpanded: () => this.toolOutputExpanded,
 			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
 		};
-	}
-
-	/**
-	 * Show a notification for extensions.
-	 */
-	private showExtensionNotify(message: string, type?: "info" | "warning" | "error"): void {
-		if (type === "error") {
-			this.showError(message);
-		} else if (type === "warning") {
-			this.showWarning(message);
-		} else {
-			this.showStatus(message);
-		}
-	}
-
-	/**
-	 * Show an extension error in the UI.
-	 */
-	private showExtensionError(extensionPath: string, error: string, stack?: string): void {
-		const errorMsg = `Extension "${extensionPath}" error: ${error}`;
-		const errorText = new Text(theme.fg("error", errorMsg), 1, 0);
-		this.chatContainer.addChild(errorText);
-		if (stack) {
-			// Show stack trace in dim color, indented
-			const stackLines = stack
-				.split("\n")
-				.slice(1) // Skip first line (duplicates error message)
-				.map((line) => theme.fg("dim", `  ${line.trim()}`))
-				.join("\n");
-			if (stackLines) {
-				this.chatContainer.addChild(new Text(stackLines, 1, 0));
-			}
-		}
-		this.ui.requestRender();
 	}
 
 	// =========================================================================
@@ -952,7 +917,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.modelController.cycle("backward"));
 
 		// Global debug handler on TUI (works regardless of focus)
-		this.ui.onDebug = () => this.handleDebugCommand();
+		this.ui.onDebug = () => this.feedbackController.writeDebugLog();
 		this.defaultEditor.onAction("app.model.select", () => this.modelController.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
@@ -1104,17 +1069,17 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/debug") {
-				this.handleDebugCommand();
+				this.feedbackController.writeDebugLog();
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/arminsayshi") {
-				this.handleArminSaysHi();
+				this.feedbackController.showArmin();
 				this.editor.setText("");
 				return;
 			}
 			if (text === "/dementedelves") {
-				this.handleDementedDelves();
+				this.feedbackController.showDementedDelves();
 				this.editor.setText("");
 				return;
 			}
@@ -1187,30 +1152,8 @@ export class InteractiveMode {
 		});
 	}
 
-	/**
-	 * Show a status message in the chat.
-	 *
-	 * If multiple status messages are emitted back-to-back (without anything else being added to the chat),
-	 * we update the previous status line instead of appending new ones to avoid log spam.
-	 */
 	private showStatus(message: string): void {
-		const children = this.chatContainer.children;
-		const last = children.length > 0 ? children[children.length - 1] : undefined;
-		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
-
-		if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
-			this.lastStatusText.setText(theme.fg("dim", message));
-			this.ui.requestRender();
-			return;
-		}
-
-		const spacer = new Spacer(1);
-		const text = new Text(theme.fg("dim", message), 1, 0);
-		this.chatContainer.addChild(spacer);
-		this.chatContainer.addChild(text);
-		this.lastStatusSpacer = spacer;
-		this.lastStatusText = text;
-		this.ui.requestRender();
+		this.feedbackController.showStatus(message);
 	}
 
 	renderInitialMessages(): void {
@@ -1281,55 +1224,19 @@ export class InteractiveMode {
 	}
 
 	showError(errorMessage: string): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
-		this.ui.requestRender();
+		this.feedbackController.showError(errorMessage);
 	}
 
 	showWarning(warningMessage: string): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
-		this.ui.requestRender();
+		this.feedbackController.showWarning(warningMessage);
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
-		const changelogUrl = theme.fg(
-			"accent",
-			"https://github.com/Sanery1/FitClaw/blob/main/packages/coding-agent/CHANGELOG.md",
-		);
-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogUrl;
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction}\n${changelogLine}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		this.feedbackController.showVersionUpdate(newVersion);
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
-		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Package Updates Available"))}\n${updateInstruction}\n${theme.fg("muted", "Packages:")}\n${packageLines}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+		this.feedbackController.showPackageUpdates(packages);
 	}
 
 	// =========================================================================
@@ -1349,63 +1256,6 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to create session", error);
-		}
-	}
-
-	private handleDebugCommand(): void {
-		const width = this.ui.terminal.columns;
-		const height = this.ui.terminal.rows;
-		const allLines = this.ui.render(width);
-
-		const debugLogPath = getDebugLogPath();
-		const debugData = [
-			`Debug output at ${new Date().toISOString()}`,
-			`Terminal: ${width}x${height}`,
-			`Total lines: ${allLines.length}`,
-			"",
-			"=== All rendered lines with visible widths ===",
-			...allLines.map((line, idx) => {
-				const vw = visibleWidth(line);
-				const escaped = JSON.stringify(line);
-				return `[${idx}] (w=${vw}) ${escaped}`;
-			}),
-			"",
-			"=== Agent messages (JSONL) ===",
-			...this.session.messages.map((msg) => JSON.stringify(msg)),
-			"",
-		].join("\n");
-
-		fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
-		fs.writeFileSync(debugLogPath, debugData);
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(
-			new Text(`${theme.fg("accent", "✓ Debug log written")}\n${theme.fg("muted", debugLogPath)}`, 1, 1),
-		);
-		this.ui.requestRender();
-	}
-
-	private handleArminSaysHi(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new ArminComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private handleDementedDelves(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new EarendilAnnouncementComponent());
-		this.ui.requestRender();
-	}
-
-	private handleDaxnuts(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DaxnutsComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private checkDaxnutsEasterEgg(model: { provider: string; id: string }): void {
-		if (model.provider === "opencode" && model.id.toLowerCase().includes("kimi-k2.5")) {
-			this.handleDaxnuts();
 		}
 	}
 
