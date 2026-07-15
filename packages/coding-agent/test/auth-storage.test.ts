@@ -30,8 +30,9 @@ describe("AuthStorage", () => {
 		writeFileSync(authJsonPath, JSON.stringify(data));
 	}
 
-	function toShPath(value: string): string {
-		return value.replace(/\\/g, "/").replace(/"/g, '\\"');
+	function createNodeCommand(source: string): string {
+		const encodedSource = Buffer.from(source).toString("base64");
+		return `!"${process.execPath}" -e "eval(Buffer.from('${encodedSource}','base64').toString())"`;
 	}
 
 	describe("API key resolution", () => {
@@ -48,7 +49,7 @@ describe("AuthStorage", () => {
 
 		test("apiKey with ! prefix executes command and uses stdout", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!echo test-api-key-from-command" },
+				anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("test-api-key-from-command")') },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -59,7 +60,7 @@ describe("AuthStorage", () => {
 
 		test("apiKey with ! prefix trims whitespace from command output", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!echo '  spaced-key  '" },
+				anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("  spaced-key  \\n")') },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -70,7 +71,7 @@ describe("AuthStorage", () => {
 
 		test("apiKey with ! prefix handles multiline output (uses trimmed result)", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!printf 'line1\\nline2'" },
+				anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("line1\\nline2")') },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -81,7 +82,7 @@ describe("AuthStorage", () => {
 
 		test("apiKey with ! prefix returns undefined on command failure", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!exit 1" },
+				anthropic: { type: "api_key", key: createNodeCommand("process.exit(1)") },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -103,7 +104,7 @@ describe("AuthStorage", () => {
 
 		test("apiKey with ! prefix returns undefined on empty output", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!printf ''" },
+				anthropic: { type: "api_key", key: createNodeCommand("") },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -149,8 +150,10 @@ describe("AuthStorage", () => {
 		});
 
 		test("apiKey command can use shell features like pipes", async () => {
+			const command =
+				process.platform === "win32" ? "!echo hello-world | findstr world" : "!printf hello-world | cat";
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!echo 'hello world' | tr ' ' '-'" },
+				anthropic: { type: "api_key", key: command },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -165,8 +168,9 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const counterPath = toShPath(counterFile);
-				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
+				const command = createNodeCommand(
+					`const fs=require("node:fs");const path=${JSON.stringify(counterFile)};const count=Number(fs.readFileSync(path,"utf8"));fs.writeFileSync(path,String(count+1));process.stdout.write("key-value");`,
+				);
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
@@ -187,8 +191,9 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const counterPath = toShPath(counterFile);
-				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
+				const command = createNodeCommand(
+					`const fs=require("node:fs");const path=${JSON.stringify(counterFile)};const count=Number(fs.readFileSync(path,"utf8"));fs.writeFileSync(path,String(count+1));process.stdout.write("key-value");`,
+				);
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
@@ -209,8 +214,9 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const counterPath = toShPath(counterFile);
-				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; echo "key-value"'`;
+				const command = createNodeCommand(
+					`const fs=require("node:fs");const path=${JSON.stringify(counterFile)};const count=Number(fs.readFileSync(path,"utf8"));fs.writeFileSync(path,String(count+1));process.stdout.write("key-value");`,
+				);
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
@@ -229,8 +235,8 @@ describe("AuthStorage", () => {
 
 			test("different commands are cached separately", async () => {
 				writeAuthJson({
-					anthropic: { type: "api_key", key: "!echo key-anthropic" },
-					openai: { type: "api_key", key: "!echo key-openai" },
+					anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("key-anthropic")') },
+					openai: { type: "api_key", key: createNodeCommand('process.stdout.write("key-openai")') },
 				});
 
 				authStorage = AuthStorage.create(authJsonPath);
@@ -246,8 +252,9 @@ describe("AuthStorage", () => {
 				const counterFile = join(tempDir, "counter");
 				writeFileSync(counterFile, "0");
 
-				const counterPath = toShPath(counterFile);
-				const command = `!sh -c 'count=$(cat "${counterPath}"); echo $((count + 1)) > "${counterPath}"; exit 1'`;
+				const command = createNodeCommand(
+					`const fs=require("node:fs");const path=${JSON.stringify(counterFile)};const count=Number(fs.readFileSync(path,"utf8"));fs.writeFileSync(path,String(count+1));process.exit(1);`,
+				);
 				writeAuthJson({
 					anthropic: { type: "api_key", key: command },
 				});
@@ -454,7 +461,7 @@ describe("AuthStorage", () => {
 	describe("runtime overrides", () => {
 		test("runtime override takes priority over auth.json", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!echo stored-key" },
+				anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("stored-key")') },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);
@@ -467,7 +474,7 @@ describe("AuthStorage", () => {
 
 		test("removing runtime override falls back to auth.json", async () => {
 			writeAuthJson({
-				anthropic: { type: "api_key", key: "!echo stored-key" },
+				anthropic: { type: "api_key", key: createNodeCommand('process.stdout.write("stored-key")') },
 			});
 
 			authStorage = AuthStorage.create(authJsonPath);

@@ -1,22 +1,19 @@
 import { Agent, type AgentTool } from "@fitclaw/agent-core";
 import type { ImageContent } from "@fitclaw/ai";
 import {
-	AgentSession,
-	type AgentSessionEvent,
 	AuthStorage,
 	convertToLlm,
-	createExtensionRuntime,
+	ManagedAgentSession,
+	type ManagedAgentSessionEvent,
 	ModelRegistry,
-	type ResourceLoader,
 	SessionManager,
 	SettingsManager,
-} from "@fitclaw/claw";
-import type { Skill } from "@fitclaw/runtime";
+} from "@fitclaw/runtime";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 
-export type CoachSessionEvent = AgentSessionEvent;
+export type CoachSessionEvent = ManagedAgentSessionEvent;
 
 type CoachSettingsStorage = Parameters<typeof SettingsManager.fromStorage>[0];
 
@@ -45,41 +42,9 @@ class WorkspaceSettingsStorage implements CoachSettingsStorage {
 	}
 }
 
-export interface CoachResourceState {
-	readonly resourceLoader: ResourceLoader;
-	update(systemPrompt: string, skills: Skill[]): void;
-}
-
-export function createCoachResourceState(systemPrompt: string, skills: Skill[]): CoachResourceState {
-	let currentSystemPrompt = systemPrompt;
-	let currentSkills = skills.slice();
-
-	const resourceLoader: ResourceLoader = {
-		getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-		getSkills: () => ({ skills: currentSkills.slice(), diagnostics: [] }),
-		getPrompts: () => ({ prompts: [], diagnostics: [] }),
-		getThemes: () => ({ themes: [], diagnostics: [] }),
-		getAgentsFiles: () => ({ agentsFiles: [] }),
-		getSystemPrompt: () => currentSystemPrompt,
-		getAppendSystemPrompt: () => [],
-		extendResources: () => {},
-		reload: async () => {},
-	};
-
-	return {
-		resourceLoader,
-		update(nextSystemPrompt, nextSkills) {
-			currentSystemPrompt = nextSystemPrompt;
-			currentSkills = nextSkills.slice();
-		},
-	};
-}
-
 export interface CreateCoachSessionOptions {
 	channelDir: string;
-	cwd: string;
 	systemPrompt: string;
-	skills: Skill[];
 	tools: AgentTool[];
 }
 
@@ -119,15 +84,11 @@ export function createCoachSession(options: CreateCoachSessionOptions) {
 
 	const sessionManager = SessionManager.open(join(options.channelDir, "context.jsonl"), options.channelDir);
 	const settingsManager = SettingsManager.fromStorage(new WorkspaceSettingsStorage(join(options.channelDir, "..")));
-	const resources = createCoachResourceState(options.systemPrompt, options.skills);
-	const session = new AgentSession({
+	const session = new ManagedAgentSession({
 		agent,
 		sessionManager,
 		settingsManager,
-		cwd: options.cwd,
 		modelRegistry,
-		resourceLoader: resources.resourceLoader,
-		baseToolsOverride: Object.fromEntries(options.tools.map((tool) => [tool.name, tool])),
 	});
 
 	return {
@@ -139,15 +100,13 @@ export function createCoachSession(options: CreateCoachSessionOptions) {
 		},
 		subscribe: session.subscribe.bind(session),
 		prompt(text: string, images?: ImageContent[]) {
-			return session.prompt(text, images && images.length > 0 ? { images } : undefined);
+			return session.prompt(text, images);
 		},
 		abort() {
 			return session.abort();
 		},
-		updateRuntime(systemPrompt: string, skills: Skill[], tools: AgentTool[]) {
-			resources.update(systemPrompt, skills);
-			session.setActiveToolsByName(session.getActiveToolNames());
-			session.agent.state.tools = tools;
+		updateRuntime(systemPrompt: string, tools: AgentTool[]) {
+			session.updateRuntime(systemPrompt, tools);
 		},
 	};
 }

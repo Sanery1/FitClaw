@@ -171,14 +171,14 @@ interface UserInfo {
 }
 ```
 
-### 3. MomAgent
+### 3. CoachAgent
 
-MomAgent wraps `AgentSession` from coding-agent. Agent is platform-agnostic; it just forwards events to the adapter.
+CoachAgent uses the shared managed session from `@fitclaw/runtime`. The product application does not depend on the coding CLI package; it forwards runtime events to the adapter.
 
 ```typescript
-import { type AgentSessionEvent } from "@fitclaw/claw";
+import { type ManagedAgentSessionEvent } from "@fitclaw/runtime";
 
-interface MomAgent {
+interface CoachAgent {
   /**
    * Handle an incoming message.
    * Adapter receives events via callback and renders however it wants.
@@ -186,7 +186,7 @@ interface MomAgent {
   handleMessage(
     message: ChannelMessage,
     context: ChannelContext,
-    onEvent: (event: AgentSessionEvent) => Promise<void>
+    onEvent: (event: ManagedAgentSessionEvent) => Promise<void>
   ): Promise<{ stopReason: string; errorMessage?: string }>;
   
   /** Abort the current run for a channel */

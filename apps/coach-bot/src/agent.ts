@@ -89,9 +89,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const contextWindowOptions = getCoachContextWindowOptions();
 	const session = createCoachSession({
 		channelDir,
-		cwd: process.cwd(),
 		systemPrompt,
-		skills,
 		tools,
 	});
 	const { model: resolvedModel, sessionManager } = session;
@@ -153,7 +151,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildCoachSystemPrompt(skills);
 			const activeTools = createCoachActiveTools(executor, channelDir, skills);
-			session.updateRuntime(systemPrompt, skills, activeTools);
+			session.updateRuntime(systemPrompt, activeTools);
 
 			// Reset per-run state
 			runState.ctx = ctx;

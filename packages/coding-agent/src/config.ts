@@ -1,3 +1,4 @@
+import { CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getBinDir, getSessionsDir } from "@fitclaw/runtime";
 import { spawnSync } from "child_process";
 import { existsSync, readFileSync, realpathSync } from "fs";
 import { homedir } from "os";
@@ -323,11 +324,9 @@ const appConfigName: string | undefined = appConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@fitclaw/claw";
 export const APP_NAME: string = appConfigName || "fitclaw";
 export const APP_TITLE: string = appConfigName ? APP_NAME : "FitClaw";
-export const CONFIG_DIR_NAME: string = appConfig?.configDir || ".fitclaw";
 export const VERSION: string = pkg.version || "0.0.0";
 
-// e.g., FITCLAW_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
-export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
+export { CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getBinDir, getSessionsDir };
 
 const DEFAULT_SHARE_VIEWER_URL = ""; // No default; set FITCLAW_SHARE_VIEWER_URL env var
 
@@ -340,18 +339,6 @@ export function getShareViewerUrl(gistId: string): string {
 // =============================================================================
 // User Config Paths (~/.fitclaw/agent/*)
 // =============================================================================
-
-/** Get the agent config directory (e.g., ~/.fitclaw/agent/) */
-export function getAgentDir(): string {
-	const envDir = process.env[ENV_AGENT_DIR];
-	if (envDir) {
-		// Expand tilde to home directory
-		if (envDir === "~") return homedir();
-		if (envDir.startsWith("~/")) return homedir() + envDir.slice(1);
-		return envDir;
-	}
-	return join(homedir(), CONFIG_DIR_NAME, "agent");
-}
 
 /** Get path to user's custom themes directory */
 export function getCustomThemesDir(): string {
@@ -378,19 +365,9 @@ export function getToolsDir(): string {
 	return join(getAgentDir(), "tools");
 }
 
-/** Get path to managed binaries directory (fd, rg) */
-export function getBinDir(): string {
-	return join(getAgentDir(), "bin");
-}
-
 /** Get path to prompt templates directory */
 export function getPromptsDir(): string {
 	return join(getAgentDir(), "prompts");
-}
-
-/** Get path to sessions directory */
-export function getSessionsDir(): string {
-	return join(getAgentDir(), "sessions");
 }
 
 /** Get path to debug log file */

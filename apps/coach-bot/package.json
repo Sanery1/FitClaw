@@ -22,7 +22,6 @@
 		"@anthropic-ai/sandbox-runtime": "^0.0.16",
 		"@fitclaw/agent-core": "^0.70.5",
 		"@fitclaw/ai": "^0.70.5",
-		"@fitclaw/claw": "^0.70.5",
 		"@fitclaw/coach-core": "^0.70.5",
 		"@fitclaw/runtime": "^0.70.5",
 		"chalk": "^5.6.2",
