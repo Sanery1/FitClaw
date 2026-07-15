@@ -9,17 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent } from "@fitclaw/ai";
 import type { EditorComponent, KeyId, MarkdownTheme } from "@fitclaw/tui";
-import {
-	type Component,
-	Container,
-	matchesKey,
-	ProcessTerminal,
-	Spacer,
-	setKeybindings,
-	Text,
-	TUI,
-	visibleWidth,
-} from "@fitclaw/tui";
+import { Container, matchesKey, ProcessTerminal, Spacer, setKeybindings, Text, TUI, visibleWidth } from "@fitclaw/tui";
 import { spawnSync } from "child_process";
 import { APP_NAME, APP_TITLE, getDebugLogPath, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
@@ -49,6 +39,7 @@ import { InteractiveExtensionSurfaceController } from "./interactive-extension-s
 import { InteractiveInfoController } from "./interactive-info-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
 import { InteractiveModelController } from "./interactive-model-controller.js";
+import { InteractiveReloadController } from "./interactive-reload-controller.js";
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
@@ -118,6 +109,7 @@ export class InteractiveMode {
 	private readonly infoController: InteractiveInfoController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
 	private readonly modelController: InteractiveModelController;
+	private readonly reloadController: InteractiveReloadController;
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly settingsController: InteractiveSettingsController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
@@ -275,6 +267,31 @@ export class InteractiveMode {
 			keybindings: this.keybindings,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 			showWarning: (message) => this.showWarning(message),
+		});
+		this.reloadController = new InteractiveReloadController({
+			getSession: () => this.session,
+			ui: this.ui,
+			editorContainer: this.editorContainer,
+			defaultEditor: this.defaultEditor,
+			getEditor: () => this.editor,
+			keybindings: this.keybindings,
+			footer: this.footer,
+			footerDataProvider: this.footerDataProvider,
+			getToolOutputExpanded: () => this.toolOutputExpanded,
+			setHeaderExpanded: (expanded) => this.extensionChromeController.setHeaderExpanded(expanded),
+			refreshSettings: () => this.settingsController.refresh(),
+			setupAutocomplete: () => this.autocompleteController.setup(),
+			setupExtensionShortcuts: (runner) => this.setupExtensionShortcuts(runner),
+			resetExtensionUI: () => this.resetExtensionUI(),
+			rebuildChatFromMessages: () => this.rebuildChatFromMessages(),
+			showLoadedResources: () =>
+				this.showLoadedResources({
+					force: false,
+					showDiagnosticsWhenQuiet: true,
+				}),
+			showWarning: (message) => this.showWarning(message),
+			showError: (message) => this.showError(message),
+			showStatus: (message) => this.showStatus(message),
 		});
 		this.messageQueueController = new InteractiveMessageQueueController({
 			getSession: () => this.session,
@@ -680,7 +697,7 @@ export class InteractiveMode {
 					return this.sessionNavigationController.handleResumeSession(sessionPath, options);
 				},
 				reload: async () => {
-					await this.handleReloadCommand();
+					await this.reloadController.reload();
 				},
 			},
 			shutdownHandler: () => {
@@ -703,27 +720,10 @@ export class InteractiveMode {
 		this.startupController.showNotices();
 	}
 
-	private applyRuntimeSettings(): void {
-		this.footer.setSession(this.session);
-		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
-		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
-		this.settingsController.refresh();
-		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
-		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
-		const editorPaddingX = this.settingsManager.getEditorPaddingX();
-		const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
-		this.defaultEditor.setPaddingX(editorPaddingX);
-		this.defaultEditor.setAutocompleteMaxVisible(autocompleteMaxVisible);
-		if (this.editor !== this.defaultEditor) {
-			this.editor.setPaddingX?.(editorPaddingX);
-			this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
-		}
-	}
-
 	private async rebindCurrentSession(): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
-		this.applyRuntimeSettings();
+		this.reloadController.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
 		await this.modelController.updateAvailableProviderCount();
@@ -1098,7 +1098,7 @@ export class InteractiveMode {
 			}
 			if (text === "/reload") {
 				this.editor.setText("");
-				await this.handleReloadCommand();
+				await this.reloadController.reload();
 				return;
 			}
 			if (text === "/debug") {
@@ -1491,83 +1491,6 @@ export class InteractiveMode {
 	// =========================================================================
 	// Command handlers
 	// =========================================================================
-
-	private async handleReloadCommand(): Promise<void> {
-		if (this.session.isStreaming) {
-			this.showWarning("Wait for the current response to finish before reloading.");
-			return;
-		}
-		if (this.session.isCompacting) {
-			this.showWarning("Wait for compaction to finish before reloading.");
-			return;
-		}
-
-		this.resetExtensionUI();
-
-		const reloadBox = new Container();
-		const borderColor = (s: string) => theme.fg("border", s);
-		reloadBox.addChild(new DynamicBorder(borderColor));
-		reloadBox.addChild(new Spacer(1));
-		reloadBox.addChild(
-			new Text(theme.fg("muted", "Reloading keybindings, extensions, skills, prompts, themes..."), 1, 0),
-		);
-		reloadBox.addChild(new Spacer(1));
-		reloadBox.addChild(new DynamicBorder(borderColor));
-
-		const previousEditor = this.editor;
-		this.editorContainer.clear();
-		this.editorContainer.addChild(reloadBox);
-		this.ui.setFocus(reloadBox);
-		this.ui.requestRender(true);
-		await new Promise((resolve) => process.nextTick(resolve));
-
-		const dismissReloadBox = (editor: Component) => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(editor);
-			this.ui.setFocus(editor);
-			this.ui.requestRender();
-		};
-
-		try {
-			await this.session.reload();
-			this.keybindings.reload();
-			this.extensionChromeController.setHeaderExpanded(this.toolOutputExpanded);
-			setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-			this.settingsController.refresh();
-			const themeName = this.settingsManager.getTheme();
-			const themeResult = themeName ? setTheme(themeName, true) : { success: true };
-			if (!themeResult.success) {
-				this.showError(`Failed to load theme "${themeName}": ${themeResult.error}\nFell back to dark theme.`);
-			}
-			const editorPaddingX = this.settingsManager.getEditorPaddingX();
-			const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
-			this.defaultEditor.setPaddingX(editorPaddingX);
-			this.defaultEditor.setAutocompleteMaxVisible(autocompleteMaxVisible);
-			if (this.editor !== this.defaultEditor) {
-				this.editor.setPaddingX?.(editorPaddingX);
-				this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
-			}
-			this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
-			this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
-			this.autocompleteController.setup();
-			const runner = this.session.extensionRunner;
-			this.setupExtensionShortcuts(runner);
-			this.rebuildChatFromMessages();
-			dismissReloadBox(this.editor as Component);
-			this.showLoadedResources({
-				force: false,
-				showDiagnosticsWhenQuiet: true,
-			});
-			const modelsJsonError = this.session.modelRegistry.getError();
-			if (modelsJsonError) {
-				this.showError(`models.json error: ${modelsJsonError}`);
-			}
-			this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
-		} catch (error) {
-			dismissReloadBox(previousEditor as Component);
-			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
 
 	private async handleClearCommand(): Promise<void> {
 		this.workingController.stop();
