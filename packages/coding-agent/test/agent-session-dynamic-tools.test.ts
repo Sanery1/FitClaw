@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { getModel } from "@fitclaw/ai";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ToolDefinition } from "../src/core/extensions/index.js";
 import { DefaultResourceLoader } from "../src/core/resource-loader.js";
 import { createAgentSession } from "../src/core/sdk.js";
 import { SessionManager } from "../src/core/session-manager.js";
@@ -131,6 +132,49 @@ describe("AgentSession dynamic tool registration", () => {
 		});
 		expect(session.getActiveToolNames()).toContain("sdk_tool");
 
+		session.dispose();
+	});
+
+	it("copies the SDK custom tool collection", async () => {
+		const settingsManager = SettingsManager.create(tempDir, agentDir);
+		const sessionManager = SessionManager.inMemory();
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const customTools: ToolDefinition[] = [
+			{
+				name: "initial_sdk_tool",
+				label: "Initial SDK Tool",
+				description: "Configured before session creation",
+				parameters: Type.Object({}),
+				execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+			},
+		];
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager,
+			resourceLoader,
+			customTools,
+		});
+
+		customTools.push({
+			name: "external_late_tool",
+			label: "External Late Tool",
+			description: "Added after session creation",
+			parameters: Type.Object({}),
+			execute: async () => ({ content: [{ type: "text", text: "unexpected" }], details: {} }),
+		});
+		await session.reload();
+
+		expect(session.getAllTools().map((tool) => tool.name)).toContain("initial_sdk_tool");
+		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("external_late_tool");
 		session.dispose();
 	});
 
