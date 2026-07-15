@@ -8,15 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent, Model } from "@fitclaw/ai";
-import type {
-	EditorComponent,
-	EditorTheme,
-	Keybinding,
-	KeyId,
-	MarkdownTheme,
-	OverlayHandle,
-	OverlayOptions,
-} from "@fitclaw/tui";
+import type { EditorComponent, Keybinding, KeyId, MarkdownTheme } from "@fitclaw/tui";
 import {
 	type Component,
 	Container,
@@ -62,6 +54,7 @@ import { InteractiveAutocompleteController } from "./interactive-autocomplete-co
 import { InteractiveBashController } from "./interactive-bash-controller.js";
 import { InteractiveExtensionChromeController } from "./interactive-extension-chrome-controller.js";
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
+import { InteractiveExtensionSurfaceController } from "./interactive-extension-surface-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
@@ -109,9 +102,7 @@ export class InteractiveMode {
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
-	private editor: EditorComponent;
 	private fdPath: string | undefined;
-	private editorContainer: Container;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
@@ -131,6 +122,7 @@ export class InteractiveMode {
 	private readonly bashController: InteractiveBashController;
 	private readonly extensionChromeController: InteractiveExtensionChromeController;
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
+	private readonly extensionSurfaceController: InteractiveExtensionSurfaceController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
@@ -157,10 +149,13 @@ export class InteractiveMode {
 	// Shutdown state
 	private shutdownRequested = false;
 
-	// Extension UI state
-	private extensionTerminalInputUnsubscribers = new Set<() => void>();
-
 	// Convenience accessors
+	private get editor(): EditorComponent {
+		return this.extensionSurfaceController.editor;
+	}
+	private get editorContainer(): Container {
+		return this.extensionSurfaceController.editorContainer;
+	}
 	private get session(): AgentSession {
 		return this.runtimeHost.session;
 	}
@@ -196,9 +191,12 @@ export class InteractiveMode {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
 		});
-		this.editor = this.defaultEditor;
-		this.editorContainer = new Container();
-		this.editorContainer.addChild(this.editor as Component);
+		this.extensionSurfaceController = new InteractiveExtensionSurfaceController({
+			ui: this.ui,
+			defaultEditor: this.defaultEditor,
+			keybindings: this.keybindings,
+			applyAutocompleteToEditor: (editor) => this.autocompleteController.applyToEditor(editor),
+		});
 		this.autocompleteController = new InteractiveAutocompleteController({
 			getSession: () => this.session,
 			getEditor: () => this.editor,
@@ -959,34 +957,16 @@ export class InteractiveMode {
 
 	private resetExtensionUI(): void {
 		this.extensionDialogController.reset();
-		this.ui.hideOverlay();
-		this.clearExtensionTerminalInputListeners();
+		this.extensionSurfaceController.hideOverlay();
+		this.extensionSurfaceController.clearTerminalInputListeners();
 		this.extensionChromeController.reset();
 		this.autocompleteController.clearProviders();
-		this.setCustomEditorComponent(undefined);
+		this.extensionSurfaceController.setCustomEditor(undefined);
 		this.autocompleteController.setup();
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
 		this.workingController.reset();
 		this.setHiddenThinkingLabel();
-	}
-
-	private addExtensionTerminalInputListener(
-		handler: (data: string) => { consume?: boolean; data?: string } | undefined,
-	): () => void {
-		const unsubscribe = this.ui.addInputListener(handler);
-		this.extensionTerminalInputUnsubscribers.add(unsubscribe);
-		return () => {
-			unsubscribe();
-			this.extensionTerminalInputUnsubscribers.delete(unsubscribe);
-		};
-	}
-
-	private clearExtensionTerminalInputListeners(): void {
-		for (const unsubscribe of this.extensionTerminalInputUnsubscribers) {
-			unsubscribe();
-		}
-		this.extensionTerminalInputUnsubscribers.clear();
 	}
 
 	/**
@@ -998,7 +978,7 @@ export class InteractiveMode {
 			confirm: (title, message, opts) => this.extensionDialogController.confirm(title, message, opts),
 			input: (title, placeholder, opts) => this.extensionDialogController.input(title, placeholder, opts),
 			notify: (message, type) => this.showExtensionNotify(message, type),
-			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
+			onTerminalInput: (handler) => this.extensionSurfaceController.addTerminalInputListener(handler),
 			setStatus: (key, text) => this.extensionChromeController.setStatus(key, text),
 			setWorkingMessage: (message) => this.workingController.setMessage(message),
 			setWorkingVisible: (visible) => this.workingController.setVisible(visible),
@@ -1008,15 +988,15 @@ export class InteractiveMode {
 			setFooter: (factory) => this.extensionChromeController.setFooter(factory),
 			setHeader: (factory) => this.extensionChromeController.setHeader(factory),
 			setTitle: (title) => this.ui.terminal.setTitle(title),
-			custom: (factory, options) => this.showExtensionCustom(factory, options),
-			pasteToEditor: (text) => this.editor.handleInput(`\x1b[200~${text}\x1b[201~`),
-			setEditorText: (text) => this.editor.setText(text),
-			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
+			custom: (factory, options) => this.extensionSurfaceController.showCustom(factory, options),
+			pasteToEditor: (text) => this.extensionSurfaceController.pasteToEditor(text),
+			setEditorText: (text) => this.extensionSurfaceController.setEditorText(text),
+			getEditorText: () => this.extensionSurfaceController.getEditorText(),
 			editor: (title, prefill) => this.extensionDialogController.editor(title, prefill),
 			addAutocompleteProvider: (factory) => {
 				this.autocompleteController.addProvider(factory);
 			},
-			setEditorComponent: (factory) => this.setCustomEditorComponent(factory),
+			setEditorComponent: (factory) => this.extensionSurfaceController.setCustomEditor(factory),
 			get theme() {
 				return theme;
 			},
@@ -1043,74 +1023,6 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Set a custom editor component from an extension.
-	 * Pass undefined to restore the default editor.
-	 */
-	private setCustomEditorComponent(
-		factory: ((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent) | undefined,
-	): void {
-		// Save text from current editor before switching
-		const currentText = this.editor.getText();
-
-		this.editorContainer.clear();
-
-		if (factory) {
-			// Create the custom editor with tui, theme, and keybindings
-			const newEditor = factory(this.ui, getEditorTheme(), this.keybindings);
-
-			// Wire up callbacks from the default editor
-			newEditor.onSubmit = this.defaultEditor.onSubmit;
-			newEditor.onChange = this.defaultEditor.onChange;
-
-			// Copy text from previous editor
-			newEditor.setText(currentText);
-
-			// Copy appearance settings if supported
-			if (newEditor.borderColor !== undefined) {
-				newEditor.borderColor = this.defaultEditor.borderColor;
-			}
-			if (newEditor.setPaddingX !== undefined) {
-				newEditor.setPaddingX(this.defaultEditor.getPaddingX());
-			}
-
-			// Set autocomplete if supported
-			this.autocompleteController.applyToEditor(newEditor);
-
-			// If extending CustomEditor, copy app-level handlers
-			// Use duck typing since instanceof fails across jiti module boundaries
-			const customEditor = newEditor as unknown as Record<string, unknown>;
-			if ("actionHandlers" in customEditor && customEditor.actionHandlers instanceof Map) {
-				if (!customEditor.onEscape) {
-					customEditor.onEscape = () => this.defaultEditor.onEscape?.();
-				}
-				if (!customEditor.onCtrlD) {
-					customEditor.onCtrlD = () => this.defaultEditor.onCtrlD?.();
-				}
-				if (!customEditor.onPasteImage) {
-					customEditor.onPasteImage = () => this.defaultEditor.onPasteImage?.();
-				}
-				if (!customEditor.onExtensionShortcut) {
-					customEditor.onExtensionShortcut = (data: string) => this.defaultEditor.onExtensionShortcut?.(data);
-				}
-				// Copy action handlers (clear, suspend, model switching, etc.)
-				for (const [action, handler] of this.defaultEditor.actionHandlers) {
-					(customEditor.actionHandlers as Map<string, () => void>).set(action, handler);
-				}
-			}
-
-			this.editor = newEditor;
-		} else {
-			// Restore default editor with text from custom editor
-			this.defaultEditor.setText(currentText);
-			this.editor = this.defaultEditor;
-		}
-
-		this.editorContainer.addChild(this.editor as Component);
-		this.ui.setFocus(this.editor as Component);
-		this.ui.requestRender();
-	}
-
-	/**
 	 * Show a notification for extensions.
 	 */
 	private showExtensionNotify(message: string, type?: "info" | "warning" | "error"): void {
@@ -1121,85 +1033,6 @@ export class InteractiveMode {
 		} else {
 			this.showStatus(message);
 		}
-	}
-
-	/** Show a custom component with keyboard focus. Overlay mode renders on top of existing content. */
-	private async showExtensionCustom<T>(
-		factory: (
-			tui: TUI,
-			theme: Theme,
-			keybindings: KeybindingsManager,
-			done: (result: T) => void,
-		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
-		options?: {
-			overlay?: boolean;
-			overlayOptions?: OverlayOptions | (() => OverlayOptions);
-			onHandle?: (handle: OverlayHandle) => void;
-		},
-	): Promise<T> {
-		const savedText = this.editor.getText();
-		const isOverlay = options?.overlay ?? false;
-
-		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.editor.setText(savedText);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
-
-		return new Promise((resolve, reject) => {
-			let component: Component & { dispose?(): void };
-			let closed = false;
-
-			const close = (result: T) => {
-				if (closed) return;
-				closed = true;
-				if (isOverlay) this.ui.hideOverlay();
-				else restoreEditor();
-				// Note: both branches above already call requestRender
-				resolve(result);
-				try {
-					component?.dispose?.();
-				} catch {
-					/* ignore dispose errors */
-				}
-			};
-
-			Promise.resolve(factory(this.ui, theme, this.keybindings, close))
-				.then((c) => {
-					if (closed) return;
-					component = c;
-					if (isOverlay) {
-						// Resolve overlay options - can be static or dynamic function
-						const resolveOptions = (): OverlayOptions | undefined => {
-							if (options?.overlayOptions) {
-								const opts =
-									typeof options.overlayOptions === "function"
-										? options.overlayOptions()
-										: options.overlayOptions;
-								return opts;
-							}
-							// Fallback: use component's width property if available
-							const w = (component as { width?: number }).width;
-							return w ? { width: w } : undefined;
-						};
-						const handle = this.ui.showOverlay(component, resolveOptions());
-						// Expose handle to caller for visibility control
-						options?.onHandle?.(handle);
-					} else {
-						this.editorContainer.clear();
-						this.editorContainer.addChild(component);
-						this.ui.setFocus(component);
-						this.ui.requestRender();
-					}
-				})
-				.catch((err) => {
-					if (closed) return;
-					if (!isOverlay) restoreEditor();
-					reject(err);
-				});
-		});
 	}
 
 	/**
@@ -2556,7 +2389,7 @@ export class InteractiveMode {
 			this.ui.terminal.setProgress(false);
 		}
 		this.workingController.dispose();
-		this.clearExtensionTerminalInputListeners();
+		this.extensionSurfaceController.clearTerminalInputListeners();
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
 		if (this.unsubscribe) {
