@@ -81,12 +81,11 @@ describe("InteractiveMode.showStatus", () => {
 
 describe("InteractiveMode.setToolsExpanded", () => {
 	test("applies expansion state to the active header and chat entries", () => {
-		const header = { setExpanded: vi.fn() };
+		const setHeaderExpanded = vi.fn();
 		const chatChild = { setExpanded: vi.fn() };
 		const fakeThis: any = {
 			toolOutputExpanded: false,
-			customHeader: undefined,
-			builtInHeader: header,
+			extensionChromeController: { setHeaderExpanded },
 			chatContainer: { children: [chatChild] },
 			ui: { requestRender: vi.fn() },
 		};
@@ -94,7 +93,7 @@ describe("InteractiveMode.setToolsExpanded", () => {
 		(InteractiveMode as any).prototype.setToolsExpanded.call(fakeThis, true);
 
 		expect(fakeThis.toolOutputExpanded).toBe(true);
-		expect(header.setExpanded).toHaveBeenCalledWith(true);
+		expect(setHeaderExpanded).toHaveBeenCalledWith(true);
 		expect(chatChild.setExpanded).toHaveBeenCalledWith(true);
 		expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(1);
 	});
