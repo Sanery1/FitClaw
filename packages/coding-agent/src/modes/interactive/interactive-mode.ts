@@ -9,8 +9,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent, Model } from "@fitclaw/ai";
 import type {
-	AutocompleteItem,
-	AutocompleteProvider,
 	EditorComponent,
 	EditorTheme,
 	Keybinding,
@@ -18,13 +16,10 @@ import type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
-	SlashCommand,
 } from "@fitclaw/tui";
 import {
-	CombinedAutocompleteProvider,
 	type Component,
 	Container,
-	fuzzyFilter,
 	Loader,
 	type LoaderIndicatorOptions,
 	Markdown,
@@ -41,7 +36,6 @@ import { APP_NAME, APP_TITLE, getAgentDir, getDebugLogPath, VERSION } from "../.
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type {
-	AutocompleteProviderFactory,
 	ExtensionContext,
 	ExtensionRunner,
 	ExtensionUIContext,
@@ -54,12 +48,10 @@ import { findExactModelReferenceMatch, resolveModelScope } from "../../core/mode
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, type MissingSessionCwdError } from "../../core/session-cwd.js";
-import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
-import { parseGitUrl } from "../../utils/git.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { ArminComponent } from "./components/armin.js";
@@ -78,6 +70,7 @@ import { ScopedModelsSelectorComponent } from "./components/scoped-models-select
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
+import { InteractiveAutocompleteController } from "./interactive-autocomplete-controller.js";
 import { InteractiveBashController } from "./interactive-bash-controller.js";
 import { InteractiveMessageQueueController } from "./interactive-message-queue-controller.js";
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
@@ -126,8 +119,6 @@ export class InteractiveMode {
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
-	private autocompleteProvider: AutocompleteProvider | undefined;
-	private autocompleteProviderWrappers: AutocompleteProviderFactory[] = [];
 	private fdPath: string | undefined;
 	private editorContainer: Container;
 	private footer: FooterComponent;
@@ -149,6 +140,7 @@ export class InteractiveMode {
 	private lastEscapeTime = 0;
 	private changelogMarkdown: string | undefined = undefined;
 	private startupNoticesShown = false;
+	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
 	private readonly bashController: InteractiveBashController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
@@ -165,9 +157,6 @@ export class InteractiveMode {
 
 	// Thinking block visibility state
 	private hideThinkingBlock = false;
-
-	// Skill commands: command name -> skill file path
-	private skillCommands = new Map<string, string>();
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
@@ -245,6 +234,12 @@ export class InteractiveMode {
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
+		this.autocompleteController = new InteractiveAutocompleteController({
+			getSession: () => this.session,
+			getEditor: () => this.editor,
+			defaultEditor: this.defaultEditor,
+			getFdPath: () => this.fdPath,
+		});
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
@@ -359,144 +354,6 @@ export class InteractiveMode {
 			getToolOutputExpanded: () => this.toolOutputExpanded,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
-	}
-
-	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
-		if (!sourceInfo) {
-			return undefined;
-		}
-
-		const scopePrefix = sourceInfo.scope === "user" ? "u" : sourceInfo.scope === "project" ? "p" : "t";
-		const source = sourceInfo.source.trim();
-
-		if (source === "auto" || source === "local" || source === "cli") {
-			return scopePrefix;
-		}
-
-		if (source.startsWith("npm:")) {
-			return `${scopePrefix}:${source}`;
-		}
-
-		const gitSource = parseGitUrl(source);
-		if (gitSource) {
-			const ref = gitSource.ref ? `@${gitSource.ref}` : "";
-			return `${scopePrefix}:git:${gitSource.host}/${gitSource.path}${ref}`;
-		}
-
-		return scopePrefix;
-	}
-
-	private prefixAutocompleteDescription(description: string | undefined, sourceInfo?: SourceInfo): string | undefined {
-		const sourceTag = this.getAutocompleteSourceTag(sourceInfo);
-		if (!sourceTag) {
-			return description;
-		}
-		return description ? `[${sourceTag}] ${description}` : `[${sourceTag}]`;
-	}
-
-	private getBuiltInCommandConflictDiagnostics(extensionRunner: ExtensionRunner): ResourceDiagnostic[] {
-		const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
-		return extensionRunner
-			.getRegisteredCommands()
-			.filter((command) => builtinNames.has(command.name))
-			.map((command) => ({
-				type: "warning" as const,
-				message:
-					command.invocationName === command.name
-						? `Extension command '/${command.name}' conflicts with built-in interactive command. Skipping in autocomplete.`
-						: `Extension command '/${command.name}' conflicts with built-in interactive command. Available as '/${command.invocationName}'.`,
-				path: command.sourceInfo.path,
-			}));
-	}
-
-	private createBaseAutocompleteProvider(): AutocompleteProvider {
-		// Define commands for autocomplete
-		const slashCommands: SlashCommand[] = BUILTIN_SLASH_COMMANDS.map((command) => ({
-			name: command.name,
-			description: command.description,
-		}));
-
-		const modelCommand = slashCommands.find((command) => command.name === "model");
-		if (modelCommand) {
-			modelCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				// Get available models (scoped or from registry)
-				const models =
-					this.session.scopedModels.length > 0
-						? this.session.scopedModels.map((s) => s.model)
-						: this.session.modelRegistry.getAvailable();
-
-				if (models.length === 0) return null;
-
-				// Create items with provider/id format
-				const items = models.map((m) => ({
-					id: m.id,
-					provider: m.provider,
-					label: `${m.provider}/${m.id}`,
-				}));
-
-				// Fuzzy filter by model ID + provider (allows "opus anthropic" to match)
-				const filtered = fuzzyFilter(items, prefix, (item) => `${item.id} ${item.provider}`);
-
-				if (filtered.length === 0) return null;
-
-				return filtered.map((item) => ({
-					value: item.label,
-					label: item.id,
-					description: item.provider,
-				}));
-			};
-		}
-
-		// Convert prompt templates to SlashCommand format for autocomplete
-		const templateCommands: SlashCommand[] = this.session.promptTemplates.map((cmd) => ({
-			name: cmd.name,
-			description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
-			...(cmd.argumentHint && { argumentHint: cmd.argumentHint }),
-		}));
-
-		// Convert extension commands to SlashCommand format
-		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
-		const extensionCommands: SlashCommand[] = this.session.extensionRunner
-			.getRegisteredCommands()
-			.filter((cmd) => !builtinCommandNames.has(cmd.name))
-			.map((cmd) => ({
-				name: cmd.invocationName,
-				description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
-				getArgumentCompletions: cmd.getArgumentCompletions,
-			}));
-
-		// Build skill commands from session.skills (if enabled)
-		this.skillCommands.clear();
-		const skillCommandList: SlashCommand[] = [];
-		if (this.settingsManager.getEnableSkillCommands()) {
-			for (const skill of this.session.resourceLoader.getSkills().skills) {
-				const commandName = `skill:${skill.name}`;
-				this.skillCommands.set(commandName, skill.filePath);
-				skillCommandList.push({
-					name: commandName,
-					description: this.prefixAutocompleteDescription(skill.description, skill.sourceInfo),
-				});
-			}
-		}
-
-		return new CombinedAutocompleteProvider(
-			[...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList],
-			this.sessionManager.getCwd(),
-			this.fdPath,
-		);
-	}
-
-	private setupAutocompleteProvider(): void {
-		let provider = this.createBaseAutocompleteProvider();
-		for (const wrapProvider of this.autocompleteProviderWrappers) {
-			provider = wrapProvider(provider);
-		}
-
-		this.autocompleteProvider = provider;
-		this.defaultEditor.setAutocompleteProvider(provider);
-		if (this.editor !== this.defaultEditor) {
-			this.editor.setAutocompleteProvider?.(provider);
-		}
 	}
 
 	private showStartupNoticesIfNeeded(): void {
@@ -916,7 +773,9 @@ export class InteractiveMode {
 			path: error.path,
 		}));
 		extensionDiagnostics.push(...this.session.extensionRunner.getCommandDiagnostics());
-		extensionDiagnostics.push(...this.getBuiltInCommandConflictDiagnostics(this.session.extensionRunner));
+		extensionDiagnostics.push(
+			...this.autocompleteController.getBuiltInCommandConflictDiagnostics(this.session.extensionRunner),
+		);
 		extensionDiagnostics.push(...this.session.extensionRunner.getShortcutDiagnostics());
 
 		renderLoadedResources(
@@ -1020,7 +879,7 @@ export class InteractiveMode {
 		});
 
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-		this.setupAutocompleteProvider();
+		this.autocompleteController.setup();
 
 		const extensionRunner = this.session.extensionRunner;
 		this.setupExtensionShortcuts(extensionRunner);
@@ -1255,9 +1114,9 @@ export class InteractiveMode {
 		this.clearExtensionWidgets();
 		this.footerDataProvider.clearExtensionStatuses();
 		this.footer.invalidate();
-		this.autocompleteProviderWrappers = [];
+		this.autocompleteController.clearProviders();
 		this.setCustomEditorComponent(undefined);
-		this.setupAutocompleteProvider();
+		this.autocompleteController.setup();
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
 		this.workingMessage = undefined;
@@ -1430,8 +1289,7 @@ export class InteractiveMode {
 			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
 			addAutocompleteProvider: (factory) => {
-				this.autocompleteProviderWrappers.push(factory);
-				this.setupAutocompleteProvider();
+				this.autocompleteController.addProvider(factory);
 			},
 			setEditorComponent: (factory) => this.setCustomEditorComponent(factory),
 			get theme() {
@@ -1659,9 +1517,7 @@ export class InteractiveMode {
 			}
 
 			// Set autocomplete if supported
-			if (newEditor.setAutocompleteProvider && this.autocompleteProvider) {
-				newEditor.setAutocompleteProvider(this.autocompleteProvider);
-			}
+			this.autocompleteController.applyToEditor(newEditor);
 
 			// If extending CustomEditor, copy app-level handlers
 			// Use duck typing since instanceof fails across jiti module boundaries
@@ -2498,7 +2354,7 @@ export class InteractiveMode {
 					},
 					onEnableSkillCommandsChange: (enabled) => {
 						this.settingsManager.setEnableSkillCommands(enabled);
-						this.setupAutocompleteProvider();
+						this.autocompleteController.setup();
 					},
 					onSteeringModeChange: (mode) => {
 						this.session.setSteeringMode(mode);
@@ -2810,7 +2666,7 @@ export class InteractiveMode {
 			}
 			this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 			this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
-			this.setupAutocompleteProvider();
+			this.autocompleteController.setup();
 			const runner = this.session.extensionRunner;
 			this.setupExtensionShortcuts(runner);
 			this.rebuildChatFromMessages();
