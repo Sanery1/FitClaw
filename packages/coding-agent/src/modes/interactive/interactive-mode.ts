@@ -45,8 +45,6 @@ import { FooterComponent } from "./components/footer.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
-import { SettingsSelectorComponent } from "./components/settings-selector.js";
-import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
 import { InteractiveAutocompleteController } from "./interactive-autocomplete-controller.js";
 import { InteractiveBashController } from "./interactive-bash-controller.js";
@@ -57,11 +55,11 @@ import { InteractiveMessageQueueController } from "./interactive-message-queue-c
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
+import { InteractiveSettingsController } from "./interactive-settings-controller.js";
 import { InteractiveStartupController } from "./interactive-startup-controller.js";
 import { InteractiveWorkingController } from "./interactive-working-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
-	getAvailableThemes,
 	getAvailableThemesWithPaths,
 	getEditorTheme,
 	getMarkdownTheme,
@@ -122,6 +120,7 @@ export class InteractiveMode {
 	private readonly extensionSurfaceController: InteractiveExtensionSurfaceController;
 	private readonly messageQueueController: InteractiveMessageQueueController;
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
+	private readonly settingsController: InteractiveSettingsController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
 	private readonly sessionViewController: InteractiveSessionViewController;
 	private readonly startupController: InteractiveStartupController;
@@ -133,9 +132,6 @@ export class InteractiveMode {
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
-
-	// Thinking block visibility state
-	private hideThinkingBlock = false;
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
@@ -227,9 +223,21 @@ export class InteractiveMode {
 			version: this.version,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
-
-		// Load hide thinking block setting
-		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+		this.settingsController = new InteractiveSettingsController({
+			getSession: () => this.session,
+			getEditor: () => this.editor,
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+			defaultEditor: this.defaultEditor,
+			footer: this.footer,
+			showSelector: (create) => this.extensionSurfaceController.showSelector(create),
+			setupAutocomplete: () => this.autocompleteController.setup(),
+			rebuildThinkingVisibility: (hidden, showStatus) =>
+				this.sessionViewController.rebuildForThinkingVisibility(hidden, showStatus),
+			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			showError: (message) => this.showError(message),
+			showStatus: (message) => this.showStatus(message),
+		});
 
 		// Register themes from resource loader and initialize
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
@@ -239,7 +247,7 @@ export class InteractiveMode {
 			ui: this.ui,
 			editorContainer: this.editorContainer,
 			getEditor: () => this.editor,
-			showSelector: (create) => this.showSelector(create),
+			showSelector: (create) => this.extensionSurfaceController.showSelector(create),
 			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
 			showWarning: (message) => this.showWarning(message),
@@ -289,7 +297,7 @@ export class InteractiveMode {
 			defaultEditor: this.defaultEditor,
 			getEditor: () => this.editor,
 			keybindings: this.keybindings,
-			showSelector: (create) => this.showSelector(create),
+			showSelector: (create) => this.extensionSurfaceController.showSelector(create),
 			showExtensionSelector: (title, options) => this.extensionDialogController.select(title, options),
 			showExtensionEditor: (title) => this.extensionDialogController.editor(title),
 			promptForMissingSessionCwd: (error) => this.extensionDialogController.promptForMissingSessionCwd(error),
@@ -321,7 +329,7 @@ export class InteractiveMode {
 			showError: (message) => this.showError(message),
 			showStatus: (message) => this.showStatus(message),
 			flushCompactionQueue: (options) => this.messageQueueController.flushCompactionQueue(options),
-			getHideThinkingBlock: () => this.hideThinkingBlock,
+			getHideThinkingBlock: () => this.settingsController.hideThinkingBlock,
 			getHiddenThinkingLabel: () => this.hiddenThinkingLabel,
 			getToolOutputExpanded: () => this.toolOutputExpanded,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
@@ -679,7 +687,7 @@ export class InteractiveMode {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
-		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+		this.settingsController.refresh();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -977,7 +985,7 @@ export class InteractiveMode {
 
 			// Handle commands
 			if (text === "/settings") {
-				this.showSettingsSelector();
+				this.settingsController.show();
 				this.editor.setText("");
 				return;
 			}
@@ -1367,11 +1375,7 @@ export class InteractiveMode {
 	}
 
 	private toggleThinkingBlockVisibility(): void {
-		this.hideThinkingBlock = !this.hideThinkingBlock;
-		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
-		this.sessionViewController.rebuildForThinkingVisibility(this.hideThinkingBlock, true);
-
-		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
+		this.settingsController.toggleThinkingVisibility();
 	}
 
 	private openExternalEditor(): void {
@@ -1487,172 +1491,6 @@ export class InteractiveMode {
 	// Selectors
 	// =========================================================================
 
-	/**
-	 * Shows a selector component in place of the editor.
-	 * @param create Factory that receives a `done` callback and returns the component and focus target
-	 */
-	private showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
-		const done = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-		};
-		const { component, focus } = create(done);
-		this.editorContainer.clear();
-		this.editorContainer.addChild(component);
-		this.ui.setFocus(focus);
-		this.ui.requestRender();
-	}
-
-	private showSettingsSelector(): void {
-		this.showSelector((done) => {
-			const selector = new SettingsSelectorComponent(
-				{
-					autoCompact: this.session.autoCompactionEnabled,
-					showImages: this.settingsManager.getShowImages(),
-					imageWidthCells: this.settingsManager.getImageWidthCells(),
-					autoResizeImages: this.settingsManager.getImageAutoResize(),
-					blockImages: this.settingsManager.getBlockImages(),
-					enableSkillCommands: this.settingsManager.getEnableSkillCommands(),
-					steeringMode: this.session.steeringMode,
-					followUpMode: this.session.followUpMode,
-					transport: this.settingsManager.getTransport(),
-					thinkingLevel: this.session.thinkingLevel,
-					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
-					currentTheme: this.settingsManager.getTheme() || "dark",
-					availableThemes: getAvailableThemes(),
-					hideThinkingBlock: this.hideThinkingBlock,
-					collapseChangelog: this.settingsManager.getCollapseChangelog(),
-					enableInstallTelemetry: this.settingsManager.getEnableInstallTelemetry(),
-					doubleEscapeAction: this.settingsManager.getDoubleEscapeAction(),
-					treeFilterMode: this.settingsManager.getTreeFilterMode(),
-					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
-					editorPaddingX: this.settingsManager.getEditorPaddingX(),
-					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
-					quietStartup: this.settingsManager.getQuietStartup(),
-					clearOnShrink: this.settingsManager.getClearOnShrink(),
-					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
-					warnings: this.settingsManager.getWarnings(),
-				},
-				{
-					onAutoCompactChange: (enabled) => {
-						this.session.setAutoCompactionEnabled(enabled);
-						this.footer.setAutoCompactEnabled(enabled);
-					},
-					onShowImagesChange: (enabled) => {
-						this.settingsManager.setShowImages(enabled);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setShowImages(enabled);
-							}
-						}
-					},
-					onImageWidthCellsChange: (width) => {
-						this.settingsManager.setImageWidthCells(width);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setImageWidthCells(width);
-							}
-						}
-					},
-					onAutoResizeImagesChange: (enabled) => {
-						this.settingsManager.setImageAutoResize(enabled);
-					},
-					onBlockImagesChange: (blocked) => {
-						this.settingsManager.setBlockImages(blocked);
-					},
-					onEnableSkillCommandsChange: (enabled) => {
-						this.settingsManager.setEnableSkillCommands(enabled);
-						this.autocompleteController.setup();
-					},
-					onSteeringModeChange: (mode) => {
-						this.session.setSteeringMode(mode);
-					},
-					onFollowUpModeChange: (mode) => {
-						this.session.setFollowUpMode(mode);
-					},
-					onTransportChange: (transport) => {
-						this.settingsManager.setTransport(transport);
-						this.session.agent.transport = transport;
-					},
-					onThinkingLevelChange: (level) => {
-						this.session.setThinkingLevel(level);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-					},
-					onThemeChange: (themeName) => {
-						const result = setTheme(themeName, true);
-						this.settingsManager.setTheme(themeName);
-						this.ui.invalidate();
-						if (!result.success) {
-							this.showError(`Failed to load theme "${themeName}": ${result.error}\nFell back to dark theme.`);
-						}
-					},
-					onThemePreview: (themeName) => {
-						const result = setTheme(themeName, true);
-						if (result.success) {
-							this.ui.invalidate();
-							this.ui.requestRender();
-						}
-					},
-					onHideThinkingBlockChange: (hidden) => {
-						this.hideThinkingBlock = hidden;
-						this.settingsManager.setHideThinkingBlock(hidden);
-						this.sessionViewController.rebuildForThinkingVisibility(hidden, false);
-					},
-					onCollapseChangelogChange: (collapsed) => {
-						this.settingsManager.setCollapseChangelog(collapsed);
-					},
-					onEnableInstallTelemetryChange: (enabled) => {
-						this.settingsManager.setEnableInstallTelemetry(enabled);
-					},
-					onQuietStartupChange: (enabled) => {
-						this.settingsManager.setQuietStartup(enabled);
-					},
-					onDoubleEscapeActionChange: (action) => {
-						this.settingsManager.setDoubleEscapeAction(action);
-					},
-					onTreeFilterModeChange: (mode) => {
-						this.settingsManager.setTreeFilterMode(mode);
-					},
-					onShowHardwareCursorChange: (enabled) => {
-						this.settingsManager.setShowHardwareCursor(enabled);
-						this.ui.setShowHardwareCursor(enabled);
-					},
-					onEditorPaddingXChange: (padding) => {
-						this.settingsManager.setEditorPaddingX(padding);
-						this.defaultEditor.setPaddingX(padding);
-						if (this.editor !== this.defaultEditor && this.editor.setPaddingX !== undefined) {
-							this.editor.setPaddingX(padding);
-						}
-					},
-					onAutocompleteMaxVisibleChange: (maxVisible) => {
-						this.settingsManager.setAutocompleteMaxVisible(maxVisible);
-						this.defaultEditor.setAutocompleteMaxVisible(maxVisible);
-						if (this.editor !== this.defaultEditor && this.editor.setAutocompleteMaxVisible !== undefined) {
-							this.editor.setAutocompleteMaxVisible(maxVisible);
-						}
-					},
-					onClearOnShrinkChange: (enabled) => {
-						this.settingsManager.setClearOnShrink(enabled);
-						this.ui.setClearOnShrink(enabled);
-					},
-					onShowTerminalProgressChange: (enabled) => {
-						this.settingsManager.setShowTerminalProgress(enabled);
-					},
-					onWarningsChange: (warnings) => {
-						this.settingsManager.setWarnings(warnings);
-					},
-					onCancel: () => {
-						done();
-						this.ui.requestRender();
-					},
-				},
-			);
-			return { component: selector, focus: selector.getSettingsList() };
-		});
-	}
-
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
 		if (!searchTerm) {
 			this.showModelSelector();
@@ -1703,7 +1541,7 @@ export class InteractiveMode {
 	}
 
 	private showModelSelector(initialSearchInput?: string): void {
-		this.showSelector((done) => {
+		this.extensionSurfaceController.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
 				this.ui,
 				this.session.model,
@@ -1782,7 +1620,7 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		};
 
-		this.showSelector((done) => {
+		this.extensionSurfaceController.showSelector((done) => {
 			const selector = new ScopedModelsSelectorComponent(
 				{
 					allModels,
@@ -1856,7 +1694,7 @@ export class InteractiveMode {
 			this.keybindings.reload();
 			this.extensionChromeController.setHeaderExpanded(this.toolOutputExpanded);
 			setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+			this.settingsController.refresh();
 			const themeName = this.settingsManager.getTheme();
 			const themeResult = themeName ? setTheme(themeName, true) : { success: true };
 			if (!themeResult.success) {

@@ -117,6 +117,24 @@ describe("InteractiveExtensionSurfaceController", () => {
 		expect(fixture.setFocus).toHaveBeenLastCalledWith(fixture.defaultEditor);
 	});
 
+	it("mounts selectors and restores the active editor through done", () => {
+		const fixture = createSurfaceFixture();
+		const component = createComponent();
+		const focus = createComponent();
+		let done: (() => void) | undefined;
+
+		fixture.controller.showSelector((restore) => {
+			done = restore;
+			return { component, focus };
+		});
+
+		expect(fixture.controller.editorContainer.children).toEqual([component]);
+		expect(fixture.setFocus).toHaveBeenLastCalledWith(focus);
+		done?.();
+		expect(fixture.controller.editorContainer.children).toEqual([fixture.defaultEditor]);
+		expect(fixture.setFocus).toHaveBeenLastCalledWith(fixture.defaultEditor);
+	});
+
 	it("tracks terminal listeners until individually removed or cleared", () => {
 		const fixture = createSurfaceFixture();
 		const removeFirst = fixture.controller.addTerminalInputListener(() => undefined);

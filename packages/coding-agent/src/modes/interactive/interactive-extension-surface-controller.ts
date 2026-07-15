@@ -35,6 +35,19 @@ export class InteractiveExtensionSurfaceController {
 		return this.activeEditor;
 	}
 
+	showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
+		const done = () => {
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.activeEditor);
+			this.options.ui.setFocus(this.activeEditor);
+		};
+		const { component, focus } = create(done);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(component);
+		this.options.ui.setFocus(focus);
+		this.options.ui.requestRender();
+	}
+
 	setCustomEditor(factory: CustomEditorFactory | undefined): void {
 		const currentText = this.activeEditor.getText();
 		this.editorContainer.clear();
