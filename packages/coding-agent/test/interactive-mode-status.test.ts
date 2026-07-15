@@ -1,9 +1,8 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { Container } from "@fitclaw/tui";
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/resource-loader.js";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import {
 	type LoadedResourcesDisplayOptions,
 	renderLoadedResources,
@@ -24,26 +23,6 @@ function normalizeRenderedOutput(container: Container, width = 220): string {
 		.join("\n")
 		.trim();
 }
-
-describe("InteractiveMode.setToolsExpanded", () => {
-	test("applies expansion state to the active header and chat entries", () => {
-		const setHeaderExpanded = vi.fn();
-		const chatChild = { setExpanded: vi.fn() };
-		const fakeThis: any = {
-			toolOutputExpanded: false,
-			extensionChromeController: { setHeaderExpanded },
-			chatContainer: { children: [chatChild] },
-			ui: { requestRender: vi.fn() },
-		};
-
-		(InteractiveMode as any).prototype.setToolsExpanded.call(fakeThis, true);
-
-		expect(fakeThis.toolOutputExpanded).toBe(true);
-		expect(setHeaderExpanded).toHaveBeenCalledWith(true);
-		expect(chatChild.setExpanded).toHaveBeenCalledWith(true);
-		expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(1);
-	});
-});
 
 describe("renderLoadedResources", () => {
 	beforeAll(() => {

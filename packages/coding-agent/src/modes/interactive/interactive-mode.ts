@@ -14,7 +14,7 @@ import { FooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { CustomEditor } from "./components/custom-editor.js";
-import { ExpandableText, isExpandable } from "./components/expandable-text.js";
+import { ExpandableText } from "./components/expandable-text.js";
 import { FooterComponent } from "./components/footer.js";
 import { keyDisplay, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { InteractiveAuthController } from "./interactive-auth-controller.js";
@@ -37,6 +37,7 @@ import { InteractiveSessionViewController } from "./interactive-session-view-con
 import { InteractiveSettingsController } from "./interactive-settings-controller.js";
 import { InteractiveStartupController } from "./interactive-startup-controller.js";
 import { InteractiveTerminalController } from "./interactive-terminal-controller.js";
+import { InteractiveToolExpansionController } from "./interactive-tool-expansion-controller.js";
 import { InteractiveWorkingController } from "./interactive-working-controller.js";
 import {
 	getEditorTheme,
@@ -78,7 +79,6 @@ export class InteractiveMode {
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
-	private version: string;
 	private isInitialized = false;
 	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
@@ -100,10 +100,8 @@ export class InteractiveMode {
 	private readonly sessionViewController: InteractiveSessionViewController;
 	private readonly startupController: InteractiveStartupController;
 	private readonly terminalController: InteractiveTerminalController;
+	private readonly toolExpansionController: InteractiveToolExpansionController;
 	private readonly workingController: InteractiveWorkingController;
-
-	// Tool output expansion state
-	private toolOutputExpanded = false;
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
@@ -116,9 +114,6 @@ export class InteractiveMode {
 	}
 	private get session(): AgentSession {
 		return this.runtimeHost.session;
-	}
-	private get sessionManager() {
-		return this.session.sessionManager;
 	}
 	private get settingsManager() {
 		return this.session.settingsManager;
@@ -135,7 +130,6 @@ export class InteractiveMode {
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession();
 		});
-		this.version = VERSION;
 		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.chatContainer = new Container();
@@ -172,14 +166,19 @@ export class InteractiveMode {
 			getEditor: () => this.editor,
 			keybindings: this.keybindings,
 		});
-		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
+		this.footerDataProvider = new FooterDataProvider(this.session.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.extensionChromeController = new InteractiveExtensionChromeController({
 			ui: this.ui,
 			footer: this.footer,
 			footerDataProvider: this.footerDataProvider,
-			getToolOutputExpanded: () => this.toolOutputExpanded,
+			getToolOutputExpanded: () => this.toolExpansionController.isExpanded,
+		});
+		this.toolExpansionController = new InteractiveToolExpansionController({
+			ui: this.ui,
+			chatContainer: this.chatContainer,
+			setHeaderExpanded: (expanded) => this.extensionChromeController.setHeaderExpanded(expanded),
 		});
 		this.workingController = new InteractiveWorkingController({
 			ui: this.ui,
@@ -198,8 +197,8 @@ export class InteractiveMode {
 			surfaceController: this.extensionSurfaceController,
 			workingController: this.workingController,
 			isVerbose: () => this.options.verbose === true,
-			getToolOutputExpanded: () => this.toolOutputExpanded,
-			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
+			getToolOutputExpanded: () => this.toolExpansionController.isExpanded,
+			setToolsExpanded: (expanded) => this.toolExpansionController.setExpanded(expanded),
 			deferShutdown: () => this.terminalController.deferShutdown(),
 			updateTerminalTitle: () => this.updateTerminalTitle(),
 			updateHiddenThinkingLabel: (label) => this.sessionViewController.updateHiddenThinkingLabel(label),
@@ -209,7 +208,7 @@ export class InteractiveMode {
 		this.startupController = new InteractiveStartupController({
 			getSession: () => this.session,
 			chatContainer: this.chatContainer,
-			version: this.version,
+			version: VERSION,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
 		this.settingsController = new InteractiveSettingsController({
@@ -275,7 +274,7 @@ export class InteractiveMode {
 			keybindings: this.keybindings,
 			footer: this.footer,
 			footerDataProvider: this.footerDataProvider,
-			getToolOutputExpanded: () => this.toolOutputExpanded,
+			getToolOutputExpanded: () => this.toolExpansionController.isExpanded,
 			setHeaderExpanded: (expanded) => this.extensionChromeController.setHeaderExpanded(expanded),
 			refreshSettings: () => this.settingsController.refresh(),
 			setupAutocomplete: () => this.autocompleteController.setup(),
@@ -377,7 +376,7 @@ export class InteractiveMode {
 			flushCompactionQueue: (options) => this.messageQueueController.flushCompactionQueue(options),
 			getHideThinkingBlock: () => this.settingsController.hideThinkingBlock,
 			getHiddenThinkingLabel: () => this.extensionRuntimeController.hiddenThinkingLabel,
-			getToolOutputExpanded: () => this.toolOutputExpanded,
+			getToolOutputExpanded: () => this.toolExpansionController.isExpanded,
 			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
 		this.commandController = new InteractiveCommandController({
@@ -416,7 +415,7 @@ export class InteractiveMode {
 			sessionNavigationController: this.sessionNavigationController,
 			settingsController: this.settingsController,
 			terminalController: this.terminalController,
-			toggleToolOutputExpansion: () => this.toggleToolOutputExpansion(),
+			toggleToolOutputExpansion: () => this.toolExpansionController.toggle(),
 		});
 	}
 
@@ -438,7 +437,7 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${VERSION}`);
 
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
@@ -482,7 +481,7 @@ export class InteractiveMode {
 			const builtInHeader = new ExpandableText(
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
 				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
-				this.getStartupExpansionState(),
+				this.options.verbose === true || this.toolExpansionController.isExpanded,
 				1,
 				0,
 			);
@@ -542,8 +541,8 @@ export class InteractiveMode {
 	 * Update terminal title with session name and cwd.
 	 */
 	private updateTerminalTitle(): void {
-		const cwdBasename = path.basename(this.sessionManager.getCwd());
-		const sessionName = this.sessionManager.getSessionName();
+		const cwdBasename = path.basename(this.session.sessionManager.getCwd());
+		const sessionName = this.session.sessionManager.getSessionName();
 		if (sessionName) {
 			this.ui.terminal.setTitle(`${APP_TITLE} - ${sessionName} - ${cwdBasename}`);
 		} else {
@@ -625,10 +624,6 @@ export class InteractiveMode {
 	// =========================================================================
 	// Extension System
 	// =========================================================================
-
-	private getStartupExpansionState(): boolean {
-		return this.options.verbose || this.toolOutputExpanded;
-	}
 
 	/**
 	 * Initialize the extension system with TUI-based UI context.
@@ -757,21 +752,6 @@ export class InteractiveMode {
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
 		this.sessionViewController.rebuildChatFromMessages();
-	}
-
-	private toggleToolOutputExpansion(): void {
-		this.setToolsExpanded(!this.toolOutputExpanded);
-	}
-
-	private setToolsExpanded(expanded: boolean): void {
-		this.toolOutputExpanded = expanded;
-		this.extensionChromeController.setHeaderExpanded(expanded);
-		for (const child of this.chatContainer.children) {
-			if (isExpandable(child)) {
-				child.setExpanded(expanded);
-			}
-		}
-		this.ui.requestRender();
 	}
 
 	// =========================================================================
