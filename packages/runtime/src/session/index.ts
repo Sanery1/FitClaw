@@ -1,3 +1,4 @@
+export * from "./agent-compaction-controller.js";
 export * from "./agent-retry-controller.js";
 export * from "./compaction/index.js";
 export * from "./managed-agent-session.js";

@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **共享 Agent 自动压缩生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentCompactionController`，Coach 与 Coding CLI 统一复用阈值判定、单次 overflow 恢复、取消、持久化和队列续跑；CLI 通过前后钩子保留扩展摘要与事件，手动压缩仍归 CLI 编排。
 - **共享 Agent 重试生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentRetryController`，Coach 的 `ManagedAgentSession` 与 Coding CLI 的 `AgentSession` 统一复用重试判定、指数退避、取消和等待逻辑；CLI 不再维护第二套重试状态机。
 - **飞书动作媒体链路 (2026-07-15)**: Coach 在每次运行时注入频道级 `attach`，仅允许读取已加载 Skill realpath 内的文件；飞书适配器按媒体类型上传图片或文件并回复原消息，不再保留全局上传回调或空 `uploadFile` stub。真实飞书应用 smoke test 尚待执行。
 - **Coach Skill 工具边界 (2026-07-15)**: Skill 通过 `permissions.network: false` 与 `permissions.commands.allow` 声明离线脚本；Coach 只为已加载 Skill 提供限定根目录的 `read`。脚本交给独立无网络、只读文件系统的 Skill Runner 容器执行，`edit` / `write` 和任意 shell 不再进入 Coach 工具集。
