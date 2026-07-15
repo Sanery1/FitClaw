@@ -3,9 +3,6 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
-import * as crypto from "node:crypto";
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent } from "@fitclaw/ai";
 import type { EditorComponent, MarkdownTheme } from "@fitclaw/tui";
@@ -15,7 +12,6 @@ import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { FooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
-import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { CustomEditor } from "./components/custom-editor.js";
 import { ExpandableText, isExpandable } from "./components/expandable-text.js";
@@ -25,6 +21,7 @@ import { InteractiveAuthController } from "./interactive-auth-controller.js";
 import { InteractiveAutocompleteController } from "./interactive-autocomplete-controller.js";
 import { InteractiveBashController } from "./interactive-bash-controller.js";
 import { InteractiveCommandController } from "./interactive-command-controller.js";
+import { InteractiveEditorController } from "./interactive-editor-controller.js";
 import { InteractiveExtensionChromeController } from "./interactive-extension-chrome-controller.js";
 import { InteractiveExtensionDialogController } from "./interactive-extension-dialog-controller.js";
 import { InteractiveExtensionRuntimeController } from "./interactive-extension-runtime-controller.js";
@@ -83,11 +80,11 @@ export class InteractiveMode {
 	private keybindings: KeybindingsManager;
 	private version: string;
 	private isInitialized = false;
-	private lastEscapeTime = 0;
 	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
 	private readonly bashController: InteractiveBashController;
 	private readonly commandController: InteractiveCommandController;
+	private readonly editorController: InteractiveEditorController;
 	private readonly extensionChromeController: InteractiveExtensionChromeController;
 	private readonly extensionDialogController: InteractiveExtensionDialogController;
 	private readonly extensionRuntimeController: InteractiveExtensionRuntimeController;
@@ -110,9 +107,6 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
-	// Track if editor is in bash mode (text starts with !)
-	private isBashMode = false;
-
 	// Convenience accessors
 	private get editor(): EditorComponent {
 		return this.extensionSurfaceController.editor;
@@ -229,7 +223,7 @@ export class InteractiveMode {
 			setupAutocomplete: () => this.autocompleteController.setup(),
 			rebuildThinkingVisibility: (hidden, showStatus) =>
 				this.sessionViewController.rebuildForThinkingVisibility(hidden, showStatus),
-			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			updateEditorBorderColor: () => this.editorController.updateBorderColor(),
 			showError: (message) => this.showError(message),
 			showStatus: (message) => this.showStatus(message),
 		});
@@ -248,7 +242,7 @@ export class InteractiveMode {
 			showWarning: (message) => this.showWarning(message),
 			updateAvailableProviderCount: () => this.modelController.updateAvailableProviderCount(),
 			invalidateFooter: () => this.footer.invalidate(),
-			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			updateEditorBorderColor: () => this.editorController.updateBorderColor(),
 			checkModelEasterEgg: (model) => this.feedbackController.checkModelEasterEgg(model),
 		});
 		this.modelController = new InteractiveModelController({
@@ -257,7 +251,7 @@ export class InteractiveMode {
 			showSelector: (create) => this.extensionSurfaceController.showSelector(create),
 			invalidateFooter: () => this.footer.invalidate(),
 			setAvailableProviderCount: (count) => this.footerDataProvider.setAvailableProviderCount(count),
-			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			updateEditorBorderColor: () => this.editorController.updateBorderColor(),
 			warnAboutAnthropicSubscriptionAuth: (model) =>
 				this.authController.maybeWarnAboutAnthropicSubscriptionAuth(model),
 			checkModelEasterEgg: (model) => this.feedbackController.checkModelEasterEgg(model),
@@ -372,7 +366,7 @@ export class InteractiveMode {
 			isInitialized: () => this.isInitialized,
 			initialize: () => this.init(),
 			invalidateFooter: () => this.footer.invalidate(),
-			updateEditorBorderColor: () => this.updateEditorBorderColor(),
+			updateEditorBorderColor: () => this.editorController.updateBorderColor(),
 			startAgentActivity: () => this.workingController.startAgentActivity(),
 			stopAgentActivity: () => this.workingController.stopAgentActivity(),
 			updatePendingMessagesDisplay: () => this.messageQueueController.updatePendingMessagesDisplay(),
@@ -406,11 +400,23 @@ export class InteractiveMode {
 			terminalController: this.terminalController,
 			workingController: this.workingController,
 			renderCurrentSessionState: () => this.renderCurrentSessionState(),
-			resetBashMode: () => {
-				this.isBashMode = false;
-				this.updateEditorBorderColor();
-			},
+			resetBashMode: () => this.editorController.resetBashMode(),
 			handleFatalRuntimeError: (prefix, error) => this.handleFatalRuntimeError(prefix, error),
+		});
+		this.editorController = new InteractiveEditorController({
+			getSession: () => this.session,
+			ui: this.ui,
+			defaultEditor: this.defaultEditor,
+			getEditor: () => this.editor,
+			footer: this.footer,
+			commandController: this.commandController,
+			feedbackController: this.feedbackController,
+			messageQueueController: this.messageQueueController,
+			modelController: this.modelController,
+			sessionNavigationController: this.sessionNavigationController,
+			settingsController: this.settingsController,
+			terminalController: this.terminalController,
+			toggleToolOutputExpansion: () => this.toggleToolOutputExpansion(),
 		});
 	}
 
@@ -503,7 +509,7 @@ export class InteractiveMode {
 		this.ui.addChild(this.footer);
 		this.ui.setFocus(this.editor);
 
-		this.setupKeyHandlers();
+		this.editorController.setup();
 		this.commandController.setup();
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
@@ -519,7 +525,7 @@ export class InteractiveMode {
 		// Set up theme file watcher
 		onThemeChange(() => {
 			this.ui.invalidate();
-			this.updateEditorBorderColor();
+			this.editorController.updateBorderColor();
 			this.ui.requestRender();
 		});
 
@@ -710,7 +716,7 @@ export class InteractiveMode {
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
 		await this.modelController.updateAvailableProviderCount();
-		this.updateEditorBorderColor();
+		this.editorController.updateBorderColor();
 		this.updateTerminalTitle();
 	}
 
@@ -728,98 +734,6 @@ export class InteractiveMode {
 		this.messageQueueController.clearCompactionQueue();
 		this.sessionViewController.resetSessionState();
 		this.renderInitialMessages();
-	}
-
-	// =========================================================================
-	// Key Handlers
-	// =========================================================================
-
-	private setupKeyHandlers(): void {
-		// Set up handlers on defaultEditor - they use this.editor for text access
-		// so they work correctly regardless of which editor is active
-		this.defaultEditor.onEscape = () => {
-			if (this.session.isStreaming) {
-				this.messageQueueController.restoreQueuedMessagesToEditor({ abort: true });
-			} else if (this.session.isBashRunning) {
-				this.session.abortBash();
-			} else if (this.isBashMode) {
-				this.editor.setText("");
-				this.isBashMode = false;
-				this.updateEditorBorderColor();
-			} else if (!this.editor.getText().trim()) {
-				// Double-escape with empty editor triggers /tree, /fork, or nothing based on setting
-				const action = this.settingsManager.getDoubleEscapeAction();
-				if (action !== "none") {
-					const now = Date.now();
-					if (now - this.lastEscapeTime < 500) {
-						if (action === "tree") {
-							this.sessionNavigationController.showTreeSelector();
-						} else {
-							this.sessionNavigationController.showUserMessageSelector();
-						}
-						this.lastEscapeTime = 0;
-					} else {
-						this.lastEscapeTime = now;
-					}
-				}
-			}
-		};
-
-		// Register app action handlers
-		this.defaultEditor.onAction("app.clear", () => this.terminalController.handleInterruptKey());
-		this.defaultEditor.onCtrlD = () => this.terminalController.handleExitKey();
-		this.defaultEditor.onAction("app.suspend", () => this.terminalController.suspend());
-		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
-		this.defaultEditor.onAction("app.model.cycleForward", () => this.modelController.cycle("forward"));
-		this.defaultEditor.onAction("app.model.cycleBackward", () => this.modelController.cycle("backward"));
-
-		// Global debug handler on TUI (works regardless of focus)
-		this.ui.onDebug = () => this.feedbackController.writeDebugLog();
-		this.defaultEditor.onAction("app.model.select", () => this.modelController.showModelSelector());
-		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
-		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
-		this.defaultEditor.onAction("app.editor.external", () => this.terminalController.openExternalEditor());
-		this.defaultEditor.onAction("app.message.followUp", () => this.messageQueueController.handleFollowUp());
-		this.defaultEditor.onAction("app.message.dequeue", () => this.messageQueueController.handleDequeue());
-		this.defaultEditor.onAction("app.session.new", () => this.commandController.handleNewSession());
-		this.defaultEditor.onAction("app.session.tree", () => this.sessionNavigationController.showTreeSelector());
-		this.defaultEditor.onAction("app.session.fork", () => this.sessionNavigationController.showUserMessageSelector());
-		this.defaultEditor.onAction("app.session.resume", () => this.sessionNavigationController.showSessionSelector());
-
-		this.defaultEditor.onChange = (text: string) => {
-			const wasBashMode = this.isBashMode;
-			this.isBashMode = text.trimStart().startsWith("!");
-			if (wasBashMode !== this.isBashMode) {
-				this.updateEditorBorderColor();
-			}
-		};
-
-		// Handle clipboard image paste (triggered on Ctrl+V)
-		this.defaultEditor.onPasteImage = () => {
-			this.handleClipboardImagePaste();
-		};
-	}
-
-	private async handleClipboardImagePaste(): Promise<void> {
-		try {
-			const image = await readClipboardImage();
-			if (!image) {
-				return;
-			}
-
-			// Write to temp file
-			const tmpDir = os.tmpdir();
-			const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-			const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
-			const filePath = path.join(tmpDir, fileName);
-			fs.writeFileSync(filePath, Buffer.from(image.bytes));
-
-			// Insert file path directly
-			this.editor.insertTextAtCursor?.(filePath);
-			this.ui.requestRender();
-		} catch {
-			// Silently ignore clipboard errors (may not have permission, etc.)
-		}
 	}
 
 	private subscribeToAgent(): void {
@@ -845,27 +759,6 @@ export class InteractiveMode {
 		this.sessionViewController.rebuildChatFromMessages();
 	}
 
-	private updateEditorBorderColor(): void {
-		if (this.isBashMode) {
-			this.editor.borderColor = theme.getBashModeBorderColor();
-		} else {
-			const level = this.session.thinkingLevel || "off";
-			this.editor.borderColor = theme.getThinkingBorderColor(level);
-		}
-		this.ui.requestRender();
-	}
-
-	private cycleThinkingLevel(): void {
-		const newLevel = this.session.cycleThinkingLevel();
-		if (newLevel === undefined) {
-			this.showStatus("Current model does not support thinking");
-		} else {
-			this.footer.invalidate();
-			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
-		}
-	}
-
 	private toggleToolOutputExpansion(): void {
 		this.setToolsExpanded(!this.toolOutputExpanded);
 	}
@@ -881,17 +774,12 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private toggleThinkingBlockVisibility(): void {
-		this.settingsController.toggleThinkingVisibility();
-	}
-
 	// =========================================================================
 	// UI helpers
 	// =========================================================================
 
 	clearEditor(): void {
-		this.editor.setText("");
-		this.ui.requestRender();
+		this.editorController.clear();
 	}
 
 	showError(errorMessage: string): void {
