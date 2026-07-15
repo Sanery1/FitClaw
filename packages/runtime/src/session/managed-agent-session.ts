@@ -3,6 +3,7 @@ import type { AssistantMessage, ImageContent } from "@fitclaw/ai";
 import { isContextOverflow } from "@fitclaw/ai";
 import type { ModelRegistry } from "../auth/model-registry.js";
 import type { SettingsManager } from "../settings/settings-manager.js";
+import { AgentRetryController, type AgentRetryEvent } from "./agent-retry-controller.js";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -24,8 +25,7 @@ export type ManagedAgentSessionEvent =
 			willRetry: boolean;
 			errorMessage?: string;
 	  }
-	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| AgentRetryEvent;
 
 export type ManagedAgentSessionEventListener = (event: ManagedAgentSessionEvent) => void;
 
@@ -37,20 +37,6 @@ export interface ManagedAgentSessionOptions {
 	compact?: typeof compact;
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const timeout = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout);
-				reject(new Error("Sleep aborted"));
-			},
-			{ once: true },
-		);
-	});
-}
-
 export class ManagedAgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -58,14 +44,11 @@ export class ManagedAgentSession {
 	private readonly settingsManager: SettingsManager;
 	private readonly modelRegistry: ModelRegistry;
 	private readonly compactSession: typeof compact;
+	private readonly retryController: AgentRetryController;
 	private readonly eventListeners = new Set<ManagedAgentSessionEventListener>();
 	private readonly unsubscribeAgent: () => void;
 	private agentEventQueue: Promise<void> = Promise.resolve();
 	private lastAssistantMessage: AssistantMessage | undefined;
-	private retryAttempt = 0;
-	private retryPromise: Promise<void> | undefined;
-	private retryResolve: (() => void) | undefined;
-	private retryAbortController: AbortController | undefined;
 	private recoveryPromise: Promise<void> | undefined;
 	private recoveryResolve: (() => void) | undefined;
 	private compactionAbortController: AbortController | undefined;
@@ -77,6 +60,11 @@ export class ManagedAgentSession {
 		this.settingsManager = options.settingsManager;
 		this.modelRegistry = options.modelRegistry;
 		this.compactSession = options.compact ?? compact;
+		this.retryController = new AgentRetryController({
+			agent: this.agent,
+			getSettings: () => this.settingsManager.getRetrySettings(),
+			emit: (event) => this.emit(event),
+		});
 		this.unsubscribeAgent = this.agent.subscribe(this.handleAgentEvent);
 	}
 
@@ -111,7 +99,7 @@ export class ManagedAgentSession {
 		}
 
 		await this.agent.prompt(text, images);
-		await this.waitForRetry();
+		await this.retryController.waitForRetry();
 		await this.agentEventQueue;
 		await this.waitForRecovery();
 		await this.agent.waitForIdle();
@@ -119,21 +107,21 @@ export class ManagedAgentSession {
 	}
 
 	async abort(): Promise<void> {
-		this.retryAbortController?.abort();
+		this.retryController.abort();
 		this.compactionAbortController?.abort();
-		this.resolveRetry();
 		this.resolveRecovery();
 		this.agent.abort();
 		await this.agent.waitForIdle();
 	}
 
 	dispose(): void {
+		this.retryController.abort();
 		this.unsubscribeAgent();
 		this.eventListeners.clear();
 	}
 
 	private readonly handleAgentEvent = (event: AgentEvent): void => {
-		this.createRetryPromiseForAgentEnd(event);
+		this.retryController.prepareForAgentEvent(event);
 		this.agentEventQueue = this.agentEventQueue.then(
 			() => this.processAgentEvent(event),
 			() => this.processAgentEvent(event),
@@ -159,12 +147,7 @@ export class ManagedAgentSession {
 
 			if (event.message.role === "assistant") {
 				this.lastAssistantMessage = event.message;
-				if (event.message.stopReason !== "error") {
-					if (this.retryAttempt > 0) {
-						this.emit({ type: "auto_retry_end", success: true, attempt: this.retryAttempt });
-						this.retryAttempt = 0;
-					}
-				}
+				this.retryController.onAssistantMessage(event.message);
 			}
 		}
 
@@ -172,11 +155,7 @@ export class ManagedAgentSession {
 
 		const assistantMessage = this.lastAssistantMessage;
 		this.lastAssistantMessage = undefined;
-		if (this.isRetryableError(assistantMessage) && (await this.handleRetryableError(assistantMessage))) {
-			return;
-		}
-
-		this.resolveRetry();
+		if (await this.retryController.handleAgentEnd(assistantMessage)) return;
 		const didScheduleRecovery = await this.checkCompaction(assistantMessage);
 		if (!didScheduleRecovery) {
 			if (!isContextOverflow(assistantMessage, this.agent.state.model.contextWindow)) {
@@ -196,92 +175,6 @@ export class ManagedAgentSession {
 			if (message.role === "assistant") return message;
 		}
 		return undefined;
-	}
-
-	private createRetryPromiseForAgentEnd(event: AgentEvent): void {
-		if (event.type !== "agent_end" || this.retryPromise || !this.settingsManager.getRetrySettings().enabled) return;
-		const assistantMessage = this.findLastAssistantMessage(event.messages);
-		if (!assistantMessage || !this.isRetryableError(assistantMessage)) return;
-		this.retryPromise = new Promise((resolve) => {
-			this.retryResolve = resolve;
-		});
-	}
-
-	private isRetryableError(message: AssistantMessage): boolean {
-		if (message.stopReason !== "error" || !message.errorMessage) return false;
-		if (isContextOverflow(message, this.agent.state.model.contextWindow)) return false;
-		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
-			message.errorMessage,
-		);
-	}
-
-	private async handleRetryableError(message: AssistantMessage): Promise<boolean> {
-		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled) return false;
-
-		this.retryAttempt++;
-		if (this.retryAttempt > settings.maxRetries) {
-			this.emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt: this.retryAttempt - 1,
-				finalError: message.errorMessage,
-			});
-			this.retryAttempt = 0;
-			return false;
-		}
-
-		const delayMs = settings.baseDelayMs * 2 ** (this.retryAttempt - 1);
-		this.emit({
-			type: "auto_retry_start",
-			attempt: this.retryAttempt,
-			maxAttempts: settings.maxRetries,
-			delayMs,
-			errorMessage: message.errorMessage || "Unknown error",
-		});
-
-		const messages = this.agent.state.messages;
-		if (messages.at(-1)?.role === "assistant") this.agent.state.messages = messages.slice(0, -1);
-
-		this.retryAbortController = new AbortController();
-		try {
-			await sleep(delayMs, this.retryAbortController.signal);
-		} catch {
-			const attempt = this.retryAttempt;
-			this.retryAttempt = 0;
-			this.emit({ type: "auto_retry_end", success: false, attempt, finalError: "Retry cancelled" });
-			this.resolveRetry();
-			return false;
-		} finally {
-			this.retryAbortController = undefined;
-		}
-
-		setTimeout(() => {
-			this.agent.continue().catch((error: unknown) => {
-				const attempt = this.retryAttempt;
-				this.retryAttempt = 0;
-				this.emit({
-					type: "auto_retry_end",
-					success: false,
-					attempt,
-					finalError: error instanceof Error ? error.message : String(error),
-				});
-				this.resolveRetry();
-			});
-		}, 0);
-		return true;
-	}
-
-	private resolveRetry(): void {
-		this.retryResolve?.();
-		this.retryResolve = undefined;
-		this.retryPromise = undefined;
-	}
-
-	private async waitForRetry(): Promise<void> {
-		if (!this.retryPromise) return;
-		await this.retryPromise;
-		await this.agent.waitForIdle();
 	}
 
 	private createRecoveryPromise(): void {

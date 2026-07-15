@@ -51,6 +51,7 @@ function createTool(name: string): AgentTool {
 function createSession(options?: {
 	failCount?: number;
 	retryEnabled?: boolean;
+	maxRetries?: number;
 	compactionEnabled?: boolean;
 	inputTokens?: number;
 	compact?: ConstructorParameters<typeof ManagedAgentSession>[0]["compact"];
@@ -59,7 +60,7 @@ function createSession(options?: {
 	const authStorage = AuthStorage.inMemory({ anthropic: { type: "api_key", key: "test-key" } });
 	const modelRegistry = ModelRegistry.inMemory(authStorage);
 	const settingsManager = SettingsManager.inMemory({
-		retry: { enabled: options?.retryEnabled ?? false, maxRetries: 2, baseDelayMs: 1 },
+		retry: { enabled: options?.retryEnabled ?? false, maxRetries: options?.maxRetries ?? 2, baseDelayMs: 1 },
 		compaction: {
 			enabled: options?.compactionEnabled ?? false,
 			reserveTokens: 100,
@@ -133,6 +134,20 @@ describe("ManagedAgentSession", () => {
 		expect(eventTypes).toContain("auto_retry_end");
 		expect(session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
 		expect(sessionManager.getEntries().filter((entry) => entry.type === "message")).toHaveLength(3);
+		session.dispose();
+	});
+
+	it("stops after the shared retry policy is exhausted", async () => {
+		const { session, getCallCount } = createSession({ failCount: 99, retryEnabled: true, maxRetries: 2 });
+		const retryEndEvents: Array<{ success: boolean; attempt: number }> = [];
+		session.subscribe((event) => {
+			if (event.type === "auto_retry_end") retryEndEvents.push(event);
+		});
+
+		await session.prompt("build a training plan");
+
+		expect(getCallCount()).toBe(3);
+		expect(retryEndEvents).toContainEqual(expect.objectContaining({ success: false, attempt: 2 }));
 		session.dispose();
 	});
 
