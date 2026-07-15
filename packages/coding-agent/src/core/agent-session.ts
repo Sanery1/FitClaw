@@ -13,38 +13,30 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@fitclaw/agent-core";
-import type { AssistantMessage, ImageContent, Model, TextContent } from "@fitclaw/ai";
-import {
-	AgentCompactionController,
-	type AgentCompactionEvent,
-	AgentRetryController,
-	type AgentRetryEvent,
-} from "@fitclaw/runtime";
+import type { Agent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "@fitclaw/agent-core";
+import type { ImageContent, Model, TextContent } from "@fitclaw/ai";
 import { formatNoApiKeyFoundMessage } from "./auth-guidance.js";
 import type { BashResult } from "./bash-executor.js";
-import { type CompactionResult, compact, prepareCompaction } from "./compaction/index.js";
+import type { CompactionResult } from "./compaction/index.js";
 import type {
 	ContextUsage,
 	ExtensionRunner,
 	ReplacedSessionContext,
-	SessionBeforeCompactResult,
 	SessionStartEvent,
 	ToolDefinition,
 	ToolInfo,
 } from "./extensions/index.js";
-import { ManualCompactionController, type ManualCompactionEvent } from "./manual-compaction-controller.js";
 import type { CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import type { PromptTemplate } from "./prompt-templates.js";
 import type { ResourceLoader } from "./resource-loader.js";
-import { SessionBashController, type SessionBashExecutionOptions } from "./session-bash-controller.js";
-import { SessionEventController } from "./session-event-controller.js";
-import { type ExtensionBindings, SessionExtensionController } from "./session-extension-controller.js";
+import type { SessionBashExecutionOptions } from "./session-bash-controller.js";
+import type { SessionControllerEvent, SessionControllers } from "./session-controller-factory.js";
+import { createSessionControllers } from "./session-controller-factory.js";
+import type { ExtensionBindings } from "./session-extension-controller.js";
 import type { SessionManager } from "./session-manager.js";
-import { SessionMessageQueueController } from "./session-message-queue-controller.js";
-import { type ModelCycleResult, SessionModelController, type SessionScopedModel } from "./session-model-controller.js";
-import { type PromptOptions, SessionPromptController } from "./session-prompt-controller.js";
+import type { ModelCycleResult, SessionScopedModel } from "./session-model-controller.js";
+import type { PromptOptions } from "./session-prompt-controller.js";
 import {
 	exportSessionHtml,
 	exportSessionJsonl,
@@ -53,12 +45,10 @@ import {
 	getSessionStats,
 	type SessionStats,
 } from "./session-reporting.js";
-import { SessionToolController } from "./session-tool-controller.js";
-import {
-	type ForkableUserMessage,
-	SessionTreeController,
-	type SessionTreeNavigationOptions,
-	type SessionTreeNavigationResult,
+import type {
+	ForkableUserMessage,
+	SessionTreeNavigationOptions,
+	SessionTreeNavigationResult,
 } from "./session-tree-controller.js";
 import type { SettingsManager } from "./settings-manager.js";
 
@@ -69,17 +59,7 @@ export type { SessionStats } from "./session-reporting.js";
 export { type ParsedSkillBlock, parseSkillBlock } from "./skill-block.js";
 
 /** Session-specific events that extend the core AgentEvent */
-export type AgentSessionEvent =
-	| AgentEvent
-	| {
-			type: "queue_update";
-			steering: readonly string[];
-			followUp: readonly string[];
-	  }
-	| { type: "session_info_changed"; name: string | undefined }
-	| ManualCompactionEvent
-	| AgentCompactionEvent
-	| AgentRetryEvent;
+export type AgentSessionEvent = SessionControllerEvent | { type: "session_info_changed"; name: string | undefined };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -131,25 +111,8 @@ export class AgentSession {
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
 
-	private readonly _modelController: SessionModelController;
-
 	private _eventListeners: AgentSessionEventListener[] = [];
-	private readonly _eventController: SessionEventController;
-
-	private readonly _messageQueueController: SessionMessageQueueController;
-	private readonly _promptController: SessionPromptController;
-	private readonly _toolController: SessionToolController;
-	private readonly _extensionController: SessionExtensionController;
-
-	// Compaction state
-	private readonly _compactionController: AgentCompactionController;
-	private readonly _manualCompactionController: ManualCompactionController;
-
-	private readonly _treeController: SessionTreeController;
-
-	private readonly _retryController: AgentRetryController;
-
-	private readonly _bashController: SessionBashController;
+	private readonly _controllers: SessionControllers;
 
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
@@ -159,137 +122,28 @@ export class AgentSession {
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
 		this._modelRegistry = config.modelRegistry;
-		this._toolController = new SessionToolController({
-			agent: this.agent,
-			settingsManager: this.settingsManager,
-			cwd: config.cwd,
-			customTools: config.customTools,
-			allowedToolNames: config.allowedToolNames,
-			baseToolsOverride: config.baseToolsOverride,
-			getExtensionRunner: () => this._extensionController.runner,
-			getResourceLoader: () => this._extensionController.resourceLoader,
-		});
-		this._retryController = new AgentRetryController({
-			agent: this.agent,
-			getSettings: () => this.settingsManager.getRetrySettings(),
-			emit: (event) => this._emit(event),
-		});
-		this._compactionController = new AgentCompactionController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			modelRegistry: this._modelRegistry,
-			getSettings: () => this.settingsManager.getCompactionSettings(),
-			emit: (event) => this._emit(event),
-			compact,
-			prepareCompaction,
-			requestCompaction: (reason, willRetry) => this._runAutoCompaction(reason, willRetry),
-			beforeCompact: async ({ preparation, branchEntries, signal }) => {
-				if (!this._extensionController.runner.hasHandlers("session_before_compact")) return undefined;
-				const extensionResult = (await this._extensionController.runner.emit({
-					type: "session_before_compact",
-					preparation,
-					branchEntries,
-					customInstructions: undefined,
-					signal,
-				})) as SessionBeforeCompactResult | undefined;
-				return {
-					cancel: extensionResult?.cancel,
-					compaction: extensionResult?.compaction,
-					fromHook: extensionResult?.compaction !== undefined,
-				};
-			},
-			afterCompact: async ({ compactionEntry, fromHook }) => {
-				await this._extensionController.runner.emit({
-					type: "session_compact",
-					compactionEntry,
-					fromExtension: fromHook,
-				});
-			},
-		});
-		this._manualCompactionController = new ManualCompactionController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			settingsManager: this.settingsManager,
-			getModel: () => this.model,
-			getRequiredRequestAuth: (model) => this._getRequiredRequestAuth(model),
-			getExtensionRunner: () => this._extensionController.runner,
-			emit: (event) => this._emit(event),
-		});
-		this._treeController = new SessionTreeController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			settingsManager: this.settingsManager,
-			getModel: () => this.model,
-			getRequiredRequestAuth: (model) => this._getRequiredRequestAuth(model),
-			getExtensionRunner: () => this._extensionController.runner,
-		});
-		this._bashController = new SessionBashController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			settingsManager: this.settingsManager,
-		});
-		this._modelController = new SessionModelController({
+		this._controllers = createSessionControllers({
 			agent: this.agent,
 			sessionManager: this.sessionManager,
 			settingsManager: this.settingsManager,
 			modelRegistry: this._modelRegistry,
-			getExtensionRunner: () => this._extensionController.runner,
-			scopedModels: config.scopedModels,
-		});
-		this._messageQueueController = new SessionMessageQueueController({
-			agent: this.agent,
-			onUpdate: ({ steering, followUp }) => {
-				this._emit({ type: "queue_update", steering, followUp });
-			},
-		});
-		this._eventController = new SessionEventController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			retryController: this._retryController,
-			compactionController: this._compactionController,
-			messageQueueController: this._messageQueueController,
-			emitExtensionEvent: (event) => this._extensionController.emitAgentEvent(event),
-			emit: (event) => this._emit(event),
-			checkCompaction: (message) => this._checkCompaction(message),
-		});
-		this._promptController = new SessionPromptController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			modelRegistry: this._modelRegistry,
-			bashController: this._bashController,
-			messageQueueController: this._messageQueueController,
-			retryController: this._retryController,
-			getExtensionRunner: () => this._extensionController.runner,
-			getResourceLoader: () => this._extensionController.resourceLoader,
-			getBaseSystemPrompt: () => this._toolController.getBaseSystemPrompt(),
-			checkCompaction: (message, skipAbortedCheck) => this._checkCompaction(message, skipAbortedCheck),
-			waitForPendingEvents: () => this._eventController.waitForPendingEvents(),
-			emit: (event) => this._emit(event),
-		});
-		this._extensionController = new SessionExtensionController({
-			agent: this.agent,
-			sessionManager: this.sessionManager,
-			settingsManager: this.settingsManager,
-			modelRegistry: this._modelRegistry,
-			modelController: this._modelController,
-			promptController: this._promptController,
-			toolController: this._toolController,
 			resourceLoader: config.resourceLoader,
 			cwd: config.cwd,
+			scopedModels: config.scopedModels,
+			customTools: config.customTools,
+			initialActiveToolNames: config.initialActiveToolNames,
+			allowedToolNames: config.allowedToolNames,
+			baseToolsOverride: config.baseToolsOverride,
 			extensionRunnerRef: config.extensionRunnerRef,
 			sessionStartEvent: config.sessionStartEvent,
-			waitForPendingEvents: () => this._eventController.waitForPendingEvents(),
+			emit: (event) => this._emit(event),
+			getRequiredRequestAuth: (model) => this._getRequiredRequestAuth(model),
 			abort: () => this.abort(),
 			getPendingMessageCount: () => this.pendingMessageCount,
 			setSessionName: (name) => this.setSessionName(name),
 			getContextUsage: () => this.getContextUsage(),
 			compact: (customInstructions) => this.compact(customInstructions),
 		});
-		this._extensionController.initialize(config.initialActiveToolNames);
-
-		// Always subscribe to agent events for internal handling
-		// (session persistence, extensions, auto-compaction, retry logic)
-		this._eventController.connect();
 	}
 
 	/** Model registry for API key resolution and model discovery */
@@ -356,13 +210,13 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
-		this._retryController.abort();
-		this._compactionController.abort();
-		this._manualCompactionController.abort();
-		this._treeController.abort();
-		this._bashController.abort();
-		this._extensionController.dispose();
-		this._eventController.disconnect();
+		this._controllers.retry.abort();
+		this._controllers.compaction.abort();
+		this._controllers.manualCompaction.abort();
+		this._controllers.tree.abort();
+		this._controllers.bash.abort();
+		this._controllers.extension.dispose();
+		this._controllers.event.disconnect();
 		this._eventListeners = [];
 	}
 
@@ -377,12 +231,12 @@ export class AgentSession {
 
 	/** Current model (may be undefined if not yet selected) */
 	get model(): Model<any> | undefined {
-		return this._modelController.model;
+		return this._controllers.model.model;
 	}
 
 	/** Current thinking level */
 	get thinkingLevel(): ThinkingLevel {
-		return this._modelController.thinkingLevel;
+		return this._controllers.model.thinkingLevel;
 	}
 
 	/** Whether agent is currently streaming a response */
@@ -397,7 +251,7 @@ export class AgentSession {
 
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
-		return this._retryController.attempt;
+		return this._controllers.retry.attempt;
 	}
 
 	/**
@@ -405,18 +259,18 @@ export class AgentSession {
 	 * Returns the names of tools currently set on the agent.
 	 */
 	getActiveToolNames(): string[] {
-		return this._toolController.getActiveToolNames();
+		return this._controllers.tool.getActiveToolNames();
 	}
 
 	/**
 	 * Get all configured tools with name, description, parameter schema, and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
-		return this._toolController.getAllTools();
+		return this._controllers.tool.getAllTools();
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
-		return this._toolController.getToolDefinition(name);
+		return this._controllers.tool.getToolDefinition(name);
 	}
 
 	/**
@@ -426,15 +280,15 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		this._toolController.setActiveToolsByName(toolNames);
+		this._controllers.tool.setActiveToolsByName(toolNames);
 	}
 
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
-			this._compactionController.isCompacting ||
-			this._manualCompactionController.isCompacting ||
-			this._treeController.isSummarizing
+			this._controllers.compaction.isCompacting ||
+			this._controllers.manualCompaction.isCompacting ||
+			this._controllers.tree.isSummarizing
 		);
 	}
 
@@ -470,17 +324,17 @@ export class AgentSession {
 
 	/** Scoped models for cycling (from --models flag) */
 	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
-		return this._modelController.scopedModels;
+		return this._controllers.model.scopedModels;
 	}
 
 	/** Update scoped models for cycling */
 	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
-		this._modelController.setScopedModels(scopedModels);
+		this._controllers.model.setScopedModels(scopedModels);
 	}
 
 	/** File-based prompt templates */
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
-		return this._extensionController.resourceLoader.getPrompts().prompts;
+		return this._controllers.extension.resourceLoader.getPrompts().prompts;
 	}
 
 	// =========================================================================
@@ -497,7 +351,7 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
-		await this._promptController.prompt(text, options);
+		await this._controllers.prompt.prompt(text, options);
 	}
 
 	/**
@@ -509,7 +363,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async steer(text: string, images?: ImageContent[]): Promise<void> {
-		await this._promptController.steer(text, images);
+		await this._controllers.prompt.steer(text, images);
 	}
 
 	/**
@@ -520,7 +374,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async followUp(text: string, images?: ImageContent[]): Promise<void> {
-		await this._promptController.followUp(text, images);
+		await this._controllers.prompt.followUp(text, images);
 	}
 
 	/**
@@ -539,7 +393,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
-		await this._promptController.sendCustomMessage(message, options);
+		await this._controllers.prompt.sendCustomMessage(message, options);
 	}
 
 	/**
@@ -553,7 +407,7 @@ export class AgentSession {
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
-		await this._promptController.sendUserMessage(content, options);
+		await this._controllers.prompt.sendUserMessage(content, options);
 	}
 
 	/**
@@ -562,26 +416,26 @@ export class AgentSession {
 	 * @returns Object with steering and followUp arrays
 	 */
 	clearQueue(): { steering: string[]; followUp: string[] } {
-		return this._messageQueueController.clear();
+		return this._controllers.messageQueue.clear();
 	}
 
 	/** Number of pending messages (includes both steering and follow-up) */
 	get pendingMessageCount(): number {
-		return this._messageQueueController.pendingCount;
+		return this._controllers.messageQueue.pendingCount;
 	}
 
 	/** Get pending steering messages (read-only) */
 	getSteeringMessages(): readonly string[] {
-		return this._messageQueueController.getSteeringMessages();
+		return this._controllers.messageQueue.getSteeringMessages();
 	}
 
 	/** Get pending follow-up messages (read-only) */
 	getFollowUpMessages(): readonly string[] {
-		return this._messageQueueController.getFollowUpMessages();
+		return this._controllers.messageQueue.getFollowUpMessages();
 	}
 
 	get resourceLoader(): ResourceLoader {
-		return this._extensionController.resourceLoader;
+		return this._controllers.extension.resourceLoader;
 	}
 
 	/**
@@ -603,7 +457,7 @@ export class AgentSession {
 	 * @throws Error if no auth is configured for the model
 	 */
 	async setModel(model: Model<any>): Promise<void> {
-		await this._modelController.setModel(model);
+		await this._controllers.model.setModel(model);
 	}
 
 	/**
@@ -613,7 +467,7 @@ export class AgentSession {
 	 * @returns The new model info, or undefined if only one model available
 	 */
 	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
-		return this._modelController.cycleModel(direction);
+		return this._controllers.model.cycleModel(direction);
 	}
 
 	// =========================================================================
@@ -626,7 +480,7 @@ export class AgentSession {
 	 * Saves to session and settings only if the level actually changes.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
-		this._modelController.setThinkingLevel(level);
+		this._controllers.model.setThinkingLevel(level);
 	}
 
 	/**
@@ -634,7 +488,7 @@ export class AgentSession {
 	 * @returns New level, or undefined if model doesn't support thinking
 	 */
 	cycleThinkingLevel(): ThinkingLevel | undefined {
-		return this._modelController.cycleThinkingLevel();
+		return this._controllers.model.cycleThinkingLevel();
 	}
 
 	/**
@@ -642,21 +496,21 @@ export class AgentSession {
 	 * The provider will clamp to what the specific model supports internally.
 	 */
 	getAvailableThinkingLevels(): ThinkingLevel[] {
-		return this._modelController.getAvailableThinkingLevels();
+		return this._controllers.model.getAvailableThinkingLevels();
 	}
 
 	/**
 	 * Check if current model supports xhigh thinking level.
 	 */
 	supportsXhighThinking(): boolean {
-		return this._modelController.supportsXhighThinking();
+		return this._controllers.model.supportsXhighThinking();
 	}
 
 	/**
 	 * Check if current model supports thinking/reasoning.
 	 */
 	supportsThinking(): boolean {
-		return this._modelController.supportsThinking();
+		return this._controllers.model.supportsThinking();
 	}
 
 	// =========================================================================
@@ -691,12 +545,12 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		this._eventController.disconnect();
+		this._controllers.event.disconnect();
 		try {
 			await this.abort();
-			return await this._manualCompactionController.compact(customInstructions);
+			return await this._controllers.manualCompaction.compact(customInstructions);
 		} finally {
-			this._eventController.connect();
+			this._controllers.event.connect();
 		}
 	}
 
@@ -704,37 +558,15 @@ export class AgentSession {
 	 * Cancel in-progress compaction (manual or auto).
 	 */
 	abortCompaction(): void {
-		this._manualCompactionController.abort();
-		this._compactionController.abort();
+		this._controllers.manualCompaction.abort();
+		this._controllers.compaction.abort();
 	}
 
 	/**
 	 * Cancel in-progress branch summarization.
 	 */
 	abortBranchSummary(): void {
-		this._treeController.abort();
-	}
-
-	/**
-	 * Check if compaction is needed and run it.
-	 * Called after agent_end and before prompt submission.
-	 *
-	 * Two cases:
-	 * 1. Overflow: LLM returned context overflow error, remove error message from agent state, compact, auto-retry
-	 * 2. Threshold: Context over threshold, compact, NO auto-retry (user continues manually)
-	 *
-	 * @param assistantMessage The assistant message to check
-	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
-	 */
-	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
-		return this._compactionController.check(assistantMessage, skipAbortedCheck);
-	}
-
-	/**
-	 * Internal: Run auto-compaction with events.
-	 */
-	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		return this._compactionController.run(reason, willRetry);
+		this._controllers.tree.abort();
 	}
 
 	/**
@@ -750,11 +582,11 @@ export class AgentSession {
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
-		await this._extensionController.bindExtensions(bindings);
+		await this._controllers.extension.bindExtensions(bindings);
 	}
 
 	async reload(): Promise<void> {
-		await this._extensionController.reload();
+		await this._controllers.extension.reload();
 	}
 
 	// =========================================================================
@@ -765,12 +597,12 @@ export class AgentSession {
 	 * Cancel in-progress retry.
 	 */
 	abortRetry(): void {
-		this._retryController.abort();
+		this._controllers.retry.abort();
 	}
 
 	/** Whether auto-retry is currently in progress */
 	get isRetrying(): boolean {
-		return this._retryController.isRetrying;
+		return this._controllers.retry.isRetrying;
 	}
 
 	/** Whether auto-retry is enabled */
@@ -802,7 +634,7 @@ export class AgentSession {
 		onChunk?: (chunk: string) => void,
 		options?: SessionBashExecutionOptions,
 	): Promise<BashResult> {
-		return this._bashController.execute(command, onChunk, options);
+		return this._controllers.bash.execute(command, onChunk, options);
 	}
 
 	/**
@@ -810,24 +642,24 @@ export class AgentSession {
 	 * Used by executeBash and by extensions that handle bash execution themselves.
 	 */
 	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
-		this._bashController.record(command, result, options);
+		this._controllers.bash.record(command, result, options);
 	}
 
 	/**
 	 * Cancel running bash command.
 	 */
 	abortBash(): void {
-		this._bashController.abort();
+		this._controllers.bash.abort();
 	}
 
 	/** Whether a bash command is currently running */
 	get isBashRunning(): boolean {
-		return this._bashController.isRunning;
+		return this._controllers.bash.isRunning;
 	}
 
 	/** Whether there are pending bash messages waiting to be flushed */
 	get hasPendingBashMessages(): boolean {
-		return this._bashController.hasPendingMessages;
+		return this._controllers.bash.hasPendingMessages;
 	}
 
 	// =========================================================================
@@ -861,14 +693,14 @@ export class AgentSession {
 		targetId: string,
 		options: SessionTreeNavigationOptions = {},
 	): Promise<SessionTreeNavigationResult> {
-		return this._treeController.navigate(targetId, options);
+		return this._controllers.tree.navigate(targetId, options);
 	}
 
 	/**
 	 * Get all user messages from session for fork selector.
 	 */
 	getUserMessagesForForking(): ForkableUserMessage[] {
-		return this._treeController.getUserMessagesForForking();
+		return this._controllers.tree.getUserMessagesForForking();
 	}
 
 	/**
@@ -925,20 +757,20 @@ export class AgentSession {
 	// =========================================================================
 
 	createReplacedSessionContext(): ReplacedSessionContext {
-		return this._extensionController.createReplacedSessionContext();
+		return this._controllers.extension.createReplacedSessionContext();
 	}
 
 	/**
 	 * Check if extensions have handlers for a specific event type.
 	 */
 	hasExtensionHandlers(eventType: string): boolean {
-		return this._extensionController.hasHandlers(eventType);
+		return this._controllers.extension.hasHandlers(eventType);
 	}
 
 	/**
 	 * Get the extension runner (for setting UI context and error handlers).
 	 */
 	get extensionRunner(): ExtensionRunner {
-		return this._extensionController.runner;
+		return this._controllers.extension.runner;
 	}
 }
