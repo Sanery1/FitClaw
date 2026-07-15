@@ -384,6 +384,31 @@ describe("AgentSession queue characterization", () => {
 		expect(harness.session.pendingMessageCount).toBe(0);
 	});
 
+	it("returns queue snapshots that cannot mutate internal state", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		await harness.session.steer("steer queued");
+		await harness.session.followUp("follow-up queued");
+
+		const steeringSnapshot = harness.session.getSteeringMessages() as string[];
+		const followUpSnapshot = harness.session.getFollowUpMessages() as string[];
+		steeringSnapshot.push("external steer");
+		followUpSnapshot.push("external follow-up");
+
+		expect(harness.session.pendingMessageCount).toBe(2);
+		expect(harness.session.getSteeringMessages()).toEqual(["steer queued"]);
+		expect(harness.session.getFollowUpMessages()).toEqual(["follow-up queued"]);
+
+		const cleared = harness.session.clearQueue();
+		cleared.steering.push("external cleared steer");
+		cleared.followUp.push("external cleared follow-up");
+
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(harness.session.getSteeringMessages()).toEqual([]);
+		expect(harness.session.getFollowUpMessages()).toEqual([]);
+	});
+
 	it("throws when queueing an extension command with steer", async () => {
 		const harness = await createHarness({
 			extensionFactories: [
