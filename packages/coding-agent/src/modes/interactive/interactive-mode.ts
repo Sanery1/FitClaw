@@ -21,19 +21,17 @@ import {
 	TUI,
 	visibleWidth,
 } from "@fitclaw/tui";
-import { spawn, spawnSync } from "child_process";
-import { APP_NAME, APP_TITLE, getAgentDir, getDebugLogPath, VERSION } from "../../config.js";
+import { spawnSync } from "child_process";
+import { APP_NAME, APP_TITLE, getDebugLogPath, VERSION } from "../../config.js";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type { ExtensionContext, ExtensionRunner, ExtensionUIContext } from "../../core/extensions/index.js";
 import { FooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
-import { DefaultPackageManager } from "../../core/package-manager.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import type { SourceInfo } from "../../core/source-info.js";
-import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
-import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
+import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool } from "../../utils/tools-manager.js";
@@ -59,6 +57,7 @@ import { InteractiveMessageQueueController } from "./interactive-message-queue-c
 import { InteractiveSessionNavigationController } from "./interactive-session-navigation-controller.js";
 import { InteractiveSessionTransferController } from "./interactive-session-transfer-controller.js";
 import { InteractiveSessionViewController } from "./interactive-session-view-controller.js";
+import { InteractiveStartupController } from "./interactive-startup-controller.js";
 import { InteractiveWorkingController } from "./interactive-working-controller.js";
 import { type LoadedResourcesDisplayOptions, renderLoadedResources } from "./loaded-resources-view.js";
 import {
@@ -115,8 +114,6 @@ export class InteractiveMode {
 
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
-	private changelogMarkdown: string | undefined = undefined;
-	private startupNoticesShown = false;
 	private readonly autocompleteController: InteractiveAutocompleteController;
 	private readonly authController: InteractiveAuthController;
 	private readonly bashController: InteractiveBashController;
@@ -127,6 +124,7 @@ export class InteractiveMode {
 	private readonly sessionNavigationController: InteractiveSessionNavigationController;
 	private readonly sessionTransferController: InteractiveSessionTransferController;
 	private readonly sessionViewController: InteractiveSessionViewController;
+	private readonly startupController: InteractiveStartupController;
 	private readonly workingController: InteractiveWorkingController;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
@@ -222,6 +220,12 @@ export class InteractiveMode {
 			ui: this.ui,
 			statusContainer: this.statusContainer,
 			isStreaming: () => this.session.isStreaming,
+		});
+		this.startupController = new InteractiveStartupController({
+			getSession: () => this.session,
+			chatContainer: this.chatContainer,
+			version: this.version,
+			getMarkdownTheme: () => this.getMarkdownThemeWithSettings(),
 		});
 
 		// Load hide thinking block setting
@@ -324,43 +328,13 @@ export class InteractiveMode {
 		});
 	}
 
-	private showStartupNoticesIfNeeded(): void {
-		if (this.startupNoticesShown) {
-			return;
-		}
-		this.startupNoticesShown = true;
-
-		if (!this.changelogMarkdown) {
-			return;
-		}
-
-		if (this.chatContainer.children.length > 0) {
-			this.chatContainer.addChild(new Spacer(1));
-		}
-		this.chatContainer.addChild(new DynamicBorder());
-		if (this.settingsManager.getCollapseChangelog()) {
-			const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
-			const latestVersion = versionMatch ? versionMatch[1] : this.version;
-			const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
-			this.chatContainer.addChild(new Text(condensedText, 1, 0));
-		} else {
-			this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(
-				new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings()),
-			);
-			this.chatContainer.addChild(new Spacer(1));
-		}
-		this.chatContainer.addChild(new DynamicBorder());
-	}
-
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
 
 		this.registerSignalHandlers();
 
 		// Load changelog (only show new entries, skip for resumed sessions)
-		this.changelogMarkdown = this.getChangelogForDisplay();
+		this.startupController.prepareChangelog();
 
 		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
 		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
@@ -492,25 +466,10 @@ export class InteractiveMode {
 	async run(): Promise<void> {
 		await this.init();
 
-		// Start version check asynchronously
-		this.checkForNewVersion().then((newVersion) => {
-			if (newVersion) {
-				this.showNewVersionNotification(newVersion);
-			}
-		});
-
-		// Start package update check asynchronously
-		this.checkForPackageUpdates().then((updates) => {
-			if (updates.length > 0) {
-				this.showPackageUpdateNotification(updates);
-			}
-		});
-
-		// Check tmux keyboard setup asynchronously
-		this.checkTmuxKeyboardSetup().then((warning) => {
-			if (warning) {
-				this.showWarning(warning);
-			}
+		this.startupController.startBackgroundChecks({
+			showNewVersion: (version) => this.showNewVersionNotification(version),
+			showPackageUpdates: (packages) => this.showPackageUpdateNotification(packages),
+			showWarning: (warning) => this.showWarning(warning),
 		});
 
 		// Show startup warnings
@@ -562,143 +521,6 @@ export class InteractiveMode {
 				this.showError(errorMessage);
 			}
 		}
-	}
-
-	/**
-	 * Check npm registry for a newer version.
-	 */
-	private async checkForNewVersion(): Promise<string | undefined> {
-		if (process.env.FITCLAW_SKIP_VERSION_CHECK || process.env.FITCLAW_OFFLINE) return undefined;
-
-		try {
-			const response = await fetch("https://registry.npmjs.org/@fitclaw/claw/latest", {
-				signal: AbortSignal.timeout(10000),
-			});
-			if (!response.ok) return undefined;
-
-			const data = (await response.json()) as { version?: string };
-			const latestVersion = data.version;
-
-			if (latestVersion && latestVersion !== this.version) {
-				return latestVersion;
-			}
-
-			return undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.FITCLAW_OFFLINE) {
-			return [];
-		}
-
-		try {
-			const packageManager = new DefaultPackageManager({
-				cwd: this.sessionManager.getCwd(),
-				agentDir: getAgentDir(),
-				settingsManager: this.settingsManager,
-			});
-			const updates = await packageManager.checkForAvailableUpdates();
-			return updates.map((update) => update.displayName);
-		} catch {
-			return [];
-		}
-	}
-
-	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {
-		if (!process.env.TMUX) return undefined;
-
-		const runTmuxShow = (option: string): Promise<string | undefined> => {
-			return new Promise((resolve) => {
-				const proc = spawn("tmux", ["show", "-gv", option], {
-					stdio: ["ignore", "pipe", "ignore"],
-				});
-				let stdout = "";
-				const timer = setTimeout(() => {
-					proc.kill();
-					resolve(undefined);
-				}, 2000);
-
-				proc.stdout?.on("data", (data) => {
-					stdout += data.toString();
-				});
-				proc.on("error", () => {
-					clearTimeout(timer);
-					resolve(undefined);
-				});
-				proc.on("close", (code) => {
-					clearTimeout(timer);
-					resolve(code === 0 ? stdout.trim() : undefined);
-				});
-			});
-		};
-
-		const [extendedKeys, extendedKeysFormat] = await Promise.all([
-			runTmuxShow("extended-keys"),
-			runTmuxShow("extended-keys-format"),
-		]);
-
-		// If we couldn't query tmux (timeout, sandbox, etc.), don't warn
-		if (extendedKeys === undefined) return undefined;
-
-		if (extendedKeys !== "on" && extendedKeys !== "always") {
-			return "tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.";
-		}
-
-		if (extendedKeysFormat === "xterm") {
-			return "tmux extended-keys-format is xterm. Pi works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
-		}
-
-		return undefined;
-	}
-
-	/**
-	 * Get changelog entries to display on startup.
-	 * Only shows new entries since last seen version, skips for resumed sessions.
-	 */
-	private getChangelogForDisplay(): string | undefined {
-		// Skip changelog for resumed/continued sessions (already have messages)
-		if (this.session.state.messages.length > 0) {
-			return undefined;
-		}
-
-		const lastVersion = this.settingsManager.getLastChangelogVersion();
-		const changelogPath = getChangelogPath();
-		const entries = parseChangelog(changelogPath);
-
-		if (!lastVersion) {
-			// Fresh install - record the version, send telemetry, don't show changelog
-			this.settingsManager.setLastChangelogVersion(VERSION);
-			this.reportInstallTelemetry(VERSION);
-			return undefined;
-		}
-
-		const newEntries = getNewEntries(entries, lastVersion);
-		if (newEntries.length > 0) {
-			this.settingsManager.setLastChangelogVersion(VERSION);
-			this.reportInstallTelemetry(VERSION);
-			return newEntries.map((e) => e.content).join("\n\n");
-		}
-
-		return undefined;
-	}
-
-	private reportInstallTelemetry(version: string): void {
-		if (process.env.FITCLAW_OFFLINE) {
-			return;
-		}
-
-		if (!isInstallTelemetryEnabled(this.settingsManager)) {
-			return;
-		}
-
-		void fetch(`https://pi.dev/install?version=${encodeURIComponent(version)}`, {
-			signal: AbortSignal.timeout(5000),
-		})
-			.then(() => undefined)
-			.catch(() => undefined);
 	}
 
 	private getMarkdownThemeWithSettings(): MarkdownTheme {
@@ -850,7 +672,7 @@ export class InteractiveMode {
 		const extensionRunner = this.session.extensionRunner;
 		this.setupExtensionShortcuts(extensionRunner);
 		this.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
-		this.showStartupNoticesIfNeeded();
+		this.startupController.showNotices();
 	}
 
 	private applyRuntimeSettings(): void {
