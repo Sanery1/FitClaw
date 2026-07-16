@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { CONFIG_DIR_NAME, isBunRuntime } from "../config.js";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { CONFIG_DIR_NAME } from "../config.js";
 import type { GitSource } from "../utils/git.js";
 import { PackageCommandRunner } from "./package-command-runner.js";
+import { PackageInstallLayout } from "./package-install-layout.js";
 import {
 	PackageResourceCollector,
 	type PathMetadata,
@@ -101,10 +100,9 @@ export class DefaultPackageManager implements PackageManager {
 	private cwd: string;
 	private agentDir: string;
 	private settingsManager: SettingsManager;
-	private globalNpmRoot: string | undefined;
-	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
 	private readonly commandRunner = new PackageCommandRunner();
+	private readonly installLayout: PackageInstallLayout;
 	private readonly resourceCollector: PackageResourceCollector;
 	private readonly sourceResolver: PackageSourceResolver;
 
@@ -112,6 +110,12 @@ export class DefaultPackageManager implements PackageManager {
 		this.cwd = options.cwd;
 		this.agentDir = options.agentDir;
 		this.settingsManager = options.settingsManager;
+		this.installLayout = new PackageInstallLayout({
+			cwd: this.cwd,
+			agentDir: this.agentDir,
+			getNpmCommand: () => this.getNpmCommand(),
+			runCommandSync: (command, args) => this.runCommandSync(command, args),
+		});
 		this.sourceResolver = new PackageSourceResolver({ cwd: this.cwd, agentDir: this.agentDir });
 		this.resourceCollector = new PackageResourceCollector({ cwd: this.cwd, sourceResolver: this.sourceResolver });
 	}
@@ -160,11 +164,11 @@ export class DefaultPackageManager implements PackageManager {
 	getInstalledPath(source: string, scope: "user" | "project"): string | undefined {
 		const parsed = this.parseSource(source);
 		if (parsed.type === "npm") {
-			const path = this.getNpmInstallPath(parsed, scope);
+			const path = this.installLayout.getNpmInstallPath(parsed, scope);
 			return existsSync(path) ? path : undefined;
 		}
 		if (parsed.type === "git") {
-			const path = this.getGitInstallPath(parsed, scope);
+			const path = this.installLayout.getGitInstallPath(parsed, scope);
 			return existsSync(path) ? path : undefined;
 		}
 		if (parsed.type === "local") {
@@ -438,7 +442,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async shouldUpdateNpmSource(source: NpmSource, scope: InstalledSourceScope): Promise<boolean> {
-		const installedPath = this.getNpmInstallPath(source, scope);
+		const installedPath = this.installLayout.getNpmInstallPath(source, scope);
 		const installedVersion = existsSync(installedPath) ? this.getInstalledNpmVersion(installedPath) : undefined;
 		if (!installedVersion) {
 			return true;
@@ -472,8 +476,8 @@ export class DefaultPackageManager implements PackageManager {
 			await this.runNpmCommand(["install", "-g", ...specs]);
 			return;
 		}
-		const installRoot = this.getNpmInstallRoot(scope, false);
-		this.ensureNpmProject(installRoot);
+		const installRoot = this.installLayout.getNpmInstallRoot(scope, false);
+		this.installLayout.ensureNpmProject(installRoot);
 		await this.runNpmCommand(["install", ...specs, "--prefix", installRoot]);
 	}
 
@@ -506,7 +510,7 @@ export class DefaultPackageManager implements PackageManager {
 				}
 
 				if (parsed.type === "npm") {
-					const installedPath = this.getNpmInstallPath(parsed, entry.scope);
+					const installedPath = this.installLayout.getNpmInstallPath(parsed, entry.scope);
 					if (!existsSync(installedPath)) {
 						return undefined;
 					}
@@ -522,7 +526,7 @@ export class DefaultPackageManager implements PackageManager {
 					};
 				}
 
-				const installedPath = this.getGitInstallPath(parsed, entry.scope);
+				const installedPath = this.installLayout.getGitInstallPath(parsed, entry.scope);
 				if (!existsSync(installedPath)) {
 					return undefined;
 				}
@@ -575,7 +579,7 @@ export class DefaultPackageManager implements PackageManager {
 			};
 
 			if (parsed.type === "npm") {
-				const installedPath = this.getNpmInstallPath(parsed, scope);
+				const installedPath = this.installLayout.getNpmInstallPath(parsed, scope);
 				const needsInstall =
 					!existsSync(installedPath) ||
 					(parsed.pinned && !(await this.installedNpmMatchesPinnedVersion(parsed, installedPath)));
@@ -589,7 +593,7 @@ export class DefaultPackageManager implements PackageManager {
 			}
 
 			if (parsed.type === "git") {
-				const installedPath = this.getGitInstallPath(parsed, scope);
+				const installedPath = this.installLayout.getGitInstallPath(parsed, scope);
 				if (!existsSync(installedPath)) {
 					const installed = await installMissing();
 					if (!installed) continue;
@@ -888,18 +892,13 @@ export class DefaultPackageManager implements PackageManager {
 		return ["install", "--omit=dev"];
 	}
 
-	private runNpmCommandSync(args: string[]): string {
-		const npmCommand = this.getNpmCommand();
-		return this.runCommandSync(npmCommand.command, [...npmCommand.args, ...args]);
-	}
-
 	private async installNpm(source: NpmSource, scope: SourceScope, temporary: boolean): Promise<void> {
 		if (scope === "user" && !temporary) {
 			await this.runNpmCommand(["install", "-g", source.spec]);
 			return;
 		}
-		const installRoot = this.getNpmInstallRoot(scope, temporary);
-		this.ensureNpmProject(installRoot);
+		const installRoot = this.installLayout.getNpmInstallRoot(scope, temporary);
+		this.installLayout.ensureNpmProject(installRoot);
 		await this.runNpmCommand(["install", source.spec, "--prefix", installRoot]);
 	}
 
@@ -908,7 +907,7 @@ export class DefaultPackageManager implements PackageManager {
 			await this.runNpmCommand(["uninstall", "-g", source.name]);
 			return;
 		}
-		const installRoot = this.getNpmInstallRoot(scope, false);
+		const installRoot = this.installLayout.getNpmInstallRoot(scope, false);
 		if (!existsSync(installRoot)) {
 			return;
 		}
@@ -916,13 +915,13 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async installGit(source: GitSource, scope: SourceScope): Promise<void> {
-		const targetDir = this.getGitInstallPath(source, scope);
+		const targetDir = this.installLayout.getGitInstallPath(source, scope);
 		if (existsSync(targetDir)) {
 			return;
 		}
-		const gitRoot = this.getGitInstallRoot(scope);
+		const gitRoot = this.installLayout.getGitInstallRoot(scope);
 		if (gitRoot) {
-			this.ensureGitIgnore(gitRoot);
+			this.installLayout.ensureGitIgnore(gitRoot);
 		}
 		mkdirSync(dirname(targetDir), { recursive: true });
 
@@ -937,7 +936,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async updateGit(source: GitSource, scope: SourceScope): Promise<void> {
-		const targetDir = this.getGitInstallPath(source, scope);
+		const targetDir = this.installLayout.getGitInstallPath(source, scope);
 		if (!existsSync(targetDir)) {
 			await this.installGit(source, scope);
 			return;
@@ -985,118 +984,10 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async removeGit(source: GitSource, scope: SourceScope): Promise<void> {
-		const targetDir = this.getGitInstallPath(source, scope);
+		const targetDir = this.installLayout.getGitInstallPath(source, scope);
 		if (!existsSync(targetDir)) return;
 		rmSync(targetDir, { recursive: true, force: true });
-		this.pruneEmptyGitParents(targetDir, this.getGitInstallRoot(scope));
-	}
-
-	private pruneEmptyGitParents(targetDir: string, installRoot: string | undefined): void {
-		if (!installRoot) return;
-		const resolvedRoot = resolve(installRoot);
-		let current = dirname(targetDir);
-		while (current.startsWith(resolvedRoot) && current !== resolvedRoot) {
-			if (!existsSync(current)) {
-				current = dirname(current);
-				continue;
-			}
-			const entries = readdirSync(current);
-			if (entries.length > 0) {
-				break;
-			}
-			try {
-				rmSync(current, { recursive: true, force: true });
-			} catch {
-				break;
-			}
-			current = dirname(current);
-		}
-	}
-
-	private ensureNpmProject(installRoot: string): void {
-		if (!existsSync(installRoot)) {
-			mkdirSync(installRoot, { recursive: true });
-		}
-		this.ensureGitIgnore(installRoot);
-		const packageJsonPath = join(installRoot, "package.json");
-		if (!existsSync(packageJsonPath)) {
-			const pkgJson = { name: "pi-extensions", private: true };
-			writeFileSync(packageJsonPath, JSON.stringify(pkgJson, null, 2), "utf-8");
-		}
-	}
-
-	private ensureGitIgnore(dir: string): void {
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-		const ignorePath = join(dir, ".gitignore");
-		if (!existsSync(ignorePath)) {
-			writeFileSync(ignorePath, "*\n!.gitignore\n", "utf-8");
-		}
-	}
-
-	private getNpmInstallRoot(scope: SourceScope, temporary: boolean): string {
-		if (temporary) {
-			return this.getTemporaryDir("npm");
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "npm");
-		}
-		return join(this.getGlobalNpmRoot(), "..");
-	}
-
-	private getGlobalNpmRoot(): string {
-		const npmCommand = this.getNpmCommand();
-		const commandKey = [npmCommand.command, ...npmCommand.args].join("\0");
-		if (this.globalNpmRoot && this.globalNpmRootCommandKey === commandKey) {
-			return this.globalNpmRoot;
-		}
-		if (isBunRuntime) {
-			const binDir = this.runCommandSync("bun", ["pm", "bin", "-g"]).trim();
-			this.globalNpmRoot = join(dirname(binDir), "install", "global", "node_modules");
-		} else {
-			this.globalNpmRoot = this.runNpmCommandSync(["root", "-g"]).trim();
-		}
-		this.globalNpmRootCommandKey = commandKey;
-		return this.globalNpmRoot;
-	}
-
-	private getNpmInstallPath(source: NpmSource, scope: SourceScope): string {
-		if (scope === "temporary") {
-			return join(this.getTemporaryDir("npm"), "node_modules", source.name);
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
-		}
-		return join(this.getGlobalNpmRoot(), source.name);
-	}
-
-	private getGitInstallPath(source: GitSource, scope: SourceScope): string {
-		if (scope === "temporary") {
-			return this.getTemporaryDir(`git-${source.host}`, source.path);
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "git", source.host, source.path);
-		}
-		return join(this.agentDir, "git", source.host, source.path);
-	}
-
-	private getGitInstallRoot(scope: SourceScope): string | undefined {
-		if (scope === "temporary") {
-			return undefined;
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "git");
-		}
-		return join(this.agentDir, "git");
-	}
-
-	private getTemporaryDir(prefix: string, suffix?: string): string {
-		const hash = createHash("sha256")
-			.update(`${prefix}-${suffix ?? ""}`)
-			.digest("hex")
-			.slice(0, 8);
-		return join(tmpdir(), "pi-extensions", prefix, hash, suffix ?? "");
+		this.installLayout.pruneEmptyGitParents(targetDir, this.installLayout.getGitInstallRoot(scope));
 	}
 
 	private runCommandCapture(

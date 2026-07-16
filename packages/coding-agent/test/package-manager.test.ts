@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PackageInstallLayout } from "../src/core/package-install-layout.js";
 import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 
@@ -11,6 +12,10 @@ function normalizeForMatch(value: string): string {
 
 function pathEndsWith(actualPath: string, suffix: string): boolean {
 	return normalizeForMatch(actualPath).endsWith(normalizeForMatch(suffix));
+}
+
+function getInstallLayout(packageManager: DefaultPackageManager): PackageInstallLayout {
+	return (packageManager as unknown as { installLayout: PackageInstallLayout }).installLayout;
 }
 
 // Helper to check if a resource is enabled
@@ -1608,7 +1613,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should batch npm updates per scope and run git updates in parallel while skipping pinned and current packages", async () => {
-			vi.spyOn(packageManager as any, "getGlobalNpmRoot").mockReturnValue(join(agentDir, "node_modules"));
+			vi.spyOn(getInstallLayout(packageManager), "getGlobalNpmRoot").mockReturnValue(join(agentDir, "node_modules"));
 
 			const userOldPath = join(agentDir, "node_modules", "user-old");
 			const userCurrentPath = join(agentDir, "node_modules", "user-current");
@@ -1748,7 +1753,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			process.env.PI_OFFLINE = "1";
 			const gitSource = "git:github.com/example/repo";
 			const parsedGitSource = (packageManager as any).parseSource(gitSource);
-			const installedPath = (packageManager as any).getGitInstallPath(parsedGitSource, "temporary") as string;
+			const installedPath = getInstallLayout(packageManager).getGitInstallPath(parsedGitSource, "temporary");
 
 			mkdirSync(join(installedPath, "extensions"), { recursive: true });
 			writeFileSync(join(installedPath, "extensions", "index.ts"), "export default function() {};");
@@ -1821,7 +1826,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			mkdirSync(installedNpmPath, { recursive: true });
 			writeFileSync(join(installedNpmPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			const parsedGitSource = (packageManager as any).parseSource("git:github.com/example/repo@v1");
-			const installedGitPath = (packageManager as any).getGitInstallPath(parsedGitSource, "project") as string;
+			const installedGitPath = getInstallLayout(packageManager).getGitInstallPath(parsedGitSource, "project");
 			mkdirSync(installedGitPath, { recursive: true });
 
 			settingsManager.setProjectPackages(["npm:example@1.0.0", "git:github.com/example/repo@v1"]);
