@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PackageInstallLayout } from "../src/core/package-install-layout.js";
 import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.js";
+import type { PackageUpdateChecker } from "../src/core/package-update-checker.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 
 function normalizeForMatch(value: string): string {
@@ -16,6 +17,10 @@ function pathEndsWith(actualPath: string, suffix: string): boolean {
 
 function getInstallLayout(packageManager: DefaultPackageManager): PackageInstallLayout {
 	return (packageManager as unknown as { installLayout: PackageInstallLayout }).installLayout;
+}
+
+function getUpdateChecker(packageManager: DefaultPackageManager): PackageUpdateChecker {
+	return (packageManager as unknown as { updateChecker: PackageUpdateChecker }).updateChecker;
 }
 
 // Helper to check if a resource is enabled
@@ -1832,7 +1837,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			settingsManager.setProjectPackages(["npm:example@1.0.0", "git:github.com/example/repo@v1"]);
 
 			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
-			const gitUpdateSpy = vi.spyOn(packageManager as any, "gitHasAvailableUpdate");
+			const gitUpdateSpy = vi.spyOn(getUpdateChecker(packageManager), "gitHasAvailableUpdate");
 
 			const updates = await packageManager.checkForAvailableUpdates();
 			expect(updates).toEqual([]);
@@ -1843,7 +1848,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		it("should use npm view to fetch latest version", async () => {
 			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
 
-			const latest = await (packageManager as any).getLatestNpmVersion("example");
+			const latest = await getUpdateChecker(packageManager).getLatestNpmVersion("example");
 			expect(latest).toBe("1.2.3");
 			expect(runCommandCaptureSpy).toHaveBeenCalledTimes(1);
 			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
@@ -1865,7 +1870,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 
 			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
 
-			const latest = await (packageManager as any).getLatestNpmVersion("@scope/pkg");
+			const latest = await getUpdateChecker(packageManager).getLatestNpmVersion("@scope/pkg");
 			expect(latest).toBe("1.2.3");
 			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
 				"mise",
