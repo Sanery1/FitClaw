@@ -22,12 +22,12 @@ function getEnv(): NodeJS.ProcessEnv {
 	}
 }
 
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { globSync } from "glob";
 import { CONFIG_DIR_NAME, isBunRuntime } from "../config.js";
-import { type GitSource, parseGitUrl } from "../utils/git.js";
-import { canonicalizePath, isLocalPath } from "../utils/paths.js";
+import type { GitSource } from "../utils/git.js";
+import { canonicalizePath } from "../utils/paths.js";
 import { isStdoutTakenOver } from "./output-guard.js";
 import {
 	applyPatterns,
@@ -47,6 +47,13 @@ import {
 	type ResourceType,
 	splitPatterns,
 } from "./package-resource-discovery.js";
+import {
+	type LocalSource,
+	type NpmSource,
+	PackageSourceResolver,
+	type ParsedSource,
+	type SourceScope,
+} from "./package-source-resolver.js";
 import type { PackageSource, SettingsManager } from "./settings-manager.js";
 
 const NETWORK_TIMEOUT_MS = 10000;
@@ -128,22 +135,6 @@ interface PackageManagerOptions {
 	settingsManager: SettingsManager;
 }
 
-type SourceScope = "user" | "project" | "temporary";
-
-type NpmSource = {
-	type: "npm";
-	spec: string;
-	name: string;
-	pinned: boolean;
-};
-
-type LocalSource = {
-	type: "local";
-	path: string;
-};
-
-type ParsedSource = NpmSource | GitSource | LocalSource;
-
 type InstalledSourceScope = Exclude<SourceScope, "temporary">;
 
 interface ConfiguredUpdateSource {
@@ -191,11 +182,13 @@ export class DefaultPackageManager implements PackageManager {
 	private globalNpmRoot: string | undefined;
 	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
+	private readonly sourceResolver: PackageSourceResolver;
 
 	constructor(options: PackageManagerOptions) {
 		this.cwd = options.cwd;
 		this.agentDir = options.agentDir;
 		this.settingsManager = options.settingsManager;
+		this.sourceResolver = new PackageSourceResolver({ cwd: this.cwd, agentDir: this.agentDir });
 	}
 
 	setProgressCallback(callback: ProgressCallback | undefined): void {
@@ -207,8 +200,8 @@ export class DefaultPackageManager implements PackageManager {
 		const currentSettings =
 			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getGlobalSettings();
 		const currentPackages = currentSettings.packages ?? [];
-		const normalizedSource = this.normalizePackageSourceForSettings(source, scope);
-		const exists = currentPackages.some((existing) => this.packageSourcesMatch(existing, source, scope));
+		const normalizedSource = this.sourceResolver.normalizeForSettings(source, scope);
+		const exists = currentPackages.some((existing) => this.sourceResolver.matches(existing, source, scope));
 		if (exists) {
 			return false;
 		}
@@ -226,7 +219,7 @@ export class DefaultPackageManager implements PackageManager {
 		const currentSettings =
 			scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getGlobalSettings();
 		const currentPackages = currentSettings.packages ?? [];
-		const nextPackages = currentPackages.filter((existing) => !this.packageSourcesMatch(existing, source, scope));
+		const nextPackages = currentPackages.filter((existing) => !this.sourceResolver.matches(existing, source, scope));
 		const changed = nextPackages.length !== currentPackages.length;
 		if (!changed) {
 			return false;
@@ -250,8 +243,8 @@ export class DefaultPackageManager implements PackageManager {
 			return existsSync(path) ? path : undefined;
 		}
 		if (parsed.type === "local") {
-			const baseDir = this.getBaseDirForScope(scope);
-			const path = this.resolvePathFromBase(parsed.path, baseDir);
+			const baseDir = this.sourceResolver.getBaseDir(scope);
+			const path = this.sourceResolver.resolvePathFromBase(parsed.path, baseDir);
 			return existsSync(path) ? path : undefined;
 		}
 		return undefined;
@@ -293,7 +286,7 @@ export class DefaultPackageManager implements PackageManager {
 		}
 
 		// Dedupe: project scope wins over global for same package identity
-		const packageSources = this.dedupePackages(allPackages);
+		const packageSources = this.sourceResolver.dedupe(allPackages);
 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
 
 		const globalBaseDir = this.agentDir;
@@ -384,7 +377,7 @@ export class DefaultPackageManager implements PackageManager {
 				return;
 			}
 			if (parsed.type === "local") {
-				const resolved = this.resolvePath(parsed.path);
+				const resolved = this.sourceResolver.resolvePath(parsed.path);
 				if (!existsSync(resolved)) {
 					throw new Error(`Path does not exist: ${resolved}`);
 				}
@@ -445,7 +438,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		if (source && !matched) {
 			throw new Error(
-				this.buildNoMatchingPackageMessage(source, [
+				this.sourceResolver.buildNoMatchingPackageMessage(source, [
 					...(globalSettings.packages ?? []),
 					...(projectSettings.packages ?? []),
 				]),
@@ -568,7 +561,7 @@ export class DefaultPackageManager implements PackageManager {
 			allPackages.push({ pkg, scope: "user" });
 		}
 
-		const packageSources = this.dedupePackages(allPackages);
+		const packageSources = this.sourceResolver.dedupe(allPackages);
 		const checks = packageSources
 			.filter(
 				(entry): entry is { pkg: PackageSource; scope: Exclude<SourceScope, "temporary"> } =>
@@ -630,7 +623,7 @@ export class DefaultPackageManager implements PackageManager {
 			const metadata: PathMetadata = { source: sourceStr, scope, origin: "package" };
 
 			if (parsed.type === "local") {
-				const baseDir = this.getBaseDirForScope(scope);
+				const baseDir = this.sourceResolver.getBaseDir(scope);
 				this.resolveLocalExtensionSource(parsed, accumulator, filter, metadata, baseDir);
 				continue;
 			}
@@ -685,7 +678,7 @@ export class DefaultPackageManager implements PackageManager {
 		metadata: PathMetadata,
 		baseDir: string,
 	): void {
-		const resolved = this.resolvePathFromBase(source.path, baseDir);
+		const resolved = this.sourceResolver.resolvePathFromBase(source.path, baseDir);
 		if (!existsSync(resolved)) {
 			return;
 		}
@@ -720,106 +713,8 @@ export class DefaultPackageManager implements PackageManager {
 		}
 	}
 
-	private getPackageSourceString(pkg: PackageSource): string {
-		return typeof pkg === "string" ? pkg : pkg.source;
-	}
-
-	private getSourceMatchKeyForInput(source: string): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			return `npm:${parsed.name}`;
-		}
-		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
-		}
-		return `local:${this.resolvePath(parsed.path)}`;
-	}
-
-	private getSourceMatchKeyForSettings(source: string, scope: SourceScope): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			return `npm:${parsed.name}`;
-		}
-		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
-		}
-		const baseDir = this.getBaseDirForScope(scope);
-		return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
-	}
-
-	private buildNoMatchingPackageMessage(source: string, configuredPackages: PackageSource[]): string {
-		const suggestion = this.findSuggestedConfiguredSource(source, configuredPackages);
-		if (!suggestion) {
-			return `No matching package found for ${source}`;
-		}
-		return `No matching package found for ${source}. Did you mean ${suggestion}?`;
-	}
-
-	private findSuggestedConfiguredSource(source: string, configuredPackages: PackageSource[]): string | undefined {
-		const trimmedSource = source.trim();
-		const suggestions = new Set<string>();
-
-		for (const pkg of configuredPackages) {
-			const sourceStr = this.getPackageSourceString(pkg);
-			const parsed = this.parseSource(sourceStr);
-			if (parsed.type === "npm") {
-				if (trimmedSource === parsed.name || trimmedSource === parsed.spec) {
-					suggestions.add(sourceStr);
-				}
-				continue;
-			}
-			if (parsed.type === "git") {
-				const shorthand = `${parsed.host}/${parsed.path}`;
-				const shorthandWithRef = parsed.ref ? `${shorthand}@${parsed.ref}` : undefined;
-				if (trimmedSource === shorthand || (shorthandWithRef && trimmedSource === shorthandWithRef)) {
-					suggestions.add(sourceStr);
-				}
-			}
-		}
-
-		return suggestions.values().next().value;
-	}
-
-	private packageSourcesMatch(existing: PackageSource, inputSource: string, scope: SourceScope): boolean {
-		const left = this.getSourceMatchKeyForSettings(this.getPackageSourceString(existing), scope);
-		const right = this.getSourceMatchKeyForInput(inputSource);
-		return left === right;
-	}
-
-	private normalizePackageSourceForSettings(source: string, scope: SourceScope): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type !== "local") {
-			return source;
-		}
-		const baseDir = this.getBaseDirForScope(scope);
-		const resolved = this.resolvePath(parsed.path);
-		const rel = relative(baseDir, resolved);
-		return rel || ".";
-	}
-
 	private parseSource(source: string): ParsedSource {
-		if (source.startsWith("npm:")) {
-			const spec = source.slice("npm:".length).trim();
-			const { name, version } = this.parseNpmSpec(spec);
-			return {
-				type: "npm",
-				spec,
-				name,
-				pinned: Boolean(version),
-			};
-		}
-
-		if (isLocalPath(source)) {
-			return { type: "local", path: source };
-		}
-
-		// Try parsing as git URL
-		const gitParsed = parseGitUrl(source);
-		if (gitParsed) {
-			return gitParsed;
-		}
-
-		return { type: "local", path: source };
+		return this.sourceResolver.parse(source);
 	}
 
 	private async installedNpmMatchesPinnedVersion(source: NpmSource, installedPath: string): Promise<boolean> {
@@ -828,7 +723,7 @@ export class DefaultPackageManager implements PackageManager {
 			return false;
 		}
 
-		const { version: pinnedVersion } = this.parseNpmSpec(source.spec);
+		const { version: pinnedVersion } = this.sourceResolver.parseNpmSpec(source.spec);
 		if (!pinnedVersion) {
 			return true;
 		}
@@ -1034,56 +929,7 @@ export class DefaultPackageManager implements PackageManager {
 	 * for the same repository are treated as identical.
 	 */
 	private getPackageIdentity(source: string, scope?: SourceScope): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			return `npm:${parsed.name}`;
-		}
-		if (parsed.type === "git") {
-			// Use host/path for identity to normalize SSH and HTTPS
-			return `git:${parsed.host}/${parsed.path}`;
-		}
-		if (scope) {
-			const baseDir = this.getBaseDirForScope(scope);
-			return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
-		}
-		return `local:${this.resolvePath(parsed.path)}`;
-	}
-
-	/**
-	 * Dedupe packages: if same package identity appears in both global and project,
-	 * keep only the project one (project wins).
-	 */
-	private dedupePackages(
-		packages: Array<{ pkg: PackageSource; scope: SourceScope }>,
-	): Array<{ pkg: PackageSource; scope: SourceScope }> {
-		const seen = new Map<string, { pkg: PackageSource; scope: SourceScope }>();
-
-		for (const entry of packages) {
-			const sourceStr = typeof entry.pkg === "string" ? entry.pkg : entry.pkg.source;
-			const identity = this.getPackageIdentity(sourceStr, entry.scope);
-
-			const existing = seen.get(identity);
-			if (!existing) {
-				seen.set(identity, entry);
-			} else if (entry.scope === "project" && existing.scope === "user") {
-				// Project wins over user
-				seen.set(identity, entry);
-			}
-			// If existing is project and new is global, keep existing (project)
-			// If both are same scope, keep first one
-		}
-
-		return Array.from(seen.values());
-	}
-
-	private parseNpmSpec(spec: string): { name: string; version?: string } {
-		const match = spec.match(/^(@?[^@]+(?:\/[^@]+)?)(?:@(.+))?$/);
-		if (!match) {
-			return { name: spec };
-		}
-		const name = match[1] ?? spec;
-		const version = match[2];
-		return { name, version };
+		return this.sourceResolver.getIdentity(source, scope);
 	}
 
 	private getNpmCommand(): { command: string; args: string[] } {
@@ -1322,32 +1168,6 @@ export class DefaultPackageManager implements PackageManager {
 		return join(tmpdir(), "pi-extensions", prefix, hash, suffix ?? "");
 	}
 
-	private getBaseDirForScope(scope: SourceScope): string {
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME);
-		}
-		if (scope === "user") {
-			return this.agentDir;
-		}
-		return this.cwd;
-	}
-
-	private resolvePath(input: string): string {
-		const trimmed = input.trim();
-		if (trimmed === "~") return getHomeDir();
-		if (trimmed.startsWith("~/")) return join(getHomeDir(), trimmed.slice(2));
-		if (trimmed.startsWith("~")) return join(getHomeDir(), trimmed.slice(1));
-		return resolve(this.cwd, trimmed);
-	}
-
-	private resolvePathFromBase(input: string, baseDir: string): string {
-		const trimmed = input.trim();
-		if (trimmed === "~") return getHomeDir();
-		if (trimmed.startsWith("~/")) return join(getHomeDir(), trimmed.slice(2));
-		if (trimmed.startsWith("~")) return join(getHomeDir(), trimmed.slice(1));
-		return resolve(baseDir, trimmed);
-	}
-
 	private collectPackageResources(
 		packageRoot: string,
 		accumulator: ResourceAccumulator,
@@ -1535,7 +1355,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		// Collect all files from plain entries (non-pattern entries)
 		const { plain, patterns } = splitPatterns(entries);
-		const resolvedPlain = plain.map((p) => this.resolvePathFromBase(p, baseDir));
+		const resolvedPlain = plain.map((p) => this.sourceResolver.resolvePathFromBase(p, baseDir));
 		const allFiles = this.collectFilesFromPaths(resolvedPlain, resourceType);
 
 		// Determine which files are enabled based on patterns
