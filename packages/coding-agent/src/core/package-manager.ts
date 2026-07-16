@@ -1,34 +1,12 @@
-import { type ChildProcess, type ChildProcessByStdio, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-
-function getEnv(): NodeJS.ProcessEnv {
-	if (process.platform !== "linux" || Object.keys(process.env).length > 0) {
-		return process.env;
-	}
-	try {
-		const data = readFileSync("/proc/self/environ", "utf-8");
-		const env: NodeJS.ProcessEnv = {};
-		for (const entry of data.split("\0")) {
-			const idx = entry.indexOf("=");
-			if (idx > 0) {
-				env[entry.slice(0, idx)] = entry.slice(idx + 1);
-			}
-		}
-		return env;
-	} catch {
-		return process.env;
-	}
-}
-
-import { basename, dirname, join, resolve } from "node:path";
-import type { Readable } from "node:stream";
+import { dirname, join, resolve } from "node:path";
 import { globSync } from "glob";
 import { CONFIG_DIR_NAME, isBunRuntime } from "../config.js";
 import type { GitSource } from "../utils/git.js";
 import { canonicalizePath } from "../utils/paths.js";
-import { isStdoutTakenOver } from "./output-guard.js";
+import { PackageCommandRunner } from "./package-command-runner.js";
 import {
 	applyPatterns,
 	collectAncestorAgentsSkillDirs,
@@ -182,6 +160,7 @@ export class DefaultPackageManager implements PackageManager {
 	private globalNpmRoot: string | undefined;
 	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
+	private readonly commandRunner = new PackageCommandRunner();
 	private readonly sourceResolver: PackageSourceResolver;
 
 	constructor(options: PackageManagerOptions) {
@@ -1582,116 +1561,19 @@ export class DefaultPackageManager implements PackageManager {
 		};
 	}
 
-	private shouldUseWindowsShell(command: string): boolean {
-		if (process.platform !== "win32") {
-			return false;
-		}
-		const commandName = basename(command).toLowerCase();
-		return (
-			commandName === "npm" ||
-			commandName === "npx" ||
-			commandName === "pnpm" ||
-			commandName === "yarn" ||
-			commandName === "yarnpkg" ||
-			commandName === "corepack" ||
-			commandName.endsWith(".cmd") ||
-			commandName.endsWith(".bat")
-		);
-	}
-
-	private spawnCommand(command: string, args: string[], options?: { cwd?: string }): ChildProcess {
-		return spawn(command, args, {
-			cwd: options?.cwd,
-			stdio: isStdoutTakenOver() ? ["ignore", 2, 2] : "inherit",
-			shell: this.shouldUseWindowsShell(command),
-			env: getEnv(),
-		});
-	}
-
-	private spawnCaptureCommand(
-		command: string,
-		args: string[],
-		options?: { cwd?: string; env?: Record<string, string> },
-	): ChildProcessByStdio<null, Readable, Readable> {
-		const baseEnv = getEnv();
-		return spawn(command, args, {
-			cwd: options?.cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			shell: this.shouldUseWindowsShell(command),
-			env: options?.env ? { ...baseEnv, ...options.env } : baseEnv,
-		});
-	}
-
 	private runCommandCapture(
 		command: string,
 		args: string[],
 		options?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> },
 	): Promise<string> {
-		return new Promise((resolvePromise, reject) => {
-			const child = this.spawnCaptureCommand(command, args, options);
-			let stdout = "";
-			let stderr = "";
-			let timedOut = false;
-			const timeout =
-				typeof options?.timeoutMs === "number"
-					? setTimeout(() => {
-							timedOut = true;
-							child.kill();
-						}, options.timeoutMs)
-					: undefined;
-
-			child.stdout?.on("data", (data) => {
-				stdout += data.toString();
-			});
-			child.stderr?.on("data", (data) => {
-				stderr += data.toString();
-			});
-			child.once("error", (error) => {
-				if (timeout) clearTimeout(timeout);
-				reject(error);
-			});
-			child.once("close", (code, signal) => {
-				if (timeout) clearTimeout(timeout);
-				if (timedOut) {
-					reject(new Error(`${command} ${args.join(" ")} timed out after ${options?.timeoutMs}ms`));
-					return;
-				}
-				if (code === 0) {
-					resolvePromise(stdout.trim());
-					return;
-				}
-				const exitStatus = code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`;
-				reject(new Error(`${command} ${args.join(" ")} failed with ${exitStatus}: ${stderr || stdout}`));
-			});
-		});
+		return this.commandRunner.capture(command, args, options);
 	}
 
 	private runCommand(command: string, args: string[], options?: { cwd?: string }): Promise<void> {
-		return new Promise((resolvePromise, reject) => {
-			const child = this.spawnCommand(command, args, options);
-			child.on("error", reject);
-			child.on("exit", (code) => {
-				if (code === 0) {
-					resolvePromise();
-				} else {
-					reject(new Error(`${command} ${args.join(" ")} failed with code ${code}`));
-				}
-			});
-		});
+		return this.commandRunner.run(command, args, options);
 	}
 
 	private runCommandSync(command: string, args: string[]): string {
-		const result = spawnSync(command, args, {
-			stdio: ["ignore", "pipe", "pipe"],
-			encoding: "utf-8",
-			shell: this.shouldUseWindowsShell(command),
-			env: getEnv(),
-		});
-		if (result.error || result.status !== 0) {
-			throw new Error(
-				`Failed to run ${command} ${args.join(" ")}: ${result.error?.message || result.stderr || result.stdout}`,
-			);
-		}
-		return (result.stdout || result.stderr || "").trim();
+		return this.commandRunner.runSync(command, args);
 	}
 }
