@@ -1,8 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ENV_AGENT_DIR } from "../../../src/config.js";
+
+const require = createRequire(import.meta.url);
+const tsxLoader = pathToFileURL(require.resolve("tsx/esm")).href;
 
 /**
  * Regression test for https://github.com/badlogic/pi-mono/issues/2791
@@ -39,8 +45,8 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 	});
 
 	it("process should survive an error event on the theme FSWatcher", () => {
-		const themeModulePath = join(__dirname, "../../../src/modes/interactive/theme/theme.js").replace(/\\/g, "/");
-		const agentDir = join(tempRoot, "agent").replace(/\\/g, "/");
+		const themeModuleUrl = pathToFileURL(join(__dirname, "../../../src/modes/interactive/theme/theme.js")).href;
+		const agentDir = join(tempRoot, "agent");
 
 		// Script that sets up the watcher and emits a synthetic error on it.
 		// If no .on('error') handler is attached, EventEmitter.emit('error')
@@ -49,9 +55,7 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 		writeFileSync(
 			scriptPath,
 			`
-import { setTheme, stopThemeWatcher } from "${themeModulePath}";
-
-process.env.PI_CODING_AGENT_DIR = "${agentDir}";
+import { setTheme, stopThemeWatcher } from "${themeModuleUrl}";
 
 setTheme("custom-test", true);
 
@@ -87,17 +91,17 @@ process.exit(0);
 		let stderr = "";
 		let exitCode: number;
 		try {
-			_stdout = execFileSync("npx", ["tsx", scriptPath], {
+			_stdout = execFileSync(process.execPath, ["--import", tsxLoader, scriptPath], {
 				timeout: 10000,
 				encoding: "utf-8",
-				env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+				env: { ...process.env, [ENV_AGENT_DIR]: agentDir },
 				stdio: ["pipe", "pipe", "pipe"],
 			});
 			exitCode = 0;
 		} catch (err: unknown) {
-			const e = err as { status: number; stdout: string; stderr: string };
+			const e = err as { status?: number; stdout?: string; stderr?: string; message?: string };
 			_stdout = e.stdout ?? "";
-			stderr = e.stderr ?? "";
+			stderr = e.stderr ?? e.message ?? "";
 			exitCode = e.status ?? 1;
 		}
 
