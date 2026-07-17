@@ -27,7 +27,7 @@
 |----|--------|------|
 | `apps/coach-bot` | `@fitclaw/coach-bot` | **主产品**：飞书接入、消息渲染、会话和部署 |
 | `packages/coach-core` | `@fitclaw/coach-core` | FitCoach 身份、回复规则和长期数据策略 |
-| `packages/runtime` | `@fitclaw/runtime` | Skill 发现、frontmatter、namespace 存储和数据工具 |
+| `packages/runtime` | `@fitclaw/runtime` | 共享 auth/model/settings、JSONL session、压缩/重试生命周期、Skill 和 data tools |
 | `packages/ai` | `@fitclaw/ai` | 多厂商 LLM API 统一层 |
 | `packages/agent` | `@fitclaw/agent-core` | Agent 运行时：工具调用、状态管理 |
 | `packages/coding-agent` | `@fitclaw/claw` | 开发/调试 CLI（交互式 TUI） |
@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **核心模块边界重构 (2026-07-17)**: package 管理的来源解析、安装布局、资源发现/收集、命令执行和更新检查已从 `package-manager.ts` 拆出（2441→735 行）；交互式 TUI 的会话、模型、命令、终端和扩展界面编排已从 `interactive-mode.ts` 拆出（2225→798 行）；runtime 会话格式、发现、上下文和树读模型已从 `session-manager.ts` 拆出（1425→775 行），公开导出保持不变。
 - **CLI 会话职责拆分 (2026-07-15)**: `AgentSession` 的树导航、手动压缩、Bash 会话和模型/思考状态分别迁入 `SessionTreeController`、`ManualCompactionController`、`SessionBashController` 与 `SessionModelController`；补齐 faux-provider 回归，并复制 scoped model 配置避免持有调用方数组。
 - **共享 Agent 自动压缩生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentCompactionController`，Coach 与 Coding CLI 统一复用阈值判定、单次 overflow 恢复、取消、持久化和队列续跑；CLI 通过前后钩子保留扩展摘要与事件，手动压缩仍归 CLI 编排。
 - **共享 Agent 重试生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentRetryController`，Coach 的 `ManagedAgentSession` 与 Coding CLI 的 `AgentSession` 统一复用重试判定、指数退避、取消和等待逻辑；CLI 不再维护第二套重试状态机。
@@ -203,6 +204,9 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
 | Coach Bot 工具注册 | `apps/coach-bot/src/runtime/skills.ts` |
 | 共享会话生命周期 | `packages/runtime/src/session/managed-agent-session.ts` |
+| JSONL 会话格式与迁移 | `packages/runtime/src/session/session-format.ts` |
+| 会话发现与元数据 | `packages/runtime/src/session/session-discovery.ts` |
+| 会话上下文与树读模型 | `packages/runtime/src/session/session-context.ts`、`session-tree.ts` |
 | Coach Bot 会话组装 | `apps/coach-bot/src/runtime/session.ts` |
 | Coach 系统提示词 | `packages/coach-core/src/system-prompt.ts` |
 | 系统提示词 | `packages/coding-agent/src/core/system-prompt.ts` |
@@ -210,6 +214,8 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | Bot 入口脚本 | `docker/entrypoint.sh` |
 | Bot 环境配置 | `.env.example` |
 | 启动界面 | `packages/coding-agent/src/modes/interactive/interactive-mode.ts` |
+| 交互式 TUI 子控制器 | `packages/coding-agent/src/modes/interactive/interactive-*-controller.ts` |
+| package 管理编排 | `packages/coding-agent/src/core/package-manager.ts`、`package-*.ts` |
 | 配置文件 | `packages/coding-agent/src/config.ts` |
 | CLI 参数解析 | `packages/coding-agent/src/cli/args.ts` |
 | 设置管理 | `packages/coding-agent/src/core/settings-manager.ts` |

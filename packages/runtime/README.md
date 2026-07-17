@@ -11,3 +11,13 @@ Shared runtime primitives used by FitClaw applications:
 - Agent tools for Skill data access
 
 Product-specific coaching workflows do not belong in this package.
+
+## Session module ownership
+
+- `session-format.ts`: JSONL entry types, parsing, versions, and migrations
+- `session-discovery.ts`: session file discovery and metadata
+- `session-context.ts`: LLM context reconstruction for the active branch
+- `session-tree.ts`: immutable tree read model for navigation
+- `session-manager.ts`: persistence state, append operations, branching, and orchestration
+
+Public session APIs are re-exported through `session-manager.ts` and the package entry point.
