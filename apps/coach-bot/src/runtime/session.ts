@@ -24,21 +24,24 @@ class WorkspaceSettingsStorage implements CoachSettingsStorage {
 		this.settingsPath = join(workspaceDir, "settings.json");
 	}
 
-	withLock(scope: "global" | "project", fn: (current: string | undefined) => string | undefined): void {
+	read(scope: "global" | "project"): string | undefined {
 		if (scope === "project") {
-			fn(undefined);
-			return;
+			return undefined;
 		}
 
-		const current = existsSync(this.settingsPath) ? readFileSync(this.settingsPath, "utf-8") : undefined;
-		const next = fn(current);
-		if (next === undefined) return;
+		return existsSync(this.settingsPath) ? readFileSync(this.settingsPath, "utf-8") : undefined;
+	}
+
+	update(scope: "global" | "project", fn: (current: string | undefined) => string): void {
+		if (scope === "project") {
+			return;
+		}
 
 		const dir = dirname(this.settingsPath);
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 		}
-		writeFileSync(this.settingsPath, next, "utf-8");
+		writeFileSync(this.settingsPath, fn(this.read(scope)), "utf-8");
 	}
 }
 

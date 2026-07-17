@@ -1,9 +1,13 @@
 import type { Transport } from "@fitclaw/ai";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
-import lockfile from "proper-lockfile";
-import { CONFIG_DIR_NAME, getAgentDir } from "../paths.js";
+import { join } from "path";
+import { getAgentDir } from "../paths.js";
+import {
+	FileSettingsStorage,
+	InMemorySettingsStorage,
+	type SettingsScope,
+	type SettingsStorage,
+} from "./settings-storage.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -143,99 +147,9 @@ function deepMergeSettings(base: Settings, overrides: Settings): Settings {
 	return result;
 }
 
-export type SettingsScope = "global" | "project";
-
-export interface SettingsStorage {
-	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
-}
-
 export interface SettingsError {
 	scope: SettingsScope;
 	error: Error;
-}
-
-export class FileSettingsStorage implements SettingsStorage {
-	private globalSettingsPath: string;
-	private projectSettingsPath: string;
-
-	constructor(cwd: string, agentDir: string) {
-		this.globalSettingsPath = join(agentDir, "settings.json");
-		this.projectSettingsPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
-	}
-
-	private acquireLockSyncWithRetry(path: string): () => void {
-		const maxAttempts = 10;
-		const delayMs = 20;
-		let lastError: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				return lockfile.lockSync(path, { realpath: false });
-			} catch (error) {
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? String((error as { code?: unknown }).code)
-						: undefined;
-				if (code !== "ELOCKED" || attempt === maxAttempts) {
-					throw error;
-				}
-				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
-			}
-		}
-
-		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
-	}
-
-	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
-		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
-		const dir = dirname(path);
-
-		let release: (() => void) | undefined;
-		try {
-			// Only create directory and lock if file exists or we need to write
-			const fileExists = existsSync(path);
-			if (fileExists) {
-				release = this.acquireLockSyncWithRetry(path);
-			}
-			const current = fileExists ? readFileSync(path, "utf-8") : undefined;
-			const next = fn(current);
-			if (next !== undefined) {
-				// Only create directory when we actually need to write
-				if (!existsSync(dir)) {
-					mkdirSync(dir, { recursive: true });
-				}
-				if (!release) {
-					release = this.acquireLockSyncWithRetry(path);
-				}
-				writeFileSync(path, next, "utf-8");
-			}
-		} finally {
-			if (release) {
-				release();
-			}
-		}
-	}
-}
-
-export class InMemorySettingsStorage implements SettingsStorage {
-	private global: string | undefined;
-	private project: string | undefined;
-
-	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
-		const current = scope === "global" ? this.global : this.project;
-		const next = fn(current);
-		if (next !== undefined) {
-			if (scope === "global") {
-				this.global = next;
-			} else {
-				this.project = next;
-			}
-		}
-	}
 }
 
 export class SettingsManager {
@@ -301,16 +215,12 @@ export class SettingsManager {
 	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
 		const storage = new InMemorySettingsStorage();
 		const initialSettings = SettingsManager.migrateSettings(structuredClone(settings) as Record<string, unknown>);
-		storage.withLock("global", () => JSON.stringify(initialSettings, null, 2));
+		storage.update("global", () => JSON.stringify(initialSettings, null, 2));
 		return SettingsManager.fromStorage(storage);
 	}
 
 	private static loadFromStorage(storage: SettingsStorage, scope: SettingsScope): Settings {
-		let content: string | undefined;
-		storage.withLock(scope, (current) => {
-			content = current;
-			return undefined;
-		});
+		const content = storage.read(scope);
 
 		if (!content) {
 			return {};
@@ -496,7 +406,7 @@ export class SettingsManager {
 		modifiedFields: Set<keyof Settings>,
 		modifiedNestedFields: Map<keyof Settings, Set<string>>,
 	): void {
-		this.storage.withLock(scope, (current) => {
+		this.storage.update(scope, (current) => {
 			const currentFileSettings = current
 				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
 				: {};

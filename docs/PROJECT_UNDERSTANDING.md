@@ -98,6 +98,8 @@ FitClaw 内部是标准 ReAct 风格：
 | Bot runner | `apps/coach-bot/src/agent.ts` |
 | Bot Skill/runtime 组装 | `apps/coach-bot/src/runtime/skills.ts`、`events.ts` |
 | 共享会话生命周期 | `packages/runtime/src/session/managed-agent-session.ts` |
+| 共享设置合并与迁移 | `packages/runtime/src/settings/settings-manager.ts` |
+| 设置文件读写与锁 | `packages/runtime/src/settings/settings-storage.ts` |
 | JSONL 会话格式与迁移 | `packages/runtime/src/session/session-format.ts` |
 | 会话发现与元数据 | `packages/runtime/src/session/session-discovery.ts` |
 | 会话上下文重建 | `packages/runtime/src/session/session-context.ts` |

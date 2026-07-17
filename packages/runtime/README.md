@@ -21,3 +21,10 @@ Product-specific coaching workflows do not belong in this package.
 - `session-manager.ts`: persistence state, append operations, branching, and orchestration
 
 Public session APIs are re-exported through `session-manager.ts` and the package entry point.
+
+## Settings module ownership
+
+- `settings-manager.ts`: global/project merging, migrations, change tracking, and typed accessors
+- `settings-storage.ts`: storage backends and locked read-modify-write transactions
+
+File-backed updates acquire the lock before reading, including the first write to a missing settings file.

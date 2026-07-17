@@ -40,6 +40,7 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **设置存储事务边界修复 (2026-07-17)**: `FileSettingsStorage` 已迁入 `packages/runtime/src/settings/settings-storage.ts`；读取和更新契约分离，首次创建 `settings.json` 时也会先加锁再执行完整 read-modify-write，避免多进程首次写入互相覆盖，同时保持只读不创建项目配置目录。
 - **核心模块边界重构 (2026-07-17)**: package 管理的来源解析、安装布局、资源发现/收集、命令执行和更新检查已从 `package-manager.ts` 拆出（2441→735 行）；交互式 TUI 的会话、模型、命令、终端和扩展界面编排已从 `interactive-mode.ts` 拆出（2225→798 行）；runtime 会话格式、发现、上下文和树读模型已从 `session-manager.ts` 拆出（1425→775 行），公开导出保持不变。
 - **CLI 会话职责拆分 (2026-07-15)**: `AgentSession` 的树导航、手动压缩、Bash 会话和模型/思考状态分别迁入 `SessionTreeController`、`ManualCompactionController`、`SessionBashController` 与 `SessionModelController`；补齐 faux-provider 回归，并复制 scoped model 配置避免持有调用方数组。
 - **共享 Agent 自动压缩生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentCompactionController`，Coach 与 Coding CLI 统一复用阈值判定、单次 overflow 恢复、取消、持久化和队列续跑；CLI 通过前后钩子保留扩展摘要与事件，手动压缩仍归 CLI 编排。
@@ -218,5 +219,6 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | package 管理编排 | `packages/coding-agent/src/core/package-manager.ts`、`package-*.ts` |
 | 配置文件 | `packages/coding-agent/src/config.ts` |
 | CLI 参数解析 | `packages/coding-agent/src/cli/args.ts` |
-| 设置管理 | `packages/coding-agent/src/core/settings-manager.ts` |
+| 设置合并与迁移 | `packages/runtime/src/settings/settings-manager.ts` |
+| 设置文件读写与锁 | `packages/runtime/src/settings/settings-storage.ts` |
 | 模型注册 | `packages/coding-agent/src/core/model-registry.ts` |
