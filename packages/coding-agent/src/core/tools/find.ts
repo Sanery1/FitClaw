@@ -3,6 +3,7 @@ import type { AgentTool } from "@fitclaw/agent-core";
 import { Text } from "@fitclaw/tui";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
+import { Minimatch } from "minimatch";
 import path from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
@@ -227,25 +228,28 @@ export function createFindToolDefinition(
 						// Build fd arguments. --no-require-git makes fd apply hierarchical .gitignore
 						// semantics whether or not the search path is inside a git repository, without
 						// leaking sibling-directory rules the way --ignore-file (a global source) would.
-						const args: string[] = [
-							"--glob",
-							"--color=never",
-							"--hidden",
-							"--no-require-git",
-							"--max-results",
-							String(effectiveLimit),
-						];
+						// fd matches full-path globs against native backslashes on Windows, where
+						// backslashes are also glob escapes. Filter normalized fd results in-process.
+						const usesWindowsPathFilter = process.platform === "win32" && pattern.includes("/");
+						const hasAbsolutePattern = path.isAbsolute(pattern);
+						const args: string[] = ["--glob", "--color=never", "--hidden", "--no-require-git"];
+						if (!usesWindowsPathFilter) {
+							args.push("--max-results", String(effectiveLimit));
+						}
 
 						// fd --glob matches against the basename unless --full-path is set; in --full-path
 						// mode it matches against the absolute candidate path, so a path-containing
 						// pattern like 'src/**/*.spec.ts' needs a leading '**/' to match anything.
-						let effectivePattern = pattern;
-						if (pattern.includes("/")) {
+						let effectivePattern = usesWindowsPathFilter ? "*" : pattern;
+						if (!usesWindowsPathFilter && pattern.includes("/")) {
 							args.push("--full-path");
 							if (!pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
 								effectivePattern = `**/${pattern}`;
 							}
 						}
+						const windowsPathMatcher = usesWindowsPathFilter
+							? new Minimatch(pattern, { dot: true, nocase: true })
+							: undefined;
 						args.push(effectivePattern, searchPath);
 
 						const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -268,7 +272,18 @@ export function createFindToolDefinition(
 						});
 
 						rl.on("line", (line) => {
+							if (windowsPathMatcher) {
+								if (lines.length >= effectiveLimit) return;
+								const absolutePath = line.replace(/\r$/, "").trim();
+								const candidatePath = hasAbsolutePattern
+									? toPosixPath(absolutePath)
+									: toPosixPath(path.relative(searchPath, absolutePath));
+								if (!windowsPathMatcher.match(candidatePath)) return;
+							}
 							lines.push(line);
+							if (windowsPathMatcher && lines.length >= effectiveLimit) {
+								stopChild?.();
+							}
 						});
 
 						child.on("error", (error) => {
