@@ -1063,9 +1063,9 @@ export PI_AI_ANTIGRAVITY_VERSION="1.23.0"
 
 #### Cache Retention
 
-Set `PI_CACHE_RETENTION=long` to extend prompt cache retention:
+Set `FITCLAW_CACHE_RETENTION=long` to extend prompt cache retention:
 
-| Provider | Default | With `PI_CACHE_RETENTION=long` |
+| Provider | Default | With `FITCLAW_CACHE_RETENTION=long` |
 |----------|---------|-------------------------------|
 | Anthropic | 5 minutes | 1 hour |
 | OpenAI | in-memory | 24 hours |
