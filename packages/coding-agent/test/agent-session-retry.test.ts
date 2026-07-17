@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent, type AgentEvent, type AgentTool } from "@fitclaw/agent-core";
+import { Agent, type AgentTool } from "@fitclaw/agent-core";
 import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@fitclaw/ai";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,7 +10,7 @@ import { AuthStorage } from "../src/core/auth-storage.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
-import { createTestResourceLoader } from "./utilities.js";
+import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.js";
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
 	constructor() {
@@ -46,10 +46,6 @@ function createAssistantMessage(text: string, overrides?: Partial<AssistantMessa
 	};
 }
 
-type SessionWithExtensionEmitHook = {
-	_emitExtensionEvent: (event: AgentEvent) => Promise<void>;
-};
-
 describe("AgentSession retry", () => {
 	let session: AgentSession;
 	let tempDir: string;
@@ -68,7 +64,11 @@ describe("AgentSession retry", () => {
 		}
 	});
 
-	function createSession(options?: { failCount?: number; maxRetries?: number; delayAssistantMessageEndMs?: number }) {
+	async function createSession(options?: {
+		failCount?: number;
+		maxRetries?: number;
+		delayAssistantMessageEndMs?: number;
+	}) {
 		const failCount = options?.failCount ?? 1;
 		const maxRetries = options?.maxRetries ?? 3;
 		const delayAssistantMessageEndMs = options?.delayAssistantMessageEndMs ?? 0;
@@ -105,6 +105,23 @@ describe("AgentSession retry", () => {
 		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		settingsManager.applyOverrides({ retry: { enabled: true, maxRetries, baseDelayMs: 1 } });
+		const resourceLoader =
+			delayAssistantMessageEndMs > 0
+				? createTestResourceLoader({
+						extensionsResult: await createTestExtensionsResult(
+							[
+								(pi) => {
+									pi.on("message_end", async (event) => {
+										if (event.message.role === "assistant") {
+											await new Promise((resolve) => setTimeout(resolve, delayAssistantMessageEndMs));
+										}
+									});
+								},
+							],
+							tempDir,
+						),
+					})
+				: createTestResourceLoader();
 
 		session = new AgentSession({
 			agent,
@@ -112,25 +129,14 @@ describe("AgentSession retry", () => {
 			settingsManager,
 			cwd: tempDir,
 			modelRegistry,
-			resourceLoader: createTestResourceLoader(),
+			resourceLoader,
 		});
-
-		if (delayAssistantMessageEndMs > 0) {
-			const sessionWithHook = session as unknown as SessionWithExtensionEmitHook;
-			const original = sessionWithHook._emitExtensionEvent.bind(sessionWithHook);
-			sessionWithHook._emitExtensionEvent = async (event: AgentEvent) => {
-				if (event.type === "message_end" && event.message.role === "assistant") {
-					await new Promise((resolve) => setTimeout(resolve, delayAssistantMessageEndMs));
-				}
-				await original(event);
-			};
-		}
 
 		return { session, getCallCount: () => callCount };
 	}
 
 	it("retries after a transient error and succeeds", async () => {
-		const created = createSession({ failCount: 1 });
+		const created = await createSession({ failCount: 1 });
 		const events: string[] = [];
 		created.session.subscribe((event) => {
 			if (event.type === "auto_retry_start") events.push(`start:${event.attempt}`);
@@ -145,7 +151,7 @@ describe("AgentSession retry", () => {
 	});
 
 	it("exhausts max retries and emits failure", async () => {
-		const created = createSession({ failCount: 99, maxRetries: 2 });
+		const created = await createSession({ failCount: 99, maxRetries: 2 });
 		const events: string[] = [];
 		created.session.subscribe((event) => {
 			if (event.type === "auto_retry_start") events.push(`start:${event.attempt}`);
@@ -162,7 +168,7 @@ describe("AgentSession retry", () => {
 	});
 
 	it("prompt waits for retry completion even when assistant message_end handling is delayed", async () => {
-		const created = createSession({ failCount: 1, delayAssistantMessageEndMs: 40 });
+		const created = await createSession({ failCount: 1, delayAssistantMessageEndMs: 40 });
 
 		await created.session.prompt("Test");
 
@@ -171,7 +177,7 @@ describe("AgentSession retry", () => {
 	});
 
 	it("retries provider network_error failures", async () => {
-		const created = createSession({ failCount: 0 });
+		const created = await createSession({ failCount: 0 });
 		let callCount = 0;
 		const streamFn = () => {
 			callCount++;
