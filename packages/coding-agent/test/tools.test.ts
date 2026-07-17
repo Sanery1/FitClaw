@@ -13,6 +13,7 @@ import {
 	createWriteTool,
 } from "../src/index.js";
 import * as shellModule from "../src/utils/shell.js";
+import { HAS_LOCAL_SHELL } from "./shell-availability.js";
 
 const readTool = createReadTool(process.cwd());
 const writeTool = createWriteTool(process.cwd());
@@ -369,20 +370,20 @@ describe("Coding Agent Tools", () => {
 	});
 
 	describe("bash tool", () => {
-		it("should execute simple commands", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should execute simple commands", async () => {
 			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });
 
 			expect(getTextOutput(result)).toContain("test output");
 			expect(result.details).toBeUndefined();
 		});
 
-		it("should handle command errors", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should handle command errors", async () => {
 			await expect(bashTool.execute("test-call-9", { command: "exit 1" })).rejects.toThrow(
 				/(Command failed|code 1)/,
 			);
 		});
 
-		it("should respect timeout", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should respect timeout", async () => {
 			await expect(bashTool.execute("test-call-10", { command: "sleep 5", timeout: 1 })).rejects.toThrow(
 				/timed out/i,
 			);
@@ -431,7 +432,7 @@ describe("Coding Agent Tools", () => {
 			expect(getShellConfigSpy).toHaveBeenCalledWith("/custom/bash");
 		});
 
-		it("should prepend command prefix when configured", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should prepend command prefix when configured", async () => {
 			const bashWithPrefix = createBashTool(testDir, {
 				commandPrefix: "export TEST_VAR=hello",
 			});
@@ -440,7 +441,7 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(result).trim()).toBe("hello");
 		});
 
-		it("should include output from both prefix and command", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should include output from both prefix and command", async () => {
 			const bashWithPrefix = createBashTool(testDir, {
 				commandPrefix: "echo prefix-output",
 			});
@@ -449,14 +450,14 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(result).trim()).toBe("prefix-output\ncommand-output");
 		});
 
-		it("should work without command prefix", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should work without command prefix", async () => {
 			const bashWithoutPrefix = createBashTool(testDir, {});
 
 			const result = await bashWithoutPrefix.execute("test-prefix-3", { command: "echo no-prefix" });
 			expect(getTextOutput(result).trim()).toBe("no-prefix");
 		});
 
-		it("should expose local bash operations for extension reuse", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should expose local bash operations for extension reuse", async () => {
 			const ops = createLocalBashOperations();
 			const chunks: Buffer[] = [];
 
@@ -469,18 +470,21 @@ describe("Coding Agent Tools", () => {
 			expect(Buffer.concat(chunks).toString("utf-8").trim()).toBe("from-local-ops");
 		});
 
-		it("should preserve executeBash sanitization when using local bash operations", async () => {
-			const result = await executeBashWithOperations(
-				"printf '\\033[31mred\\033[0m\\r\\n'",
-				process.cwd(),
-				createLocalBashOperations(),
-			);
+		it.skipIf(!HAS_LOCAL_SHELL)(
+			"should preserve executeBash sanitization when using local bash operations",
+			async () => {
+				const result = await executeBashWithOperations(
+					"printf '\\033[31mred\\033[0m\\r\\n'",
+					process.cwd(),
+					createLocalBashOperations(),
+				);
 
-			expect(result.exitCode).toBe(0);
-			expect(result.output).toBe("red\n");
-		});
+				expect(result.exitCode).toBe(0);
+				expect(result.output).toBe("red\n");
+			},
+		);
 
-		it("should persist full output when truncation happens by line count only", async () => {
+		it.skipIf(!HAS_LOCAL_SHELL)("should persist full output when truncation happens by line count only", async () => {
 			const bash = createBashTool(testDir);
 			const result = await bash.execute("test-call-line-truncation", { command: "seq 3000" });
 			const output = getTextOutput(result);
@@ -503,23 +507,26 @@ describe("Coding Agent Tools", () => {
 			expect(fullOutput).toContain("2998\n2999\n3000");
 		});
 
-		it("executeBash should persist full output when truncation happens by line count only", async () => {
-			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
-			const fullOutputPath = result.fullOutputPath;
+		it.skipIf(!HAS_LOCAL_SHELL)(
+			"executeBash should persist full output when truncation happens by line count only",
+			async () => {
+				const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
+				const fullOutputPath = result.fullOutputPath;
 
-			expect(result.truncated).toBe(true);
-			expect(fullOutputPath).toBeDefined();
+				expect(result.truncated).toBe(true);
+				expect(fullOutputPath).toBeDefined();
 
-			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			}
+				for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
 
-			expect(fullOutputPath).toBeDefined();
-			expect(existsSync(fullOutputPath!)).toBe(true);
-			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
-			expect(fullOutput).toContain("1\n2\n3");
-			expect(fullOutput).toContain("2998\n2999\n3000");
-		});
+				expect(fullOutputPath).toBeDefined();
+				expect(existsSync(fullOutputPath!)).toBe(true);
+				const fullOutput = readFileSync(fullOutputPath!, "utf-8");
+				expect(fullOutput).toContain("1\n2\n3");
+				expect(fullOutput).toContain("2998\n2999\n3000");
+			},
+		);
 	});
 
 	describe("grep tool", () => {

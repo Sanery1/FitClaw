@@ -76,11 +76,11 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 	return {
 		exec: (command, cwd, { onData, signal, timeout, env }) => {
 			return new Promise((resolve, reject) => {
-				const { shell, args } = getShellConfig(options?.shellPath);
 				if (!existsSync(cwd)) {
 					reject(new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`));
 					return;
 				}
+				const { shell, args } = getShellConfig(options?.shellPath);
 				const child = spawn(shell, [...args, command], {
 					cwd,
 					detached: true,

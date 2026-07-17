@@ -4,6 +4,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@fitclaw/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BashOperations } from "../../src/core/tools/bash.js";
+import { HAS_LOCAL_SHELL } from "../shell-availability.js";
 import { createHarness, type Harness } from "./harness.js";
 
 function getEntryTypes(harness: Harness): string[] {
@@ -95,7 +96,7 @@ describe("AgentSession bash and persistence characterization", () => {
 		expect(getEntryTypes(harness).filter((type) => type === "message").length).toBeGreaterThan(0);
 	});
 
-	it("executes bash commands and records the result", async () => {
+	it.skipIf(!HAS_LOCAL_SHELL)("executes bash commands and records the result", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 

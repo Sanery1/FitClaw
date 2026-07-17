@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.js";
 import { createBashTool, createLocalBashOperations } from "../src/core/tools/bash.js";
+import { HAS_LOCAL_SHELL } from "./shell-availability.js";
 
 function toBashSingleQuotedArg(value: string): string {
 	return `'${value.replace(/\\/g, "/").replace(/'/g, `'"'"'`)}'`;
@@ -69,7 +70,7 @@ function getTextOutput(result: { content?: Array<{ type: string; text?: string }
 	);
 }
 
-describe.skipIf(process.platform !== "win32")("Windows child-process close handling", () => {
+describe.skipIf(process.platform !== "win32" || !HAS_LOCAL_SHELL)("Windows child-process close handling", () => {
 	let testDir: string;
 
 	beforeEach(() => {
