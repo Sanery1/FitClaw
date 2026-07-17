@@ -1,15 +1,9 @@
-import type { AgentMessage } from "@fitclaw/agent-core";
 import type { ImageContent, Message, TextContent } from "@fitclaw/ai";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { v7 as uuidv7 } from "uuid";
-import {
-	type BashExecutionMessage,
-	type CustomMessage,
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-} from "./messages.js";
+import type { BashExecutionMessage, CustomMessage } from "./messages.js";
+import { buildSessionContext, type SessionContext } from "./session-context.js";
 import {
 	findMostRecentSession,
 	getDefaultSessionDir,
@@ -36,6 +30,9 @@ import {
 	type SessionMessageEntry,
 	type ThinkingLevelChangeEntry,
 } from "./session-format.js";
+import { buildSessionTree, type SessionTreeNode } from "./session-tree.js";
+
+export { buildSessionContext, getLatestCompactionEntry, type SessionContext } from "./session-context.js";
 
 export {
 	findMostRecentSession,
@@ -62,26 +59,11 @@ export {
 	type SessionMessageEntry,
 	type ThinkingLevelChangeEntry,
 } from "./session-format.js";
+export type { SessionTreeNode } from "./session-tree.js";
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
-}
-
-/** Tree node for getTree() - defensive copy of session structure */
-export interface SessionTreeNode {
-	entry: SessionEntry;
-	children: SessionTreeNode[];
-	/** Resolved label for this entry, if any */
-	label?: string;
-	/** Timestamp of the latest label change for this entry, if any */
-	labelTimestamp?: string;
-}
-
-export interface SessionContext {
-	messages: AgentMessage[];
-	thinkingLevel: string;
-	model: { provider: string; modelId: string } | null;
 }
 
 export type ReadonlySessionManager = Pick<
@@ -105,128 +87,6 @@ function createSessionId(): string {
 	return uuidv7();
 }
 
-export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEntry | null {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (entries[i].type === "compaction") {
-			return entries[i] as CompactionEntry;
-		}
-	}
-	return null;
-}
-
-/**
- * Build the session context from entries using tree traversal.
- * If leafId is provided, walks from that entry to root.
- * Handles compaction and branch summaries along the path.
- */
-export function buildSessionContext(
-	entries: SessionEntry[],
-	leafId?: string | null,
-	byId?: Map<string, SessionEntry>,
-): SessionContext {
-	// Build uuid index if not available
-	if (!byId) {
-		byId = new Map<string, SessionEntry>();
-		for (const entry of entries) {
-			byId.set(entry.id, entry);
-		}
-	}
-
-	// Find leaf
-	let leaf: SessionEntry | undefined;
-	if (leafId === null) {
-		// Explicitly null - return no messages (navigated to before first entry)
-		return { messages: [], thinkingLevel: "off", model: null };
-	}
-	if (leafId) {
-		leaf = byId.get(leafId);
-	}
-	if (!leaf) {
-		// Fallback to last entry (when leafId is undefined)
-		leaf = entries[entries.length - 1];
-	}
-
-	if (!leaf) {
-		return { messages: [], thinkingLevel: "off", model: null };
-	}
-
-	// Walk from leaf to root, collecting path
-	const path: SessionEntry[] = [];
-	let current: SessionEntry | undefined = leaf;
-	while (current) {
-		path.unshift(current);
-		current = current.parentId ? byId.get(current.parentId) : undefined;
-	}
-
-	// Extract settings and find compaction
-	let thinkingLevel = "off";
-	let model: { provider: string; modelId: string } | null = null;
-	let compaction: CompactionEntry | null = null;
-
-	for (const entry of path) {
-		if (entry.type === "thinking_level_change") {
-			thinkingLevel = entry.thinkingLevel;
-		} else if (entry.type === "model_change") {
-			model = { provider: entry.provider, modelId: entry.modelId };
-		} else if (entry.type === "message" && entry.message.role === "assistant") {
-			model = { provider: entry.message.provider, modelId: entry.message.model };
-		} else if (entry.type === "compaction") {
-			compaction = entry;
-		}
-	}
-
-	// Build messages and collect corresponding entries
-	// When there's a compaction, we need to:
-	// 1. Emit summary first (entry = compaction)
-	// 2. Emit kept messages (from firstKeptEntryId up to compaction)
-	// 3. Emit messages after compaction
-	const messages: AgentMessage[] = [];
-
-	const appendMessage = (entry: SessionEntry) => {
-		if (entry.type === "message") {
-			messages.push(entry.message);
-		} else if (entry.type === "custom_message") {
-			messages.push(
-				createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp),
-			);
-		} else if (entry.type === "branch_summary" && entry.summary) {
-			messages.push(createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp));
-		}
-	};
-
-	if (compaction) {
-		// Emit summary first
-		messages.push(createCompactionSummaryMessage(compaction.summary, compaction.tokensBefore, compaction.timestamp));
-
-		// Find compaction index in path
-		const compactionIdx = path.findIndex((e) => e.type === "compaction" && e.id === compaction.id);
-
-		// Emit kept messages (before compaction, starting from firstKeptEntryId)
-		let foundFirstKept = false;
-		for (let i = 0; i < compactionIdx; i++) {
-			const entry = path[i];
-			if (entry.id === compaction.firstKeptEntryId) {
-				foundFirstKept = true;
-			}
-			if (foundFirstKept) {
-				appendMessage(entry);
-			}
-		}
-
-		// Emit messages after compaction
-		for (let i = compactionIdx + 1; i < path.length; i++) {
-			const entry = path[i];
-			appendMessage(entry);
-		}
-	} else {
-		// No compaction - emit all messages, handle branch summaries and custom messages
-		for (const entry of path) {
-			appendMessage(entry);
-		}
-	}
-
-	return { messages, thinkingLevel, model };
-}
 /**
  * Manages conversation sessions as append-only trees stored in JSONL files.
  *
@@ -645,43 +505,7 @@ export class SessionManager {
 	 * Orphaned entries (broken parent chain) are also returned as roots.
 	 */
 	getTree(): SessionTreeNode[] {
-		const entries = this.getEntries();
-		const nodeMap = new Map<string, SessionTreeNode>();
-		const roots: SessionTreeNode[] = [];
-
-		// Create nodes with resolved labels
-		for (const entry of entries) {
-			const label = this.labelsById.get(entry.id);
-			const labelTimestamp = this.labelTimestampsById.get(entry.id);
-			nodeMap.set(entry.id, { entry, children: [], label, labelTimestamp });
-		}
-
-		// Build tree
-		for (const entry of entries) {
-			const node = nodeMap.get(entry.id)!;
-			if (entry.parentId === null || entry.parentId === entry.id) {
-				roots.push(node);
-			} else {
-				const parent = nodeMap.get(entry.parentId);
-				if (parent) {
-					parent.children.push(node);
-				} else {
-					// Orphan - treat as root
-					roots.push(node);
-				}
-			}
-		}
-
-		// Sort children by timestamp (oldest first, newest at bottom)
-		// Use iterative approach to avoid stack overflow on deep trees
-		const stack: SessionTreeNode[] = [...roots];
-		while (stack.length > 0) {
-			const node = stack.pop()!;
-			node.children.sort((a, b) => new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime());
-			stack.push(...node.children);
-		}
-
-		return roots;
+		return buildSessionTree(this.getEntries(), this.labelsById, this.labelTimestampsById);
 	}
 
 	// =========================================================================
