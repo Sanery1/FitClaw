@@ -8,6 +8,8 @@ import type { SessionInfo } from "../src/core/session-manager.js";
 import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
+const directoryLinkType = process.platform === "win32" ? "junction" : "dir";
+
 type Deferred<T> = {
 	promise: Promise<T>;
 	resolve: (value: T) => void;
@@ -67,8 +69,8 @@ function createSymlinkedSessionPaths(): {
 	mkdirSync(sharedDir, { recursive: true });
 	const aliasASessions = join(aliasADir, "sessions");
 	const aliasBSessions = join(aliasBDir, "sessions");
-	symlinkSync(sharedDir, aliasASessions);
-	symlinkSync(sharedDir, aliasBSessions);
+	symlinkSync(sharedDir, aliasASessions, directoryLinkType);
+	symlinkSync(sharedDir, aliasBSessions, directoryLinkType);
 
 	const parentRealPath = join(sharedDir, "parent.jsonl");
 	const childRealPath = join(sharedDir, "child.jsonl");

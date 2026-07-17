@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -64,10 +64,13 @@ describe("withFileMutationQueue", () => {
 
 	it("uses the same queue for symlink aliases", async () => {
 		const dir = await createTempDir();
-		const targetPath = join(dir, "target.txt");
-		const symlinkPath = join(dir, "alias.txt");
+		const targetDir = join(dir, "target");
+		const aliasDir = join(dir, "alias");
+		await mkdir(targetDir);
+		await symlink(targetDir, aliasDir, process.platform === "win32" ? "junction" : "dir");
+		const targetPath = join(targetDir, "file.txt");
+		const symlinkPath = join(aliasDir, "file.txt");
 		await writeFile(targetPath, "hello\n", "utf8");
-		await symlink(targetPath, symlinkPath);
 
 		const order: string[] = [];
 		await Promise.all([

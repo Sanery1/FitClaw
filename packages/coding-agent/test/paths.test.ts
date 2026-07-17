@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { canonicalizePath, isLocalPath } from "../src/utils/paths.js";
 
 let tempDir: string;
+const directoryLinkType = process.platform === "win32" ? "junction" : "dir";
 
 afterEach(() => {
 	if (tempDir) {
@@ -28,10 +29,13 @@ describe("canonicalizePath", () => {
 
 	it("resolves symlinks to their targets", () => {
 		const dir = createTempDir();
-		const target = join(dir, "target.txt");
-		const link = join(dir, "link.txt");
+		const targetDir = join(dir, "target-dir");
+		const linkDir = join(dir, "link-dir");
+		mkdirSync(targetDir);
+		symlinkSync(targetDir, linkDir, directoryLinkType);
+		const target = join(targetDir, "file.txt");
+		const link = join(linkDir, "file.txt");
 		writeFileSync(target, "hello");
-		symlinkSync(target, link);
 		expect(canonicalizePath(link)).toBe(realpathSync(target));
 	});
 
@@ -40,7 +44,7 @@ describe("canonicalizePath", () => {
 		const targetDir = join(dir, "target-dir");
 		const linkDir = join(dir, "link-dir");
 		mkdirSync(targetDir);
-		symlinkSync(targetDir, linkDir, "dir");
+		symlinkSync(targetDir, linkDir, directoryLinkType);
 		expect(canonicalizePath(linkDir)).toBe(realpathSync(targetDir));
 	});
 
@@ -52,10 +56,11 @@ describe("canonicalizePath", () => {
 
 	it("falls back to the raw path for a dangling symlink", () => {
 		const dir = createTempDir();
-		const target = join(dir, "target.txt");
-		const link = join(dir, "link.txt");
-		// Create a symlink whose target does not exist.
-		symlinkSync(target, link);
+		const target = join(dir, "target-dir");
+		const link = join(dir, "link-dir");
+		mkdirSync(target);
+		symlinkSync(target, link, directoryLinkType);
+		rmSync(target, { recursive: true });
 		// realpathSync would throw, so canonicalizePath returns the link path.
 		expect(canonicalizePath(link)).toBe(link);
 	});
