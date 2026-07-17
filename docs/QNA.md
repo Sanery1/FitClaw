@@ -3245,7 +3245,11 @@ description: |
 data:
   user_profile: {}
   training_log: {type: array}
-  training_plan: {}
+  training_plan:
+    type: object
+    schema:
+      type: object
+      required: [name, goal, days_per_week, days]
   body_metrics: {type: array}
   progression: {type: array}
   personal_records: {type: array}
@@ -3259,7 +3263,7 @@ data:
 | `name` | `loadSkillFromFile()`、`formatSkillsForPrompt()`、data tool 工厂 | Skill 名称；也参与生成 `data_bodybuilding_read/write` 工具名 |
 | `description` | `formatSkillsForPrompt()`、LLM | 注入 `<available_skills>`，让 LLM 判断用户问题是否匹配该 Skill |
 | `disable-model-invocation` | `formatSkillsForPrompt()` | 为 true 时不出现在 `<available_skills>`，只能手动 `/skill:name` 激活 |
-| `data` | `loadSkillFromFile()`、`createAgentSession()`、data tool 执行函数 | 声明可持久化 namespace，并触发自动注册 `data_<skill>_read/write` |
+| `data` | `loadSkillFromFile()`、`createAgentSession()`、data tool 执行函数 | 声明可持久化 namespace，可选附带完整值的 JSON Schema，并触发自动注册 `data_<skill>_read/write` |
 | Markdown 正文 | LLM 通过 `read` 工具按需读取 | 具体操作手册，不在启动时全量注入 system prompt |
 | `references/` | `buildKnowledgeEntries()` 建索引，LLM 按需 read | 分层知识库，不触发 data tools 注册 |
 | `scripts/` | SKILL.md 指令或 LLM 通过 bash 调用 | 查询动作库等执行脚本，不触发 data tools 自动注册 |
@@ -3309,10 +3313,15 @@ if (frontmatter.data && typeof frontmatter.data === "object") {
     if (!/^[a-z][a-z0-9_]*$/.test(key)) {
       continue;
     }
-    if (decl && typeof decl === "object") {
-      const type = (decl as any).type === "array" ? "array" : "object";
+    if (!decl || typeof decl !== "object") continue;
+    const type = decl.type === "array" ? "array" : "object";
+    if (decl.schema === undefined) {
       dataNamespaces.set(key, { type });
+      continue;
     }
+    if (!IsSchema(decl.schema)) continue;
+    Schema.Compile(decl.schema);
+    dataNamespaces.set(key, { type, schema: decl.schema });
   }
 }
 ```
@@ -3364,8 +3373,9 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
       lines.push(`      <write>data_${escapeXml(skill.name)}_write</write>`);
       lines.push("      <namespaces>");
       for (const [namespace, declaration] of skill.dataNamespaces) {
+        const schemaAttribute = declaration.schema === undefined ? "" : ' schema="true"';
         lines.push(
-          `        <namespace name="${escapeXml(namespace)}" type="${escapeXml(declaration.type ?? "object")}" />`,
+          `        <namespace name="${escapeXml(namespace)}" type="${escapeXml(declaration.type ?? "object")}"${schemaAttribute} />`,
         );
       }
       lines.push("      </namespaces>");
@@ -3407,6 +3417,7 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 | `<write>` | `formatSkillsForPrompt()` 按 `data_${skill.name}_write` 拼出 |
 | `<namespace>` | `skill.dataNamespaces`，来自 frontmatter `data:` |
 | `type` | `data.<namespace>.type`；未显式声明 array 时默认为 object |
+| `schema="true"` | 该 namespace 声明了有效 JSON Schema；写工具会在落盘前校验完整值 |
 
 `<available_skills>` 最后由 `buildSystemPrompt()` 拼进 system prompt：
 
@@ -3453,7 +3464,11 @@ description: |
 data:
   user_profile: {}
   training_log: {type: array}
-  training_plan: {}
+  training_plan:
+    type: object
+    schema:
+      type: object
+      required: [name, goal, days_per_week, days]
   body_metrics: {type: array}
   progression: {type: array}
   personal_records: {type: array}
@@ -5988,7 +6003,7 @@ packages/coding-agent/src/core/fitness/compaction.ts
 
 **A:**
 
-**一句话结论：Session JSONL 有版本迁移；压缩摘要是 Markdown，没有严格 schema；Skill 业务数据当前缺少强 schema，这是记忆管理里最大的生产风险。**
+**一句话结论：Session JSONL 有版本迁移；压缩摘要是 Markdown；Skill data 已支持 namespace 级可选 JSON Schema，但目前只为已发生真实结构漂移的 `training_plan` 启用，历史迁移仍是主要缺口。**
 
 三类数据的演进方式：
 
@@ -5996,7 +6011,7 @@ packages/coding-agent/src/core/fitness/compaction.ts
 |------|----------|----------|------|
 | Session JSONL | append-only entries，如 `message` / `compaction` / `model_change` | 有 `CURRENT_SESSION_VERSION` 和迁移函数 | 相对可控 |
 | Compaction summary | Markdown 文本 + file ops details | 无严格 schema | 摘要格式可能漂移 |
-| Skill data JSON | namespace 文件，如 `training_log.json` | 无版本字段和强校验 | LLM 可能写出不一致结构 |
+| Skill data JSON | namespace 文件，如 `training_log.json` | 可选 JSON Schema；无统一 migration | 未声明 Schema 的 namespace 仍可能漂移，旧数据不会自动迁移 |
 
 当前 `data_bodybuilding_write` 主要保证：
 
@@ -6005,23 +6020,23 @@ packages/coding-agent/src/core/fitness/compaction.ts
 - `array` namespace 默认 append，`object` namespace 默认 replace。
 - append 到非数组会返回错误。
 - 文件路径会被限制在 `sport-data/{skill}/{namespace}.json` 下。
+- 声明了 Schema 时，replace 校验完整替换值，append 校验追加后的完整数组；失败不落盘并返回问题列表。
 
 它没有保证：
 
-- `training_log` 中每条记录字段完全一致。
+- 未声明 Schema 的 `training_log` 中每条记录字段完全一致。
 - `body_metrics` 一定有日期、体重、单位。
 - `personal_records` 一定按动作名/重量/次数规范写入。
 - 旧格式能自动迁移到新格式。
 
-生产演进建议：
+当前演进原则：
 
-1. 在 Skill `data:` 声明中加入 JSON Schema。
-2. `data_<skill>_write` 写入前做 schema 校验。
-3. 每个 namespace 增加 `version` 字段。
-4. 为关键 namespace 写 migration。
-5. eval harness 增加 `json_path_equals` / `tool_args_match` 回归任务，防止 Prompt 改动导致写入格式漂移。
+1. 只在 live/eval 证实结构漂移时，为对应 Skill namespace 增加 JSON Schema。
+2. 现阶段 `training_plan` 要求 `name/goal/days_per_week/days`，允许额外字段演进。
+3. 后续出现历史格式共存问题时，再引入 `schema_version` 和显式 migration；不要在读取时静默改写。
+4. 用 `json_path_equals`、`tool_args_match` 和 runtime 单测共同保护 Prompt 与写入边界。
 
-面试官追问“你的长期记忆可靠在哪里”时，应该承认边界：当前可靠的是**命名空间、路径和读写模式边界**，不是完整业务 schema。
+面试官追问“你的长期记忆可靠在哪里”时，应该准确说明：当前可靠的是**命名空间、路径、读写模式，以及已声明 Schema 的写入边界**；它还不是覆盖全部 namespace 的业务 schema 和自动迁移系统。
 
 **核心文件：** `packages/runtime/src/session/session-format.ts`、`packages/runtime/src/data-tools.ts`、`packages/runtime/src/data-store.ts`
 
@@ -6973,7 +6988,7 @@ const channelStates = new Map<string, ChannelState>();
 
 | 瓶颈 | 当前实现 | 问题 | 解决方案 |
 |------|---------|------|---------|
-| 图片传输 | 入站使用 `downloadFile()`，出站使用受限 `attach` | 受飞书文件类型与大小限制 | 代码已支持，待真实应用 smoke test |
+| 图片传输 | 入站使用 `downloadFile()`，出站使用受限 `attach` | 受飞书文件类型与大小限制 | 代码和 2026-07-17 真实飞书 smoke 均已通过 |
 | LLM 视觉能力 | `transformMessages` 检测非视觉模型并降级 | 需要视觉模型（GPT-4V、Claude Vision） | 配置视觉模型即可 |
 | 图片识别精度 | 无 | 需要微调模型或 RAG | 集成动作图片向量检索 |
 | 飞书图片发送 | `attach` + `sendMediaReply()` | 当前每次都重新上传 | 根据真实使用数据决定是否增加 key 缓存 |
@@ -6988,7 +7003,7 @@ const channelStates = new Map<string, ChannelState>();
 5. **图片上传无缓存**：媒体链路已打通，但重复发送同一图片会再次上传
 
 **推荐的架构演进路径：**
-1. 短期：完成真实飞书动作图片 smoke test，并根据查询性能决定是否引入 SQLite 索引
+1. 短期：观察真实动作查询性能和重复图片上传成本，达到明确瓶颈后再评估 SQLite 索引或媒体 key 缓存
 2. 中期：向量数据库（如 Qdrant）存储动作 embedding，支持语义搜索
 3. 长期：对象存储（S3/OSS）分离图片 + 分布式部署
 
@@ -7393,7 +7408,7 @@ model.id       -> 上游请求里的 model 字段
 
 1. **数据量小**：个人训练日志、体测和计划不构成数据库规模瓶颈。
 2. **部署简单**：Bot Docker volume 挂载后即可运行，不需要额外数据库服务。
-3. **Skill 可移植**：Skill 作者只声明 namespace，不接触数据库 schema 和迁移。
+3. **Skill 可移植**：Skill 作者声明 namespace 和可选 JSON Schema，不接触存储实现和迁移执行机制。
 4. **边界清晰**：每个 Skill 只能读写自己声明过的 namespace。
 5. **方便调试**：JSON 文件可直接查看，适合早期 Agent 行为排查。
 
@@ -7408,7 +7423,7 @@ model.id       -> 上游请求里的 model 字段
 | 风险 | 当前状态 | 生产演进 |
 |------|----------|----------|
 | 并发写入 | 单进程内风险低，多实例不安全 | 文件锁或数据库事务 |
-| Schema 演进 | 依赖 LLM 写入结构，缺少强 schema | JSON Schema + version 字段 |
+| Schema 演进 | 支持可选 JSON Schema；当前只约束 `training_plan`，无自动迁移 | 按实际漂移补 Schema，再增加 version 和显式 migration |
 | 查询能力 | 文件读写，复杂查询弱 | SQLite/PostgreSQL |
 | 多实例共享 | 本地文件系统不支持 | 外置数据库或对象存储 |
 
@@ -7568,16 +7583,18 @@ Agent 问题经常不是“挂了”，而是“工具调用变多了”“Promp
 当前已有：
 
 - bash 危险命令模式拦截。
+- Skill 命令 allowlist，以及无网络、只读 workspace、无 Bot 凭据的独立 Runner。
 - data namespace 白名单。
 - JSON 路径边界校验。
 - 工具参数 Schema 校验。
+- Skill data 可选 JSON Schema 写前校验；当前 `training_plan` 已启用。
+- Coach 对疼痛、伤病和高风险负重的全局保守边界。
 
 仍需补齐：
 
-- 工具级权限白名单。
 - 用户级权限模型。
-- 高风险建议的内容安全规则。
-- 写入训练数据前的结构化 schema 校验。
+- 模型外的高风险内容审核与审计机制。
+- 按实际结构漂移扩展其他 namespace Schema，并为历史数据设计显式 migration。
 
 为什么重要：
 

@@ -7,6 +7,7 @@
  */
 import type { AgentTool } from "@fitclaw/agent-core";
 import { Type } from "typebox";
+import Schema, { type XSchema } from "typebox/schema";
 import type { SkillDataStore } from "./data-store.js";
 import type { SkillDataDeclaration } from "./skills.js";
 
@@ -48,6 +49,40 @@ function listDeclaredNamespaces(dataNamespaces: Map<string, SkillDataDeclaration
 	return Array.from(dataNamespaces.keys())
 		.map((k) => `"${k}"`)
 		.join(", ");
+}
+
+interface SchemaIssue {
+	instance_path: string;
+	keyword: string;
+	message: string;
+}
+
+function getSchemaIssues(schema: XSchema | undefined, data: unknown): SchemaIssue[] {
+	if (schema === undefined) return [];
+
+	const [isValid, errors] = Schema.Errors(schema, data);
+	if (isValid) return [];
+
+	return errors.slice(0, 8).map((error) => ({
+		instance_path: error.instancePath,
+		keyword: error.keyword,
+		message: error.message,
+	}));
+}
+
+function schemaValidationResult(key: string, issues: SchemaIssue[]) {
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: JSON.stringify({
+					error: `data for "${key}" does not match its declared schema. Fix the listed issues and retry.`,
+					issues,
+				}),
+			},
+		],
+		details: { namespace: key, error: "schema_validation", issues } as unknown as Record<string, unknown>,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +176,7 @@ export function createSkillDataWriteTool(
 	return {
 		name: `data_${skillName}_write`,
 		label: `Write ${skillName} Data`,
-		description: `Persist JSON data for the ${skillName} skill. Declared namespaces: ${listDeclaredNamespaces(dataNamespaces)}. Use mode="replace" to overwrite (default for object namespaces) or mode="append" to add to an array (default for array namespaces).`,
+		description: `Persist JSON data for the ${skillName} skill. Declared namespaces: ${listDeclaredNamespaces(dataNamespaces)}. Use mode="replace" to overwrite (default for object namespaces) or mode="append" to add to an array (default for array namespaces). Schema-declared namespaces reject invalid data before saving.`,
 		parameters: dataWriteSchema,
 		async execute(_toolCallId, params) {
 			const key = params.namespace;
@@ -196,6 +231,9 @@ export function createSkillDataWriteTool(
 
 			try {
 				if (mode === "replace") {
+					const issues = getSchemaIssues(decl.schema, params.data);
+					if (issues.length > 0) return schemaValidationResult(key, issues);
+
 					await store.save(ns, params.data);
 					return {
 						content: [
@@ -211,8 +249,12 @@ export function createSkillDataWriteTool(
 				// Append mode
 				const existing = await store.load<unknown[]>(ns);
 				if (existing === null) {
+					const nextData = [params.data];
+					const issues = getSchemaIssues(decl.schema, nextData);
+					if (issues.length > 0) return schemaValidationResult(key, issues);
+
 					// No existing data, create new array
-					await store.save(ns, [params.data]);
+					await store.save(ns, nextData);
 					return {
 						content: [
 							{
@@ -243,6 +285,9 @@ export function createSkillDataWriteTool(
 				}
 
 				const nextData = [...existing, params.data];
+				const issues = getSchemaIssues(decl.schema, nextData);
+				if (issues.length > 0) return schemaValidationResult(key, issues);
+
 				await store.save(ns, nextData);
 				return {
 					content: [

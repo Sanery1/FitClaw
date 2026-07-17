@@ -86,10 +86,14 @@ npx tsx apps/coach-bot/src/main.ts ./feishu-workspace
 data:
   user_profile: {}
   training_log: {type: array}
-  training_plan: {}
+  training_plan:
+    type: object
+    schema:
+      type: object
+      required: [name, goal, days_per_week, days]
 ```
 
-对象 namespace 表示当前状态并使用 `replace`；数组 namespace 表示历史流并使用 `append`。当前文件 backend 位于 `<dataDir>/sport-data/<skill>/<namespace>.json`，它是可替换实现，不是产品领域接口。
+对象 namespace 表示当前状态并使用 `replace`；数组 namespace 表示历史流并使用 `append`。`schema` 是可选 JSON Schema，声明后会在写入前校验完整 namespace 值；现有数据仍可读取且不会自动迁移。当前文件 backend 位于 `<dataDir>/sport-data/<skill>/<namespace>.json`，它是可替换实现，不是产品领域接口。
 
 ## 开发与验证
 

@@ -40,12 +40,14 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 ## 近期完成
 
+- **Skill data 可选 Schema 校验 (2026-07-18)**: `data:` namespace 可声明 JSON Schema；runtime 在 `replace` 前校验完整对象、在 `append` 前校验追加后的完整数组，失败返回可重试的问题列表且不落盘。首个 Schema 只用于真实飞书 smoke 已证实发生结构漂移的 `training_plan`，读取旧数据不校验、不自动迁移。
+- **真实飞书健身闭环验证 (2026-07-17)**: Docker、Skill Runner、飞书 WebSocket、live model 和 11 步健身闭环已实际通过；动作图片成功送达，疼痛大重量边界经修复后回归通过。证据见 `docs/superpowers/reports/2026-07-17-feishu-fitness-live-smoke-verify.md`。
 - **设置存储事务边界修复 (2026-07-17)**: `FileSettingsStorage` 已迁入 `packages/runtime/src/settings/settings-storage.ts`；读取和更新契约分离，首次创建 `settings.json` 时也会先加锁再执行完整 read-modify-write，避免多进程首次写入互相覆盖，同时保持只读不创建项目配置目录。
 - **核心模块边界重构 (2026-07-17)**: package 管理的来源解析、安装布局、资源发现/收集、命令执行和更新检查已从 `package-manager.ts` 拆出（2441→735 行）；交互式 TUI 的会话、模型、命令、终端和扩展界面编排已从 `interactive-mode.ts` 拆出（2225→798 行）；runtime 会话格式、发现、上下文和树读模型已从 `session-manager.ts` 拆出（1425→775 行），公开导出保持不变。
 - **CLI 会话职责拆分 (2026-07-15)**: `AgentSession` 的树导航、手动压缩、Bash 会话和模型/思考状态分别迁入 `SessionTreeController`、`ManualCompactionController`、`SessionBashController` 与 `SessionModelController`；补齐 faux-provider 回归，并复制 scoped model 配置避免持有调用方数组。
 - **共享 Agent 自动压缩生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentCompactionController`，Coach 与 Coding CLI 统一复用阈值判定、单次 overflow 恢复、取消、持久化和队列续跑；CLI 通过前后钩子保留扩展摘要与事件，手动压缩仍归 CLI 编排。
 - **共享 Agent 重试生命周期 (2026-07-15)**: `@fitclaw/runtime` 新增 `AgentRetryController`，Coach 的 `ManagedAgentSession` 与 Coding CLI 的 `AgentSession` 统一复用重试判定、指数退避、取消和等待逻辑；CLI 不再维护第二套重试状态机。
-- **飞书动作媒体链路 (2026-07-15)**: Coach 在每次运行时注入频道级 `attach`，仅允许读取已加载 Skill realpath 内的文件；飞书适配器按媒体类型上传图片或文件并回复原消息，不再保留全局上传回调或空 `uploadFile` stub。真实飞书应用 smoke test 尚待执行。
+- **飞书动作媒体链路 (2026-07-15)**: Coach 在每次运行时注入频道级 `attach`，仅允许读取已加载 Skill realpath 内的文件；飞书适配器按媒体类型上传图片或文件并回复原消息，不再保留全局上传回调或空 `uploadFile` stub。2026-07-17 真实飞书 smoke 已确认图片实际送达。
 - **Coach Skill 工具边界 (2026-07-15)**: Skill 通过 `permissions.network: false` 与 `permissions.commands.allow` 声明离线脚本；Coach 只为已加载 Skill 提供限定根目录的 `read`。脚本交给独立无网络、只读文件系统的 Skill Runner 容器执行，`edit` / `write` 和任意 shell 不再进入 Coach 工具集。
 - **Coach 会话运行时解耦 (2026-07-15)**: auth、model、settings、JSONL session、compaction 和 `ManagedAgentSession` 已迁入 `@fitclaw/runtime`；`apps/coach-bot` 删除 `@fitclaw/claw` 依赖，同时保留持久化、自动重试和自动压缩测试。
 - **产品/运行时边界重构 (2026-07-14)**: 主飞书应用迁移到 `apps/coach-bot`；新增 `@fitclaw/coach-core` 和 `@fitclaw/runtime`；Skill data 从 coding CLI 中抽出；健身长期事实不再使用 `MEMORY.md` 作为第二事实源。
@@ -68,10 +70,10 @@ AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING
 
 项目接手速读维护在 [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)。完整历史、技术问答与风险说明统一维护在 [docs/QNA.md](./docs/QNA.md)。
 
-## 待完成
+## 当前后续
 
-1. **飞书动作图片 smoke** — `attach`、绝对 `imagePaths` 与飞书媒体上传已实现并通过确定性测试，仍需在真实飞书应用确认图片实际送达
-2. **live Feishu 审计** — 当前确定性 eval 不能代替真实模型和真实飞书闭环验证
+1. **运行观察** — 单次 live smoke 已通过；继续观察不同自然表达、长对话和模型版本下的 read/write 稳定性，只修复可复现问题
+2. **按证据扩展数据契约** — 当前只为 `training_plan` 启用 Schema；其他 namespace 出现实际结构漂移后再逐个约束
 
 ## 运动数据架构（Model B 纯 Skill）
 
@@ -117,6 +119,11 @@ name: bodybuilding
 data:
   user_profile: {}             # object 类型，write 默认 replace
   training_log: {type: array}  # array 类型，write 默认 append
+  training_plan:
+    type: object
+    schema:                    # 可选；校验完整 namespace 值
+      type: object
+      required: [name, goal, days_per_week, days]
 ---
 ```
 
@@ -124,6 +131,7 @@ data:
 1. 初始化 namespace JSON 文件（`{dataDir}/sport-data/{skillName}/{namespace}.json`）
 2. 注册 `data_<skillName>_read` / `data_<skillName>_write` Agent Tool
 3. 设置 `FITCLAW_DATA_DIR` 环境变量 → `{dataDir}/sport-data`
+4. 若声明 `schema`，写入前校验完整 namespace 值；失败不落盘，读取旧数据保持兼容
 
 ### `permissions.commands.allow` 声明（Coach 命令执行）
 

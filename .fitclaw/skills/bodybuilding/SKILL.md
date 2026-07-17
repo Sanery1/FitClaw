@@ -21,7 +21,57 @@ description: |
 data:
   user_profile: {}
   training_log: {type: array}
-  training_plan: {}
+  training_plan:
+    type: object
+    schema:
+      type: object
+      required: [name, goal, days_per_week, days]
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+        goal:
+          type: string
+          minLength: 1
+        days_per_week:
+          type: integer
+          minimum: 1
+          maximum: 7
+        days:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [name, exercises]
+            properties:
+              name:
+                type: string
+                minLength: 1
+              exercises:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required: [name, sets, reps, rest_seconds]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    sets:
+                      type: integer
+                      minimum: 1
+                    reps:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: number
+                          minimum: 1
+                    rest_seconds:
+                      type: integer
+                      minimum: 0
   body_metrics: {type: array}
   progression: {type: array}
   personal_records: {type: array}
@@ -237,8 +287,10 @@ JSON 格式用于导入训练 App：
 
 ```json
 {
-  "planName": "PPL - 推拉腿",
-  "created": "2026-03-20",
+  "schema_version": 1,
+  "name": "PPL - 推拉腿",
+  "goal": "hypertrophy",
+  "days_per_week": 3,
   "days": [
     {
       "name": "PUSH",
@@ -248,7 +300,7 @@ JSON 格式用于导入训练 App：
           "name": "上斜哑铃卧推",
           "sets": 4,
           "reps": "8-12",
-          "rest": 90
+          "rest_seconds": 90
         }
       ]
     }

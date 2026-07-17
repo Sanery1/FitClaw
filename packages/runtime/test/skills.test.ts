@@ -160,6 +160,42 @@ describe("skills", () => {
 			expect(diagnostics).toHaveLength(0);
 		});
 
+		it("should preserve JSON schemas declared for data namespaces", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "data-schema-valid"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].dataNamespaces?.get("user_profile")).toEqual({
+				type: "object",
+				schema: {
+					type: "object",
+					required: ["goal"],
+					properties: {
+						goal: { type: "string" },
+					},
+				},
+			});
+			expect(diagnostics).toHaveLength(0);
+		});
+
+		it("should reject schema declarations whose root type conflicts with the namespace", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "data-schema-type-mismatch"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].dataNamespaces).toBeUndefined();
+			expect(diagnostics).toEqual([
+				expect.objectContaining({
+					type: "warning",
+					message: 'data namespace "user_profile" schema type "array" must match declaration type "object"',
+				}),
+			]);
+		});
+
 		it("should warn when name contains consecutive hyphens", () => {
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: join(fixturesDir, "consecutive-hyphens"),
@@ -399,7 +435,7 @@ describe("skills", () => {
 					filePath: "/path/bodybuilding/SKILL.md",
 					baseDir: "/path/bodybuilding",
 					dataNamespaces: new Map([
-						["user_profile", { type: "object" }],
+						["user_profile", { type: "object", schema: { type: "object" } }],
 						["training_log", { type: "array" }],
 					]),
 				}),
@@ -410,6 +446,7 @@ describe("skills", () => {
 			expect(result).toContain("<data_tools>");
 			expect(result).toContain("<read>data_bodybuilding_read</read>");
 			expect(result).toContain("<write>data_bodybuilding_write</write>");
+			expect(result).toContain('<namespace name="user_profile" type="object" schema="true" />');
 			expect(result).toContain('<namespace name="training_log" type="array" />');
 		});
 	});

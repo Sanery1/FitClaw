@@ -27,8 +27,34 @@ describe("skill data tools", () => {
 		mkdirSync(tempDir, { recursive: true });
 		store = new FileSkillDataStore(tempDir);
 		dataNamespaces = new Map<string, SkillDataDeclaration>([
-			["user_profile", { type: "object" }],
-			["training_log", { type: "array" }],
+			[
+				"user_profile",
+				{
+					type: "object",
+					schema: {
+						type: "object",
+						required: ["goal", "experience_level"],
+						properties: {
+							goal: { type: "string" },
+							experience_level: { type: "string" },
+						},
+					},
+				},
+			],
+			[
+				"training_log",
+				{
+					type: "array",
+					schema: {
+						type: "array",
+						items: {
+							type: "object",
+							required: ["id"],
+							properties: { id: { type: "string" } },
+						},
+					},
+				},
+			],
 		]);
 	});
 
@@ -73,5 +99,60 @@ describe("skill data tools", () => {
 		});
 		expect(before).toEqual([{ id: "existing" }]);
 		expect(await store.load("bodybuilding/training_log")).toEqual([{ id: "existing" }, { id: "next" }]);
+	});
+
+	it("rejects schema-invalid replacements without changing persisted data", async () => {
+		const writeTool = createSkillDataWriteTool(store, "bodybuilding", dataNamespaces);
+		const existing = { goal: "strength", experience_level: "intermediate" };
+		await store.save("bodybuilding/user_profile", existing);
+
+		const result = await writeTool.execute("call-1", {
+			namespace: "user_profile",
+			data: { goal: "hypertrophy" },
+			mode: "replace",
+		});
+
+		expect(parseTextResult(result)).toMatchObject({
+			error: expect.stringContaining('data for "user_profile" does not match its declared schema'),
+			issues: [
+				expect.objectContaining({
+					instance_path: "",
+					keyword: "required",
+				}),
+			],
+		});
+		expect(await store.load("bodybuilding/user_profile")).toEqual(existing);
+	});
+
+	it("persists schema-valid replacements", async () => {
+		const writeTool = createSkillDataWriteTool(store, "bodybuilding", dataNamespaces);
+		const profile = { goal: "hypertrophy", experience_level: "beginner" };
+
+		const result = await writeTool.execute("call-1", {
+			namespace: "user_profile",
+			data: profile,
+			mode: "replace",
+		});
+
+		expect(parseTextResult(result)).toMatchObject({ success: true, mode: "replace" });
+		expect(await store.load("bodybuilding/user_profile")).toEqual(profile);
+	});
+
+	it("rejects appends when the resulting array violates its schema", async () => {
+		const writeTool = createSkillDataWriteTool(store, "bodybuilding", dataNamespaces);
+		const existing = [{ id: "existing" }];
+		await store.save("bodybuilding/training_log", existing);
+
+		const result = await writeTool.execute("call-1", {
+			namespace: "training_log",
+			data: { note: "missing id" },
+			mode: "append",
+		});
+
+		expect(parseTextResult(result)).toMatchObject({
+			error: expect.stringContaining('data for "training_log" does not match its declared schema'),
+			issues: [expect.objectContaining({ keyword: "required" })],
+		});
+		expect(await store.load("bodybuilding/training_log")).toEqual(existing);
 	});
 });

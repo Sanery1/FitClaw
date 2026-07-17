@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "f
 import ignore from "ignore";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import Schema, { IsSchema, type XSchema } from "typebox/schema";
 import { parseFrontmatter } from "./frontmatter.js";
 import { createSyntheticSourceInfo, type ResourceDiagnostic, type SourceInfo } from "./resource.js";
 
@@ -74,6 +75,8 @@ function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
 
 export interface SkillDataDeclaration {
 	type?: "object" | "array";
+	/** Optional JSON Schema for the complete persisted namespace value. */
+	schema?: XSchema;
 }
 
 export interface SkillCommandPermission {
@@ -93,7 +96,7 @@ export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
-	/** Data namespaces for persistence (Model B). key → { type: "object" | "array" } */
+	/** Data namespaces for persistence (Model B). */
 	data?: Record<string, SkillDataDeclaration>;
 	permissions?: unknown;
 	[key: string]: unknown;
@@ -499,7 +502,43 @@ function loadSkillFromFile(
 				}
 				if (decl && typeof decl === "object") {
 					const type = decl.type === "array" ? "array" : "object";
-					dataNamespaces.set(key, { type });
+					if (decl.schema === undefined) {
+						dataNamespaces.set(key, { type });
+						continue;
+					}
+
+					if (!IsSchema(decl.schema)) {
+						diagnostics.push({
+							type: "warning",
+							message: `data namespace "${key}" schema must be a JSON Schema object or boolean`,
+							path: filePath,
+						});
+						continue;
+					}
+
+					const rootType = typeof decl.schema === "object" && "type" in decl.schema ? decl.schema.type : undefined;
+					if (typeof rootType === "string" && rootType !== type) {
+						diagnostics.push({
+							type: "warning",
+							message: `data namespace "${key}" schema type "${rootType}" must match declaration type "${type}"`,
+							path: filePath,
+						});
+						continue;
+					}
+
+					try {
+						Schema.Compile(decl.schema);
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						diagnostics.push({
+							type: "warning",
+							message: `data namespace "${key}" schema could not be compiled: ${message}`,
+							path: filePath,
+						});
+						continue;
+					}
+
+					dataNamespaces.set(key, { type, schema: decl.schema });
 				}
 			}
 		}
@@ -561,8 +600,9 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 			lines.push(`      <write>data_${escapeXml(skill.name)}_write</write>`);
 			lines.push("      <namespaces>");
 			for (const [namespace, declaration] of skill.dataNamespaces) {
+				const schemaAttribute = declaration.schema === undefined ? "" : ' schema="true"';
 				lines.push(
-					`        <namespace name="${escapeXml(namespace)}" type="${escapeXml(declaration.type ?? "object")}" />`,
+					`        <namespace name="${escapeXml(namespace)}" type="${escapeXml(declaration.type ?? "object")}"${schemaAttribute} />`,
 				);
 			}
 			lines.push("      </namespaces>");
