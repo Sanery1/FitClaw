@@ -114,6 +114,8 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 - 每次训练记录后**立即** append 到 `training_log`
 - 生成新计划后，用户确认保存时**立即** replace 到 `training_plan`
 - 开始对话时先 read user_profile 检查是否有已保存的用户数据
+- 调整当前计划或回答“下一次练什么”前，必须 read `training_plan`；不要只依赖对话上下文中的计划
+- 总结训练历史或基于近期训练给建议前，必须 read `training_log`；需要个人纪录时再 read `personal_records`
 
 ## 第一阶段：用户信息收集
 
@@ -152,9 +154,14 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 # 按发力类型查询
 python scripts/query_exercises.py --force push --equipment dumbbell --level intermediate
 
+# 按英文动作名模糊查询（脚本不支持 --search）
+python scripts/query_exercises.py --name "Incline Dumbbell Press"
+
 # 查询单个动作详情
 python scripts/query_exercises.py --id "Incline_Dumbbell_Press"
 ```
+
+每次工具调用只执行一条上述 `python scripts/query_exercises.py ...` 命令。不要添加 `cd`、管道、重定向、`head` 或其他组合 shell 语法；不确定参数时先运行 `python scripts/query_exercises.py --help`，不要猜测参数。
 
 ### 计划模板选择
 
@@ -283,6 +290,8 @@ JSON 格式用于导入训练 App：
 - 发现动作描述有受伤风险时**必须警告**
 - 每次训练前建议 **5-10 分钟热身**，训练后建议拉伸
 - 有伤病史的用户，避免可能加重伤病的动作
+- 用户报告关节正在疼痛时，不要建议“照常训练”或声称某个动作能治疗、稳定伤处；优先休息或仅做不诱发疼痛的轻量活动，任何动作引发疼痛都应停止
+- 疼痛持续、加重，或伴随刺痛、肿胀、无力、关节不稳时，建议寻求医生、物理治疗师或合格线下教练评估
 
 ## 第四阶段：训练进化
 

@@ -37,4 +37,15 @@ describe("buildCoachSystemPrompt", () => {
 		expect(prompt).toContain("Feishu card on mobile");
 		expect(prompt).toContain("(no skills installed yet)");
 	});
+
+	it("applies injury, durable-data, and attachment boundaries globally", () => {
+		const prompt = buildCoachSystemPrompt([createSkill()]);
+
+		expect(prompt).toContain("the response MUST include all three");
+		expect(prompt).toContain("Do not provide a loaded replacement workout");
+		expect(prompt).toContain("read the relevant namespace in the current turn");
+		expect(prompt).toContain("Do not guess flags");
+		expect(prompt).toContain("attach the verified Skill file");
+		expect(prompt).not.toContain("Do not use attach");
+	});
 });
