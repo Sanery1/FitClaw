@@ -4,6 +4,7 @@ import { join, resolve } from "path";
 import { renderFeishuCard } from "./adapters/feishu/card-renderer.js";
 import { type AgentRunner, getOrCreateRunner } from "./agent.js";
 import { FeishuBot, type FeishuEvent } from "./feishu.js";
+import { runKnowledgeCli } from "./knowledge/cli.js";
 import * as log from "./log.js";
 import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
 import { ChannelStore } from "./store.js";
@@ -16,6 +17,16 @@ import type { BotContext } from "./types.js";
 const FEISHU_APP_ID = process.env.MOM_FEISHU_APP_ID;
 const FEISHU_APP_SECRET = process.env.MOM_FEISHU_APP_SECRET;
 const FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitCoach";
+
+if (process.argv[2] === "knowledge") {
+	try {
+		await runKnowledgeCli(process.argv.slice(3));
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+	process.exit(0);
+}
 
 interface ParsedArgs {
 	workingDir?: string;

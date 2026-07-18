@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+if [ "${1:-}" = "knowledge" ]; then
+  exec node /opt/fitclaw/node_modules/@fitclaw/coach-bot/dist/main.js "$@"
+fi
+
 # Validate required environment variables
 : "${MOM_LLM_PROVIDER:?Missing MOM_LLM_PROVIDER}"
 : "${MOM_LLM_MODEL:?Missing MOM_LLM_MODEL}"

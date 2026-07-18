@@ -2,7 +2,7 @@
  * Generic Skill Data Persistence Tools (Model B).
  *
  * These tools are auto-registered by the framework for any skill that declares
- * `data:` namespaces in its SKILL.md frontmatter. Skill authors never touch
+ * `data:` namespaces in fitclaw.yaml. Skill authors never touch
  * this file — they just declare namespaces and the framework wires everything.
  */
 import type { AgentTool } from "@fitclaw/agent-core";
@@ -116,7 +116,7 @@ export function createSkillDataReadTool(
 						{
 							type: "text" as const,
 							text: JSON.stringify({
-								error: `namespace "${key}" not declared in SKILL.md data: section. Available namespaces: [${available}]`,
+								error: `namespace "${key}" not declared in fitclaw.yaml data section. Available namespaces: [${available}]`,
 							}),
 						},
 					],
@@ -197,7 +197,7 @@ export function createSkillDataWriteTool(
 						{
 							type: "text" as const,
 							text: JSON.stringify({
-								error: `namespace "${key}" not declared in SKILL.md data: section. Available namespaces: [${available}]`,
+								error: `namespace "${key}" not declared in fitclaw.yaml data section. Available namespaces: [${available}]`,
 							}),
 						},
 					],

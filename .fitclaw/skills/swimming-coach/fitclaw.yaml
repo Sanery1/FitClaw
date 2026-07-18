@@ -1,0 +1,5 @@
+version: 1
+data:
+  user_profile: {}
+  training_log: {type: array}
+  pace_records: {type: array}

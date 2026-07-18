@@ -1,8 +1,11 @@
 import type { AgentTool } from "@fitclaw/agent-core";
 import {
+	createKnowledgeReadTool,
+	createKnowledgeSearchTool,
 	createSkillDataReadTool,
 	createSkillDataWriteTool,
 	FileSkillDataStore,
+	type KnowledgeStore,
 	loadSkillsFromDir,
 	type Skill,
 } from "@fitclaw/runtime";
@@ -68,10 +71,18 @@ export function createCoachActiveTools(
 	channelDir: string,
 	skills: Skill[],
 	uploadFile?: BotContext["uploadFile"],
+	knowledgeStore?: KnowledgeStore,
 ): AgentTool[] {
+	const allowedCollections = Array.from(new Set(skills.flatMap((skill) => skill.knowledgeCollections ?? [])));
 	return [
 		...createCoachTools(executor, createCoachReadRoots(skills), createAllowedCommands(skills), uploadFile),
 		...createCoachSkillDataTools(channelDir, skills),
+		...(knowledgeStore && allowedCollections.length > 0
+			? [
+					createKnowledgeSearchTool(knowledgeStore, allowedCollections),
+					createKnowledgeReadTool(knowledgeStore, allowedCollections),
+				]
+			: []),
 	];
 }
 

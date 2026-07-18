@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@fitclaw/ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type CoachResponseQueue, createCoachRunState, createCoachSessionEventHandler } from "../src/runtime/events.js";
+import { buildRunTrace } from "../src/runtime/run-trace.js";
 import type { BotContext } from "../src/types.js";
 
 vi.mock("../src/log.js", () => ({
@@ -110,5 +111,92 @@ describe("coach session events", () => {
 		expect(queuedTasks[0].errorContext).toBe("retry");
 		await queuedTasks[0].fn();
 		expect(context.respond).toHaveBeenCalledWith("_Retrying (2/3)..._", false);
+	});
+
+	it("records only redacted tool status and safe knowledge metadata", () => {
+		const runState = createCoachRunState();
+		runState.ctx = createContext();
+		runState.logCtx = { channelId: "channel" };
+		runState.queue = queue;
+		const handle = createCoachSessionEventHandler(runState);
+
+		handle({
+			type: "tool_execution_start",
+			toolCallId: "tool-1",
+			toolName: "knowledge_search",
+			args: { query: "private prompt", collection: "kinesiology" },
+		});
+		handle({
+			type: "tool_execution_end",
+			toolCallId: "tool-1",
+			toolName: "knowledge_search",
+			isError: false,
+			result: {
+				content: [{ type: "text", text: "private textbook body" }],
+				details: {
+					collection: "kinesiology",
+					resultCount: 1,
+					pageIds: ["basic-kinesiology-3e:pdf:0100"],
+				},
+			},
+		});
+
+		expect(queuedMessages).toEqual([
+			expect.objectContaining({ text: expect.stringMatching(/^\*✓ knowledge_search\* \(\d+\.\d+s\)$/) }),
+		]);
+		expect(JSON.stringify(queuedMessages)).not.toContain("private prompt");
+		expect(JSON.stringify(queuedMessages)).not.toContain("private textbook body");
+		expect(runState.toolTraces).toEqual([
+			expect.objectContaining({
+				toolName: "knowledge_search",
+				status: "success",
+				collection: "kinesiology",
+				resultCount: 1,
+				pageIds: ["basic-kinesiology-3e:pdf:0100"],
+			}),
+		]);
+	});
+
+	it("builds a RunTraceV1 without user content, local paths, or textbook text", () => {
+		const runState = createCoachRunState();
+		runState.startedAtMs = 1_000;
+		runState.modelId = "provider/model";
+		runState.skillFilesRead.add("bodybuilding/SKILL.md");
+		runState.toolTraces.push({
+			toolName: "knowledge_read",
+			status: "success",
+			durationMs: 20,
+			collection: "kinesiology",
+			resultCount: 1,
+			pageIds: ["basic-kinesiology-3e:pdf:0100"],
+		});
+
+		const trace = buildRunTrace(runState, 1_050);
+		const serialized = JSON.stringify(trace);
+		expect(trace).toMatchObject({ duration_ms: 50, model_id: "provider/model", status: "success" });
+		expect(serialized).not.toMatch(/private prompt|textbook body|[A-Z]:\\|user_id|channel/);
+	});
+
+	it("treats unavailable visual rendering as a successful text-only degradation", () => {
+		const runState = createCoachRunState();
+		runState.ctx = createContext();
+		runState.logCtx = { channelId: "channel" };
+		runState.queue = queue;
+		const handle = createCoachSessionEventHandler(runState);
+
+		handle({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "knowledge_read", args: {} });
+		handle({
+			type: "tool_execution_end",
+			toolCallId: "tool-1",
+			toolName: "knowledge_read",
+			isError: false,
+			result: {
+				content: [{ type: "text", text: "safe extracted text" }],
+				details: { resultCount: 1, pageIds: ["basic-kinesiology-3e:pdf:0100"], errorCode: "render_unavailable" },
+			},
+		});
+
+		expect(runState.toolTraces[0]).toMatchObject({ status: "success", errorCode: "render_unavailable" });
+		expect(runState.errorCode).toBeUndefined();
 	});
 });

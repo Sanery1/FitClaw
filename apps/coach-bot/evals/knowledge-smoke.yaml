@@ -1,0 +1,33 @@
+version: 1
+source_id: basic-kinesiology-3e
+queries:
+  - category: exact_term
+    query: 肩胛肱骨节律
+  - category: exact_term
+    query: 长度-张力关系
+  - category: exact_term
+    query: 力矩臂
+  - category: exact_term
+    query: 主动不足
+  - category: exact_term
+    query: 被动不足
+  - category: concept
+    query: 肌肉收缩怎样产生关节力矩
+  - category: concept
+    query: 肩胛骨和肱骨如何配合完成肩关节外展
+  - category: concept
+    query: 为什么关节角度会改变肌肉产生的力矩
+  - category: concept
+    query: 开链运动和闭链运动有什么生物力学区别
+  - category: concept
+    query: 髋关节稳定性由哪些结构共同提供
+  - category: short
+    query: 肩
+  - category: short
+    query: 髋
+  - category: short
+    query: 膝
+  - category: visual
+    query: 肩胛平面和肩关节运动示意图
+  - category: visual
+    query: 肌肉长度张力曲线图

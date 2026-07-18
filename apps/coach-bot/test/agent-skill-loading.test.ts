@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { KnowledgeStore } from "@fitclaw/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	configureCoachSkillDataRoot,
@@ -54,16 +55,12 @@ describe("coach bot skill loading", () => {
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(
 			join(skillDir, "SKILL.md"),
-			[
-				"---",
-				"name: bodybuilding",
-				"description: Bodybuilding coaching skill.",
-				"data:",
-				"  training_log:",
-				"    type: array",
-				"---",
-				"# Bodybuilding",
-			].join("\n"),
+			["---", "name: bodybuilding", "description: Bodybuilding coaching skill.", "---", "# Bodybuilding"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(
+			join(skillDir, "fitclaw.yaml"),
+			["version: 1", "data:", "  training_log:", "    type: array"].join("\n"),
 			"utf-8",
 		);
 
@@ -128,16 +125,12 @@ describe("coach bot skill loading", () => {
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(
 			join(skillDir, "SKILL.md"),
-			[
-				"---",
-				"name: bodybuilding",
-				"description: Bodybuilding coaching skill.",
-				"data:",
-				"  training_log:",
-				"    type: array",
-				"---",
-				"# Bodybuilding",
-			].join("\n"),
+			["---", "name: bodybuilding", "description: Bodybuilding coaching skill.", "---", "# Bodybuilding"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(
+			join(skillDir, "fitclaw.yaml"),
+			["version: 1", "data:", "  training_log:", "    type: array"].join("\n"),
 			"utf-8",
 		);
 
@@ -161,21 +154,22 @@ describe("coach bot skill loading", () => {
 		writeFileSync(join(scriptsDir, "query.py"), "print('ok')\n", "utf-8");
 		writeFileSync(
 			join(skillDir, "SKILL.md"),
+			["---", "name: bodybuilding", "description: Bodybuilding coaching skill.", "---", "# Bodybuilding"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(
+			join(skillDir, "fitclaw.yaml"),
 			[
-				"---",
-				"name: bodybuilding",
-				"description: Bodybuilding coaching skill.",
+				"version: 1",
+				"data:",
+				"  training_log:",
+				"    type: array",
 				"permissions:",
 				"  network: false",
 				"  commands:",
 				"    allow:",
 				"      - executable: python",
 				"        args: [scripts/query.py]",
-				"data:",
-				"  training_log:",
-				"    type: array",
-				"---",
-				"# Bodybuilding",
 			].join("\n"),
 			"utf-8",
 		);
@@ -194,6 +188,34 @@ describe("coach bot skill loading", () => {
 			"data_bodybuilding_read",
 			"data_bodybuilding_write",
 		]);
+	});
+
+	it("exposes knowledge tools only when a Skill declares an allowed collection", () => {
+		const channelDir = join(workspaceDir, "chat-1");
+		mkdirSync(channelDir, { recursive: true });
+		const skillDir = join(workspaceDir, "skills", "bodybuilding");
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			["---", "name: bodybuilding", "description: Bodybuilding coaching skill.", "---", "# Bodybuilding"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(
+			join(skillDir, "fitclaw.yaml"),
+			["version: 1", "knowledge:", "  collections: [kinesiology]"].join("\n"),
+			"utf-8",
+		);
+		const store: KnowledgeStore = {
+			search: async () => [],
+			read: async () => [],
+		};
+
+		const skills = loadCoachSkills(channelDir, workspaceDir, workspaceDir);
+		const toolNames = createCoachActiveTools(new RecordingExecutor(), channelDir, skills, undefined, store).map(
+			(tool) => tool.name,
+		);
+
+		expect(toolNames).toEqual(["read", "knowledge_search", "knowledge_read"]);
 	});
 
 	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {

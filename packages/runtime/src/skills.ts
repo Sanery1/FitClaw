@@ -2,9 +2,10 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "f
 import ignore from "ignore";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
-import Schema, { IsSchema, type XSchema } from "typebox/schema";
+import type { XSchema } from "typebox/schema";
 import { parseFrontmatter } from "./frontmatter.js";
 import { createSyntheticSourceInfo, type ResourceDiagnostic, type SourceInfo } from "./resource.js";
+import { loadSkillConfig } from "./skill-config.js";
 
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
@@ -96,9 +97,6 @@ export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
-	/** Data namespaces for persistence (Model B). */
-	data?: Record<string, SkillDataDeclaration>;
-	permissions?: unknown;
 	[key: string]: unknown;
 }
 
@@ -122,10 +120,12 @@ export interface Skill {
 	toolsPath?: string;
 	/** Knowledge index entries from references/ directory */
 	knowledgeEntries?: KnowledgeEntryMeta[];
-	/** Data namespaces declared in SKILL.md frontmatter (Model B persistence) */
+	/** Data namespaces declared in fitclaw.yaml. */
 	dataNamespaces?: Map<string, SkillDataDeclaration>;
-	/** Explicit runtime capabilities declared by the Skill. */
+	/** Explicit runtime capabilities declared in fitclaw.yaml. */
 	permissions?: SkillPermissions;
+	/** External knowledge collections this Skill may access. */
+	knowledgeCollections?: readonly string[];
 }
 
 export interface LoadSkillsResult {
@@ -176,97 +176,6 @@ function validateDescription(description: string | undefined): string[] {
 	}
 
 	return errors;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseSkillPermissions(
-	value: unknown,
-	skillDir: string,
-	filePath: string,
-	diagnostics: ResourceDiagnostic[],
-): SkillPermissions | undefined {
-	if (value === undefined) return undefined;
-	if (!isRecord(value)) {
-		diagnostics.push({ type: "warning", message: "permissions must be an object", path: filePath });
-		return undefined;
-	}
-
-	if (value.commands === undefined && value.network === undefined) return undefined;
-	if (value.network !== false) {
-		diagnostics.push({
-			type: "warning",
-			message: "permissions.network must be false; network-enabled Skill commands are not supported",
-			path: filePath,
-		});
-		return undefined;
-	}
-
-	if (value.commands === undefined) return { network: false };
-	if (!isRecord(value.commands) || !Array.isArray(value.commands.allow)) {
-		diagnostics.push({
-			type: "warning",
-			message: "permissions.commands.allow must be an array",
-			path: filePath,
-		});
-		return { network: false };
-	}
-
-	const allow: SkillCommandPermission[] = [];
-	for (const [index, entry] of value.commands.allow.entries()) {
-		const prefix = `permissions.commands.allow[${index}]`;
-		if (!isRecord(entry)) {
-			diagnostics.push({ type: "warning", message: `${prefix} must be an object`, path: filePath });
-			continue;
-		}
-
-		if (typeof entry.executable !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(entry.executable)) {
-			diagnostics.push({
-				type: "warning",
-				message: `${prefix}.executable must be a command name without a path`,
-				path: filePath,
-			});
-			continue;
-		}
-
-		if (
-			!Array.isArray(entry.args) ||
-			entry.args.length === 0 ||
-			!entry.args.every(
-				(argument) => typeof argument === "string" && argument.length > 0 && !argument.includes("\0"),
-			)
-		) {
-			diagnostics.push({
-				type: "warning",
-				message: `${prefix}.args must be a non-empty string array`,
-				path: filePath,
-			});
-			continue;
-		}
-
-		const targetPath = resolve(skillDir, entry.args[0]);
-		const canonicalSkillDir = canonicalizePath(skillDir);
-		const canonicalTargetPath = canonicalizePath(targetPath);
-		const relativeTarget = relative(canonicalSkillDir, canonicalTargetPath);
-		let isFile = false;
-		try {
-			isFile = statSync(targetPath).isFile();
-		} catch {}
-		if (isAbsolute(entry.args[0]) || relativeTarget.startsWith("..") || isAbsolute(relativeTarget) || !isFile) {
-			diagnostics.push({
-				type: "warning",
-				message: `${prefix}.args[0] must reference a file inside the Skill directory`,
-				path: filePath,
-			});
-			continue;
-		}
-
-		allow.push({ executable: entry.executable, args: [...entry.args] });
-	}
-
-	return allow.length > 0 ? { network: false, commands: { allow } } : { network: false };
 }
 
 export interface LoadSkillsFromDirOptions {
@@ -458,6 +367,14 @@ function loadSkillFromFile(
 		const { frontmatter } = parseFrontmatter<SkillFrontmatter>(rawContent);
 		const skillDir = dirname(filePath);
 		const parentDirName = basename(skillDir);
+		if ("data" in frontmatter || "permissions" in frontmatter) {
+			diagnostics.push({
+				type: "warning",
+				message: "legacy data and permissions frontmatter is not supported; move it to fitclaw.yaml",
+				path: filePath,
+			});
+			return { skill: null, diagnostics };
+		}
 
 		// Validate description
 		const descErrors = validateDescription(frontmatter.description);
@@ -485,63 +402,9 @@ function loadSkillFromFile(
 
 		// Build knowledge index from references/ directory
 		const knowledgeEntries = buildKnowledgeEntries(skillDir);
-		const permissions = parseSkillPermissions(frontmatter.permissions, skillDir, filePath, diagnostics);
-
-		// Parse data: declarations (Model B persistence namespaces)
-		let dataNamespaces: Map<string, SkillDataDeclaration> | undefined;
-		if (frontmatter.data && typeof frontmatter.data === "object") {
-			dataNamespaces = new Map();
-			for (const [key, decl] of Object.entries(frontmatter.data)) {
-				if (!/^[a-z][a-z0-9_]*$/.test(key)) {
-					diagnostics.push({
-						type: "warning",
-						message: `data namespace key "${key}" must match [a-z][a-z0-9_]*`,
-						path: filePath,
-					});
-					continue;
-				}
-				if (decl && typeof decl === "object") {
-					const type = decl.type === "array" ? "array" : "object";
-					if (decl.schema === undefined) {
-						dataNamespaces.set(key, { type });
-						continue;
-					}
-
-					if (!IsSchema(decl.schema)) {
-						diagnostics.push({
-							type: "warning",
-							message: `data namespace "${key}" schema must be a JSON Schema object or boolean`,
-							path: filePath,
-						});
-						continue;
-					}
-
-					const rootType = typeof decl.schema === "object" && "type" in decl.schema ? decl.schema.type : undefined;
-					if (typeof rootType === "string" && rootType !== type) {
-						diagnostics.push({
-							type: "warning",
-							message: `data namespace "${key}" schema type "${rootType}" must match declaration type "${type}"`,
-							path: filePath,
-						});
-						continue;
-					}
-
-					try {
-						Schema.Compile(decl.schema);
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						diagnostics.push({
-							type: "warning",
-							message: `data namespace "${key}" schema could not be compiled: ${message}`,
-							path: filePath,
-						});
-						continue;
-					}
-
-					dataNamespaces.set(key, { type, schema: decl.schema });
-				}
-			}
-		}
+		const configResult = loadSkillConfig(skillDir);
+		diagnostics.push(...configResult.diagnostics);
+		if (!configResult.config) return { skill: null, diagnostics };
 
 		return {
 			skill: {
@@ -554,8 +417,9 @@ function loadSkillFromFile(
 				hasTools,
 				toolsPath: hasTools ? toolsPath : undefined,
 				knowledgeEntries: knowledgeEntries.length > 0 ? knowledgeEntries : undefined,
-				dataNamespaces: dataNamespaces && dataNamespaces.size > 0 ? dataNamespaces : undefined,
-				permissions,
+				dataNamespaces: configResult.config.dataNamespaces,
+				permissions: configResult.config.permissions,
+				knowledgeCollections: configResult.config.knowledgeCollections,
 			},
 			diagnostics,
 		};

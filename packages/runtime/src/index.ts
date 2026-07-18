@@ -2,6 +2,8 @@ export * from "./auth/index.js";
 export { FileSkillDataStore, type SkillDataStore } from "./data-store.js";
 export { createSkillDataReadTool, createSkillDataWriteTool } from "./data-tools.js";
 export { parseFrontmatter, stripFrontmatter } from "./frontmatter.js";
+export * from "./knowledge.js";
+export { createKnowledgeReadTool, createKnowledgeSearchTool, type KnowledgeToolDetails } from "./knowledge-tools.js";
 export * from "./paths.js";
 export {
 	createSyntheticSourceInfo,

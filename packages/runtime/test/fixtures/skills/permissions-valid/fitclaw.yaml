@@ -1,0 +1,9 @@
+version: 1
+permissions:
+  network: false
+  commands:
+    allow:
+      - executable: python
+        args: [scripts/query.py]
+      - executable: python3
+        args: [scripts/query.py]

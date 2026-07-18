@@ -38,18 +38,19 @@ describe("skill runner", () => {
 		writeFileSync(scriptPath, "process.stdout.write(process.argv.slice(2).join('|'));\n", "utf-8");
 		writeFileSync(
 			join(skillPath, "SKILL.md"),
+			["---", `name: ${skillName}`, "description: Test runner skill.", "---", "# Test Skill"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(
+			join(skillPath, "fitclaw.yaml"),
 			[
-				"---",
-				`name: ${skillName}`,
-				"description: Test runner skill.",
+				"version: 1",
 				"permissions:",
 				"  network: false",
 				"  commands:",
 				"    allow:",
 				"      - executable: node",
 				`        args: [scripts/${scriptName}]`,
-				"---",
-				"# Test Skill",
 			].join("\n"),
 			"utf-8",
 		);

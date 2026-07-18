@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as log from "../log.js";
 import type { BotContext } from "../types.js";
 import type { CoachSessionEvent } from "./session.js";
@@ -25,7 +26,21 @@ export interface CoachRunState {
 	ctx: BotContext | null;
 	logCtx: { channelId: string; userName?: string } | null;
 	queue: CoachResponseQueue | null;
-	pendingTools: Map<string, { toolName: string; args: unknown; startTime: number }>;
+	pendingTools: Map<string, { toolName: string; startTime: number }>;
+	toolTraces: Array<{
+		toolName: string;
+		status: "success" | "error";
+		durationMs: number;
+		collection?: string;
+		resultCount?: number;
+		pageIds: readonly string[];
+		errorCode?: string;
+	}>;
+	skillFilesRead: Set<string>;
+	traceId: string;
+	startedAtMs: number;
+	modelId: string;
+	errorCode?: string;
 	totalUsage: CoachUsageTotals;
 	stopReason: string;
 	errorMessage?: string;
@@ -47,52 +62,45 @@ export function createCoachRunState(): CoachRunState {
 		logCtx: null,
 		queue: null,
 		pendingTools: new Map(),
+		toolTraces: [],
+		skillFilesRead: new Set(),
+		traceId: randomUUID(),
+		startedAtMs: Date.now(),
+		modelId: "unknown",
 		totalUsage: createEmptyUsageTotals(),
 		stopReason: "stop",
 		errorMessage: undefined,
 	};
 }
 
-function truncate(text: string, maxLen: number): string {
-	if (text.length <= maxLen) return text;
-	return `${text.substring(0, maxLen - 3)}...`;
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
 }
 
-function extractToolResultText(result: unknown): string {
-	if (typeof result === "string") return result;
-
-	if (
-		result &&
-		typeof result === "object" &&
-		"content" in result &&
-		Array.isArray((result as { content: unknown }).content)
-	) {
-		const content = (result as { content: Array<{ type: string; text?: string }> }).content;
-		const textParts = content.filter((part) => part.type === "text" && part.text).map((part) => part.text as string);
-		if (textParts.length > 0) return textParts.join("\n");
-	}
-
-	return JSON.stringify(result);
+function safeSkillFile(args: unknown): string | undefined {
+	const path = asRecord(args)?.path;
+	if (typeof path !== "string") return undefined;
+	const match = path.replace(/\\/g, "/").match(/(?:^|\/)skills\/([^/]+)\/(.+)$/);
+	return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-function formatToolArgs(args: Record<string, unknown>): string {
-	const lines: string[] = [];
-
-	for (const [key, value] of Object.entries(args)) {
-		if (key === "label") continue;
-
-		if (key === "path" && typeof value === "string") {
-			const offset = args.offset as number | undefined;
-			const limit = args.limit as number | undefined;
-			lines.push(offset !== undefined && limit !== undefined ? `${value}:${offset}-${offset + limit}` : value);
-			continue;
-		}
-
-		if (key === "offset" || key === "limit") continue;
-		lines.push(typeof value === "string" ? value : JSON.stringify(value));
-	}
-
-	return lines.join("\n");
+function safeToolDetails(result: unknown): {
+	collection?: string;
+	resultCount?: number;
+	pageIds: readonly string[];
+	errorCode?: string;
+} {
+	const details = asRecord(asRecord(result)?.details);
+	return {
+		collection: typeof details?.collection === "string" ? details.collection : undefined,
+		resultCount: typeof details?.resultCount === "number" ? details.resultCount : undefined,
+		pageIds: Array.isArray(details?.pageIds)
+			? details.pageIds.filter((pageId): pageId is string => typeof pageId === "string")
+			: [],
+		errorCode: typeof details?.errorCode === "string" ? details.errorCode : undefined,
+	};
 }
 
 export function createCoachSessionEventHandler(runState: CoachRunState): (event: CoachSessionEvent) => void {
@@ -102,42 +110,46 @@ export function createCoachSessionEventHandler(runState: CoachRunState): (event:
 		const { ctx, logCtx, queue, pendingTools } = runState;
 
 		if (event.type === "tool_execution_start") {
-			const args = event.args as { label?: string };
-			const label = args.label || event.toolName;
 			pendingTools.set(event.toolCallId, {
 				toolName: event.toolName,
-				args: event.args,
 				startTime: Date.now(),
 			});
-			log.logToolStart(logCtx, event.toolName, label, event.args as Record<string, unknown>);
-			queue.enqueue(() => ctx.respond(`_→ ${label}_`, false), "tool label");
+			const skillFile = event.toolName === "read" ? safeSkillFile(event.args) : undefined;
+			if (skillFile) runState.skillFilesRead.add(skillFile);
+			log.logToolStart(logCtx, event.toolName, event.toolName, {});
+			queue.enqueue(() => ctx.respond(`_→ ${event.toolName}_`, false), "tool status");
 			return;
 		}
 
 		if (event.type === "tool_execution_end") {
-			const resultText = extractToolResultText(event.result);
 			const pending = pendingTools.get(event.toolCallId);
 			pendingTools.delete(event.toolCallId);
 			const durationMs = pending ? Date.now() - pending.startTime : 0;
+			const details = safeToolDetails(event.result);
+			const isDegraded = details.errorCode === "render_unavailable";
+			const isError = event.isError || (details.errorCode !== undefined && !isDegraded);
+			runState.toolTraces.push({
+				toolName: event.toolName,
+				status: isError ? "error" : "success",
+				durationMs,
+				collection: details.collection,
+				resultCount: details.resultCount,
+				pageIds: details.pageIds,
+				errorCode: details.errorCode,
+			});
+			if (details.errorCode && !isDegraded && !runState.errorCode) runState.errorCode = details.errorCode;
 
-			if (event.isError) {
-				log.logToolError(logCtx, event.toolName, durationMs, resultText);
+			if (isError) {
+				log.logToolError(logCtx, event.toolName, durationMs, details.errorCode ?? "tool_error");
 			} else {
-				log.logToolSuccess(logCtx, event.toolName, durationMs, resultText);
+				log.logToolSuccess(logCtx, event.toolName, durationMs, "");
 			}
 
-			const pendingArgs = pending?.args as Record<string, unknown> | undefined;
-			const label = pendingArgs && typeof pendingArgs.label === "string" ? pendingArgs.label : undefined;
-			const argsFormatted = pendingArgs ? formatToolArgs(pendingArgs) : "(args not found)";
-			let threadMessage = `*${event.isError ? "✗" : "✓"} ${event.toolName}*`;
-			if (label) threadMessage += `: ${label}`;
-			threadMessage += ` (${(durationMs / 1000).toFixed(1)}s)\n`;
-			if (argsFormatted) threadMessage += `\`\`\`\n${argsFormatted}\n\`\`\`\n`;
-			threadMessage += `*Result:*\n\`\`\`\n${resultText}\n\`\`\``;
+			const threadMessage = `*${isError ? "✗" : "✓"} ${event.toolName}* (${(durationMs / 1000).toFixed(1)}s)`;
 			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
 
-			if (event.isError) {
-				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultText, 200)}_`, false), "tool error");
+			if (isError) {
+				queue.enqueue(() => ctx.respond(`_Error: ${event.toolName} failed_`, false), "tool error");
 			}
 			return;
 		}

@@ -1,0 +1,10 @@
+version: 1
+data:
+  user_profile:
+    type: object
+    schema:
+      type: object
+      required: [goal]
+      properties:
+        goal:
+          type: string

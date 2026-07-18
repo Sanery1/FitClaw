@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AssistantMessage, ImageContent } from "@fitclaw/ai";
 import { buildCoachSystemPrompt } from "@fitclaw/coach-core";
 import { existsSync, readFileSync } from "fs";
@@ -5,8 +6,12 @@ import { mkdir, writeFile } from "fs/promises";
 import { isAbsolute, join } from "path";
 import { syncLogToSessionManager } from "./context.js";
 import { type CoachContextWindowResult, getCoachContextWindowOptions, windowCoachContext } from "./context-window.js";
+import { createKnowledgePaths } from "./knowledge/paths.js";
+import { PopplerPageRenderer } from "./knowledge/poppler-renderer.js";
+import { SqliteKnowledgeStore } from "./knowledge/sqlite-store.js";
 import * as log from "./log.js";
 import { createCoachRunState, createCoachSessionEventHandler, createEmptyUsageTotals } from "./runtime/events.js";
+import { appendRunTrace } from "./runtime/run-trace.js";
 import { createCoachSession } from "./runtime/session.js";
 import {
 	configureCoachSkillDataRoot,
@@ -77,6 +82,13 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const executor = createExecutor(sandboxConfig);
 	const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, channelId);
 	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
+	const knowledgePaths = createKnowledgePaths(hostWorkspacePath);
+	const knowledgeStore = new SqliteKnowledgeStore({
+		databasePath: knowledgePaths.database,
+		knowledgeRoot: knowledgePaths.root,
+		allowCandidate: process.env.FITCLAW_KNOWLEDGE_ALLOW_CANDIDATE === "true",
+		renderer: new PopplerPageRenderer(knowledgePaths.pageCache),
+	});
 
 	// Initial system prompt (updated each run with freshly loaded skills)
 	const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
@@ -84,7 +96,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	// Model B: auto-register data persistence tools for skills with data: declarations
 	configureCoachSkillDataRoot(channelDir);
-	const tools = createCoachActiveTools(executor, channelDir, skills);
+	const tools = createCoachActiveTools(executor, channelDir, skills, undefined, knowledgeStore);
 
 	const contextWindowOptions = getCoachContextWindowOptions();
 	const session = createCoachSession({
@@ -150,7 +162,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// Update the system prompt and tools with freshly loaded skills
 			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
 			const systemPrompt = buildCoachSystemPrompt(skills);
-			const activeTools = createCoachActiveTools(executor, channelDir, skills, ctx.uploadFile);
+			const activeTools = createCoachActiveTools(executor, channelDir, skills, ctx.uploadFile, knowledgeStore);
 			session.updateRuntime(systemPrompt, activeTools);
 
 			// Reset per-run state
@@ -160,6 +172,12 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				userName: ctx.message.userName,
 			};
 			runState.pendingTools.clear();
+			runState.toolTraces.length = 0;
+			runState.skillFilesRead.clear();
+			runState.traceId = randomUUID();
+			runState.startedAtMs = Date.now();
+			runState.modelId = `${resolvedModel.provider}/${resolvedModel.id}`;
+			runState.errorCode = undefined;
 			runState.totalUsage = createEmptyUsageTotals();
 			runState.stopReason = "stop";
 			runState.errorMessage = undefined;
@@ -244,7 +262,25 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			};
 			await writeFile(join(channelDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2));
 
-			await session.prompt(userMessage, imageAttachments);
+			try {
+				await session.prompt(userMessage, imageAttachments);
+			} catch (error) {
+				runState.stopReason = "error";
+				runState.errorMessage = error instanceof Error ? error.message : String(error);
+				runState.errorCode = "model_error";
+				try {
+					await appendRunTrace(hostWorkspacePath, runState);
+				} catch (traceError) {
+					log.logWarning(
+						"Failed to append run trace",
+						traceError instanceof Error ? traceError.message : String(traceError),
+					);
+				}
+				runState.ctx = null;
+				runState.logCtx = null;
+				runState.queue = null;
+				throw error;
+			}
 
 			// Wait for queued messages
 			await queueChain;
@@ -314,6 +350,12 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				const summary = log.logUsageSummary(runState.logCtx!, runState.totalUsage, contextTokens, contextWindow);
 				runState.queue.enqueue(() => ctx.respondInThread(summary), "usage summary");
 				await queueChain;
+			}
+
+			try {
+				await appendRunTrace(hostWorkspacePath, runState);
+			} catch (error) {
+				log.logWarning("Failed to append run trace", error instanceof Error ? error.message : String(error));
 			}
 
 			// Clear run state

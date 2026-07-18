@@ -1,0 +1,6 @@
+version: 1
+data:
+  user_profile:
+    type: object
+    schema:
+      type: array

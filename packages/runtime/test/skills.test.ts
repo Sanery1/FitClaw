@@ -180,14 +180,46 @@ describe("skills", () => {
 			expect(diagnostics).toHaveLength(0);
 		});
 
+		it("should load external knowledge collection authorization from fitclaw.yaml", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "knowledge-valid"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(1);
+			expect(skills[0].knowledgeCollections).toEqual(["kinesiology"]);
+			expect(diagnostics).toHaveLength(0);
+		});
+
+		it("should reject legacy data and permissions frontmatter", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "legacy-frontmatter"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(0);
+			expect(diagnostics).toEqual([
+				expect.objectContaining({ message: expect.stringContaining("move it to fitclaw.yaml") }),
+			]);
+		});
+
+		it("should reject unsupported fitclaw.yaml fields", () => {
+			const { skills, diagnostics } = loadSkillsFromDir({
+				dir: join(fixturesDir, "config-unknown"),
+				source: "test",
+			});
+
+			expect(skills).toHaveLength(0);
+			expect(diagnostics).toEqual([expect.objectContaining({ message: "unexpected is not supported" })]);
+		});
+
 		it("should reject schema declarations whose root type conflicts with the namespace", () => {
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: join(fixturesDir, "data-schema-type-mismatch"),
 				source: "test",
 			});
 
-			expect(skills).toHaveLength(1);
-			expect(skills[0].dataNamespaces).toBeUndefined();
+			expect(skills).toHaveLength(0);
 			expect(diagnostics).toEqual([
 				expect.objectContaining({
 					type: "warning",
@@ -277,8 +309,7 @@ describe("skills", () => {
 				source: "test",
 			});
 
-			expect(skills).toHaveLength(1);
-			expect(skills[0].permissions).toEqual({ network: false });
+			expect(skills).toHaveLength(0);
 			expect(diagnostics.some((diagnostic) => diagnostic.message.includes("permissions.commands.allow"))).toBe(true);
 		});
 
@@ -288,8 +319,7 @@ describe("skills", () => {
 				source: "test",
 			});
 
-			expect(skills).toHaveLength(1);
-			expect(skills[0].permissions).toBeUndefined();
+			expect(skills).toHaveLength(0);
 			expect(diagnostics.some((diagnostic) => diagnostic.message.includes("permissions.network"))).toBe(true);
 		});
 
