@@ -218,6 +218,26 @@ describe("coach bot skill loading", () => {
 		expect(toolNames).toEqual(["read", "knowledge_search", "knowledge_read"]);
 	});
 
+	it("exposes exercise_search only when the loaded bodybuilding database exists", () => {
+		const channelDir = join(workspaceDir, "chat-1");
+		mkdirSync(channelDir, { recursive: true });
+		const skillDir = join(workspaceDir, "skills", "bodybuilding");
+		mkdirSync(join(skillDir, "free-exercise-db", "dist"), { recursive: true });
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			["---", "name: bodybuilding", "description: Bodybuilding coaching skill.", "---", "# Bodybuilding"].join("\n"),
+			"utf-8",
+		);
+		writeFileSync(join(skillDir, "free-exercise-db", "dist", "exercises.json"), "[]\n", "utf-8");
+
+		const skills = loadCoachSkills(channelDir, "/workspace", workspaceDir);
+		const toolNames = createCoachActiveTools(new RecordingExecutor(), channelDir, skills).map((tool) => tool.name);
+
+		expect(toPosixPath(skills[0].baseDir)).toBe("/workspace/skills/bodybuilding");
+		expect(skills[0].hasExerciseDatabase).toBe(true);
+		expect(toolNames).toEqual(["read", "exercise_search"]);
+	});
+
 	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {
 		const previousDataDir = process.env.FITCLAW_DATA_DIR;
 		const channelId = `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;

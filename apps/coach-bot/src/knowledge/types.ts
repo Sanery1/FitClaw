@@ -54,6 +54,7 @@ export interface IngestReport {
 export interface KnowledgePaths {
 	root: string;
 	library: string;
+	aliases: string;
 	database: string;
 	pageCache: string;
 	reports: string;

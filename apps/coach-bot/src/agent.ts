@@ -87,6 +87,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		databasePath: knowledgePaths.database,
 		knowledgeRoot: knowledgePaths.root,
 		allowCandidate: process.env.FITCLAW_KNOWLEDGE_ALLOW_CANDIDATE === "true",
+		aliasesPath: knowledgePaths.aliases,
 		renderer: new PopplerPageRenderer(knowledgePaths.pageCache),
 	});
 

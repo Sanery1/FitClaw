@@ -126,6 +126,64 @@ describe("SQLite textbook knowledge", () => {
 		expect(await store.search({ query: "肩' OR 1=1 --", collection: "kinesiology", limit: 5 })).toEqual([]);
 	});
 
+	it("expands audited aliases without changing source text", async () => {
+		const paths = createKnowledgePaths(workspace);
+		extractor = new FakePdfExtractor([
+			{ pdfPage: 1, text: "封面" },
+			{ pdfPage: 2, text: "固定页眉\n肩胧节律、肩脾骨运动与肩脾平面。" },
+			{ pdfPage: 3, text: "院关节、鹘关节和骸关节是文字提取结果。" },
+		]);
+		writeFileSync(
+			paths.aliases,
+			[
+				"version: 1",
+				"collections:",
+				"  kinesiology:",
+				"    肩胛肱骨节律: [肩胧节律]",
+				"    肩胛平面: [肩脾平面]",
+				"    肩胛骨: [肩脾骨]",
+				"    肩胛: [肩脾]",
+				"    髋: [院, 鹘, 骸]",
+			].join("\n"),
+			"utf-8",
+		);
+		await ingestKnowledgeSource({ paths, sourceId: "basic-kinesiology-3e", extractor });
+		const store = new SqliteKnowledgeStore({
+			databasePath: paths.database,
+			knowledgeRoot: paths.root,
+			allowCandidate: true,
+			aliasesPath: paths.aliases,
+		});
+
+		const rhythm = await store.search({ query: "肩胛肱骨节律", collection: "kinesiology", limit: 5 });
+		const shoulderPlane = await store.search({ query: "肩胛平面", collection: "kinesiology", limit: 5 });
+		const hip = await store.search({ query: "髋", collection: "kinesiology", limit: 5 });
+		const pages = await store.read({ pageIds: [rhythm[0].pageId], includeVisual: false });
+
+		expect(rhythm[0].pageId).toBe("basic-kinesiology-3e:pdf:0002");
+		expect(shoulderPlane[0].pageId).toBe("basic-kinesiology-3e:pdf:0002");
+		expect(hip[0].pageId).toBe("basic-kinesiology-3e:pdf:0003");
+		expect(hip[0].excerpt).toContain("关节");
+		expect(pages[0].text).toContain("肩胧节律");
+		expect(pages[0].text).not.toContain("肩胛肱骨节律");
+	});
+
+	it("rejects invalid alias configuration with a stable unavailable error", async () => {
+		const paths = createKnowledgePaths(workspace);
+		writeFileSync(paths.aliases, "version: 2\ncollections: {}\n", "utf-8");
+		await ingestKnowledgeSource({ paths, sourceId: "basic-kinesiology-3e", extractor });
+		const store = new SqliteKnowledgeStore({
+			databasePath: paths.database,
+			knowledgeRoot: paths.root,
+			allowCandidate: true,
+			aliasesPath: paths.aliases,
+		});
+
+		await expect(store.search({ query: "肩", collection: "kinesiology", limit: 5 })).rejects.toMatchObject({
+			code: "knowledge_unavailable",
+		});
+	});
+
 	it("preserves the published database when temporary validation fails", async () => {
 		const paths = createKnowledgePaths(workspace);
 		await ingestKnowledgeSource({ paths, sourceId: "basic-kinesiology-3e", extractor });

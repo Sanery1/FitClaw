@@ -118,23 +118,18 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 
 ### 查询可用动作
 
-使用查询脚本从数据库筛选动作：
+优先使用类型化 `exercise_search`，按动作 ID、英文名称、肌群、器械、难度、发力类型、动作类型或类别筛选。需要动作步骤时设置 `include_instructions: true`，需要示范图时使用返回的 `image_paths` 调用 `attach`。
 
-```bash
-# 按肌群查询
-python scripts/query_exercises.py --muscle chest --equipment dumbbell
+示例参数：
 
-# 按发力类型查询
-python scripts/query_exercises.py --force push --equipment dumbbell --level intermediate
-
-# 按英文动作名模糊查询（脚本不支持 --search）
-python scripts/query_exercises.py --name "Incline Dumbbell Press"
-
-# 查询单个动作详情
-python scripts/query_exercises.py --id "Incline_Dumbbell_Press"
+```json
+{"muscle":"chest","equipment":"dumbbell","limit":10}
+{"force":"push","equipment":"dumbbell","level":"intermediate"}
+{"query":"Incline Dumbbell Press"}
+{"id":"Incline_Dumbbell_Press","include_instructions":true}
 ```
 
-每次工具调用只执行一条上述 `python scripts/query_exercises.py ...` 命令。不要添加 `cd`、管道、重定向、`head` 或其他组合 shell 语法；不确定参数时先运行 `python scripts/query_exercises.py --help`，不要猜测参数。
+只有列举数据库枚举值、验证数据库或诊断类型化工具时，才使用允许的 `python scripts/query_exercises.py ...` 命令。每次 Bash 调用只执行一个允许的进程，不要添加 `cd`、管道、重定向或其他 shell 语法。
 
 ### 计划模板选择
 
@@ -242,10 +237,7 @@ JSON 格式用于导入训练 App：
 
 当用户询问动作如何做时：
 
-1. **查询动作详情**
-   ```bash
-   python scripts/query_exercises.py --id "动作ID" --detailed
-   ```
+1. **查询动作详情**：调用 `exercise_search`，传入精确 `id` 并设置 `include_instructions: true`。
 
 2. **输出内容**：
    - 基本信息（难度、器械、肌群）

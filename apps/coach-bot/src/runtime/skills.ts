@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { AgentTool } from "@fitclaw/agent-core";
 import {
 	createKnowledgeReadTool,
@@ -11,9 +12,14 @@ import {
 } from "@fitclaw/runtime";
 import { dirname, join } from "path";
 import type { Executor } from "../sandbox.js";
+import { createExerciseSearchTool } from "../tools/exercise-search.js";
 import { createCoachTools } from "../tools/index.js";
 import type { BotContext } from "../types.js";
 import { createAllowedCommands } from "./permissions.js";
+
+export interface CoachSkill extends Skill {
+	hasExerciseDatabase: boolean;
+}
 
 export function resolveCoachHostWorkspacePath(channelDir: string, channelId: string): string {
 	const channelParts = channelId.split(/[\\/]+/).filter(Boolean);
@@ -24,8 +30,8 @@ export function resolveCoachHostWorkspacePath(channelDir: string, channelId: str
 	return workspacePath;
 }
 
-export function loadCoachSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): Skill[] {
-	const skillMap = new Map<string, Skill>();
+export function loadCoachSkills(channelDir: string, workspacePath: string, hostWorkspacePath: string): CoachSkill[] {
+	const skillMap = new Map<string, CoachSkill>();
 
 	const translatePath = (hostPath: string): string => {
 		if (hostPath.startsWith(hostWorkspacePath)) {
@@ -36,10 +42,14 @@ export function loadCoachSkills(channelDir: string, workspacePath: string, hostW
 
 	const addSkills = (dir: string, source: string): void => {
 		for (const skill of loadSkillsFromDir({ dir, source }).skills) {
+			const hasExerciseDatabase =
+				skill.name === "bodybuilding" &&
+				existsSync(join(skill.baseDir, "free-exercise-db", "dist", "exercises.json"));
 			skillMap.set(skill.name, {
 				...skill,
 				filePath: translatePath(skill.filePath),
 				baseDir: translatePath(skill.baseDir),
+				hasExerciseDatabase,
 			});
 		}
 	};
@@ -69,14 +79,16 @@ export function createCoachSkillDataTools(channelDir: string, skills: Skill[]): 
 export function createCoachActiveTools(
 	executor: Executor,
 	channelDir: string,
-	skills: Skill[],
+	skills: CoachSkill[],
 	uploadFile?: BotContext["uploadFile"],
 	knowledgeStore?: KnowledgeStore,
 ): AgentTool[] {
 	const allowedCollections = Array.from(new Set(skills.flatMap((skill) => skill.knowledgeCollections ?? [])));
+	const bodybuildingSkill = skills.find((skill) => skill.name === "bodybuilding" && skill.hasExerciseDatabase);
 	return [
 		...createCoachTools(executor, createCoachReadRoots(skills), createAllowedCommands(skills), uploadFile),
 		...createCoachSkillDataTools(channelDir, skills),
+		...(bodybuildingSkill ? [createExerciseSearchTool(executor, bodybuildingSkill)] : []),
 		...(knowledgeStore && allowedCollections.length > 0
 			? [
 					createKnowledgeSearchTool(knowledgeStore, allowedCollections),

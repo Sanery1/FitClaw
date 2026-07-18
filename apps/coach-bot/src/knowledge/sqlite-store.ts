@@ -11,6 +11,7 @@ import {
 	type KnowledgeSourceTier,
 	type KnowledgeStore,
 } from "@fitclaw/runtime";
+import { expandKnowledgeQuery, loadKnowledgeAliases } from "./aliases.js";
 import { normalizeSearchQuery } from "./normalize.js";
 import type { PageRenderer } from "./types.js";
 
@@ -20,6 +21,7 @@ interface SqliteKnowledgeStoreOptions {
 	databasePath: string;
 	knowledgeRoot: string;
 	allowCandidate: boolean;
+	aliasesPath?: string;
 	renderer?: PageRenderer;
 }
 
@@ -55,16 +57,19 @@ function asStatus(value: SQLOutputValue | undefined): KnowledgeSourceStatus {
 	throw new KnowledgeError("knowledge_unavailable", "Invalid source status in knowledge database");
 }
 
-function createFtsQuery(query: string): string | null {
+function createFtsQuery(queries: readonly string[]): string | null {
 	const terms: string[] = [];
-	for (const segment of query.split(" ")) {
-		const characters = Array.from(segment);
-		for (let index = 0; index <= characters.length - 3; index++) {
-			const term = characters
-				.slice(index, index + 3)
-				.join("")
-				.replace(/"/g, '""');
-			if (!terms.includes(term)) terms.push(term);
+	for (const query of queries) {
+		for (const segment of query.split(" ")) {
+			const characters = Array.from(segment);
+			for (let index = 0; index <= characters.length - 3; index++) {
+				const term = characters
+					.slice(index, index + 3)
+					.join("")
+					.replace(/"/g, '""');
+				if (!terms.includes(term)) terms.push(term);
+				if (terms.length >= 32) break;
+			}
 			if (terms.length >= 32) break;
 		}
 		if (terms.length >= 32) break;
@@ -93,7 +98,23 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
 	async search(input: KnowledgeSearchInput): Promise<KnowledgeSearchResult[]> {
 		const query = normalizeSearchQuery(input.query);
 		if (!query) throw new KnowledgeError("invalid_query", "Query contains no searchable characters.");
-		const ftsQuery = createFtsQuery(query);
+		let queries: readonly string[];
+		let aliasRankTerms: readonly string[];
+		try {
+			const aliases = this.options.aliasesPath
+				? loadKnowledgeAliases(this.options.aliasesPath, input.collection)
+				: new Map<string, readonly string[]>();
+			queries = expandKnowledgeQuery(query, aliases).map(normalizeSearchQuery).filter(Boolean);
+			aliasRankTerms = Array.from(aliases)
+				.filter(([term]) => query.includes(term))
+				.flatMap(([, replacements]) => replacements)
+				.map(normalizeSearchQuery)
+				.filter((replacement) => Array.from(replacement).length >= 3)
+				.filter((replacement, index, terms) => terms.indexOf(replacement) === index);
+		} catch {
+			throw new KnowledgeError("knowledge_unavailable", "Knowledge aliases are invalid.");
+		}
+		const ftsQuery = createFtsQuery(queries);
 		const database = this.openDatabase();
 		try {
 			const rows =
@@ -101,28 +122,34 @@ export class SqliteKnowledgeStore implements KnowledgeStore {
 					? database
 							.prepare(
 								`SELECT p.page_id, p.source_id, p.pdf_page, p.book_page, p.chapter,
-							        p.search_text, p.needs_visual, s.title, s.edition, s.collection,
-							        s.tier, s.status
-							 FROM pages p JOIN sources s ON s.source_id = p.source_id
-							 WHERE s.collection = ? AND ${statusClause(this.options.allowCandidate)}
-							   AND instr(p.search_text, ?) > 0
-							 ORDER BY p.source_id, p.pdf_page LIMIT ?`,
+								        p.search_text, p.needs_visual, s.title, s.edition, s.collection,
+								        (${queries.map(() => "length(p.search_text) - length(replace(p.search_text, ?, ''))").join(" + ")}) AS match_count,
+								        s.tier, s.status
+								 FROM pages p JOIN sources s ON s.source_id = p.source_id
+								 WHERE s.collection = ? AND ${statusClause(this.options.allowCandidate)}
+								   AND (${queries.map(() => "instr(p.search_text, ?) > 0").join(" OR ")})
+								 ORDER BY match_count DESC, p.source_id, p.pdf_page LIMIT ?`,
 							)
-							.all(input.collection, query, input.limit)
+							.all(...queries, input.collection, ...queries, input.limit)
 					: database
 							.prepare(
 								`SELECT p.page_id, p.source_id, p.pdf_page, p.book_page, p.chapter,
-							        snippet(pages_fts, 1, '', '', '…', 32) AS search_text,
-							        p.needs_visual, s.title, s.edition, s.collection, s.tier, s.status,
-							        bm25(pages_fts) AS score
+								        snippet(pages_fts, 1, '', '', '…', 32) AS search_text,
+								        p.needs_visual, s.title, s.edition, s.collection, s.tier, s.status,
+								        ${
+												aliasRankTerms.length > 0
+													? `(${aliasRankTerms.map(() => "instr(p.search_text, ?) > 0").join(" + ")})`
+													: "0"
+											} AS alias_rank,
+								        bm25(pages_fts) AS score
 							 FROM pages_fts
 							 JOIN pages p ON p.page_id = pages_fts.page_id
 							 JOIN sources s ON s.source_id = p.source_id
 							 WHERE pages_fts MATCH ? AND s.collection = ?
 							   AND ${statusClause(this.options.allowCandidate)}
-							 ORDER BY score, p.pdf_page LIMIT ?`,
+								 ORDER BY alias_rank DESC, score, p.pdf_page LIMIT ?`,
 							)
-							.all(ftsQuery, input.collection, input.limit);
+							.all(...aliasRankTerms, ftsQuery, input.collection, input.limit);
 
 			return rows.map((row, index) => ({
 				pageId: asString(row.page_id, "page_id"),

@@ -6,6 +6,7 @@ export function createKnowledgePaths(workspacePath: string): KnowledgePaths {
 	return {
 		root,
 		library: resolve(root, "library.yaml"),
+		aliases: resolve(root, "aliases.yaml"),
 		database: resolve(root, "books.sqlite"),
 		pageCache: resolve(root, "page-cache"),
 		reports: resolve(root, "reports"),
