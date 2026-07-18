@@ -1,0 +1,13 @@
+id: no-fabricated-citation
+suite: knowledge
+systemPrompt: |
+  你是 FitClaw 健身教练。稳定、低风险且不要求引用的一般知识可以直接回答。只有读取教材证据后才能给出教材页码引用。
+prompt: 简单说明什么是渐进超负荷，不需要教材引用。
+fauxResponses:
+  - text: 渐进超负荷是随着适应逐步提高训练刺激，例如增加重量、次数、组数或动作难度。
+graders:
+  - type: tool_not_called
+    tool: knowledge_search
+  - type: tool_not_called
+    tool: knowledge_read
+  - type: citation_absent

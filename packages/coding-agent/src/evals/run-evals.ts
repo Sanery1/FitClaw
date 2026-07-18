@@ -2,6 +2,8 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AuthStorage } from "../core/auth-storage.js";
+import { ModelRegistry } from "../core/model-registry.js";
 import { writeSummary } from "./reporter.js";
 import { createSessionEvalTaskDraft } from "./session-import.js";
 import { loadEvalTask } from "./task-schema.js";
@@ -17,6 +19,9 @@ type EvalCliOptions = {
 	fromSession?: string;
 	writeTask?: string;
 	draftTaskId?: string;
+	mode: "faux" | "real";
+	provider?: string;
+	model?: string;
 };
 
 function requireFlagValue(args: string[], index: number): string {
@@ -44,6 +49,9 @@ function parseArgs(args: string[]): EvalCliOptions {
 	let fromSession: string | undefined;
 	let writeTask: string | undefined;
 	let draftTaskId: string | undefined;
+	let mode: "faux" | "real" = "faux";
+	let provider: string | undefined;
+	let model: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--tasks") {
@@ -70,9 +78,20 @@ function parseArgs(args: string[]): EvalCliOptions {
 		} else if (arg === "--task-id") {
 			draftTaskId = requireFlagValue(args, index);
 			index += 1;
+		} else if (arg === "--mode") {
+			const value = requireFlagValue(args, index);
+			if (value !== "faux" && value !== "real") throw new Error('--mode must be "faux" or "real".');
+			mode = value;
+			index += 1;
+		} else if (arg === "--provider") {
+			provider = requireFlagValue(args, index);
+			index += 1;
+		} else if (arg === "--model") {
+			model = requireFlagValue(args, index);
+			index += 1;
 		} else if (arg === "--help" || arg === "-h") {
 			console.log(
-				"Usage: npm run eval -- --tasks evals/tasks --out eval-results [--suite skills] [--task task-id] [--runs 3]\n" +
+				"Usage: npm run eval -- --tasks evals/tasks --out eval-results [--suite skills] [--task task-id] [--runs 3] [--mode faux|real --provider name --model id]\n" +
 					"       npm run eval -- --from-session session.jsonl --write-task evals/tasks/session/case.yaml --task-id case-id",
 			);
 			process.exit(0);
@@ -89,6 +108,9 @@ function parseArgs(args: string[]): EvalCliOptions {
 		fromSession: fromSession ? resolve(fromSession) : undefined,
 		writeTask: writeTask ? resolve(writeTask) : undefined,
 		draftTaskId,
+		mode,
+		provider,
+		model,
 	};
 }
 
@@ -119,6 +141,20 @@ export async function runEvalCli(args: string[]): Promise<number> {
 	if (!existsSync(options.tasksDir)) {
 		throw new Error(`Eval tasks directory does not exist: ${options.tasksDir}`);
 	}
+	const execution = (() => {
+		if (options.mode === "faux") return { mode: "faux" as const };
+		if (!options.provider || !options.model) {
+			throw new Error("--mode real requires --provider and --model.");
+		}
+		const authStorage = AuthStorage.create();
+		const modelRegistry = ModelRegistry.create(authStorage);
+		const model = modelRegistry.find(options.provider, options.model);
+		if (!model) throw new Error(`Model not found: ${options.provider}/${options.model}`);
+		if (!modelRegistry.hasConfiguredAuth(model)) {
+			throw new Error(`No configured authentication for ${options.provider}/${options.model}`);
+		}
+		return { mode: "real" as const, model, modelRegistry };
+	})();
 	mkdirSync(options.outputDir, { recursive: true });
 	const tasks = collectTaskFiles(options.tasksDir)
 		.map((path) => loadEvalTask(path))
@@ -134,6 +170,7 @@ export async function runEvalCli(args: string[]): Promise<number> {
 				outputDir: options.outputDir,
 				trialIndex,
 				totalTrials: options.runs,
+				execution,
 			});
 			results = [...results, result];
 			const status = result.passed ? "PASS" : "FAIL";

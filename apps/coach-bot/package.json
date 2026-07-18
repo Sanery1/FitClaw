@@ -13,7 +13,7 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
-		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/main.js",
+		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/main.js && shx mkdir -p dist/evals && shx cp evals/*.yaml dist/evals/",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
@@ -28,7 +28,8 @@
 		"croner": "^9.1.0",
 		"diff": "^8.0.2",
 		"pdfjs-dist": "5.4.394",
-		"typebox": "^1.1.24"
+		"typebox": "^1.1.24",
+		"yaml": "^2.8.2"
 	},
 	"devDependencies": {
 		"@types/diff": "^7.0.2",

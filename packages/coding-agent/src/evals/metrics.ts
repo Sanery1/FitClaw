@@ -49,6 +49,9 @@ export function summarizeEvalResults(results: EvalTrialResult[]): EvalSummaryMet
 		averageToolCalls: average(results.map((result) => result.metrics.toolCallCount)),
 		averageTurns: average(results.map((result) => result.metrics.turnCount)),
 		averageDurationMs: average(results.map((result) => result.metrics.durationMs)),
+		averageInputTokens: average(results.map((result) => result.metrics.inputTokens)),
+		averageOutputTokens: average(results.map((result) => result.metrics.outputTokens)),
+		averageCost: average(results.map((result) => result.metrics.cost)),
 	};
 }
 

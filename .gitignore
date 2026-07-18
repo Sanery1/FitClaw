@@ -17,7 +17,7 @@ pi-*.html
 syntax.jsonl
 tui-debug.log
 compaction-results/
-packages/coding-agent/eval-results/
+packages/coding-agent/eval-results*/
 
 # ── 密钥与环境变量 ──
 .env

@@ -4,9 +4,30 @@ export type EvalTask = {
 	id: string;
 	suite: string;
 	prompt: string;
+	systemPrompt?: string;
 	initialData: Record<string, unknown>;
-	fauxResponses: EvalFauxResponse[];
+	knowledge?: EvalKnowledgeFixture;
+	fauxResponses?: EvalFauxResponse[];
 	graders: EvalGrader[];
+};
+
+export type EvalKnowledgeFixture = {
+	allowedCollections: string[];
+	pages: EvalKnowledgePage[];
+};
+
+export type EvalKnowledgePage = {
+	pageId: string;
+	sourceId: string;
+	title: string;
+	edition: string;
+	collection: string;
+	chapter: string | null;
+	bookPage: number | null;
+	pdfPage: number;
+	text: string;
+	keywords: string[];
+	needsVisual: boolean;
 };
 
 export type EvalFauxResponse = {
@@ -70,11 +91,28 @@ export type EvalGrader =
 	| {
 			type: "max_turns";
 			max: number;
+	  }
+	| {
+			type: "retrieved_page_ids";
+			pageIds: string[];
+			tool?: string;
+	  }
+	| {
+			type: "citation_present";
+			title: string;
+			edition: string;
+			bookPage: number | null;
+			pdfPage: number;
+	  }
+	| {
+			type: "citation_absent";
 	  };
 
 export type EvalToolCallRecord = {
 	name: string;
 	args: Record<string, unknown>;
+	pageIds: string[];
+	isError: boolean;
 };
 
 export type EvalGraderResult = {
@@ -87,7 +125,9 @@ export type EvalTrialResult = {
 	taskId: string;
 	suite: string;
 	trialIndex: number;
+	modelId: string;
 	passed: boolean;
+	errorMessage?: string;
 	finalAnswer: string;
 	toolCalls: EvalToolCallRecord[];
 	graderResults: EvalGraderResult[];
@@ -96,6 +136,9 @@ export type EvalTrialResult = {
 		turnCount: number;
 		toolCallCount: number;
 		durationMs: number;
+		inputTokens: number;
+		outputTokens: number;
+		cost: number;
 	};
 };
 
@@ -122,4 +165,7 @@ export type EvalSummaryMetrics = {
 	averageToolCalls: number;
 	averageTurns: number;
 	averageDurationMs: number;
+	averageInputTokens: number;
+	averageOutputTokens: number;
+	averageCost: number;
 };

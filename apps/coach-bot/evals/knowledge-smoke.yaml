@@ -1,33 +1,57 @@
 version: 1
 source_id: basic-kinesiology-3e
+thresholds:
+  k: 5
+  min_recall_at_k: 0.8
+  min_mrr: 0.6
+  category_min_recall_at_k:
+    exact_term: 0.8
+    concept: 0.8
+    short: 1
+    visual: 0.5
 queries:
   - category: exact_term
     query: 肩胛肱骨节律
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0072, basic-kinesiology-3e:pdf:0082]
   - category: exact_term
     query: 长度-张力关系
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0053, basic-kinesiology-3e:pdf:0054]
   - category: exact_term
     query: 力矩臂
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0352]
   - category: exact_term
     query: 主动不足
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0056]
   - category: exact_term
     query: 被动不足
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0056]
   - category: concept
     query: 肌肉收缩怎样产生关节力矩
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0048]
   - category: concept
     query: 肩胛骨和肱骨如何配合完成肩关节外展
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0072, basic-kinesiology-3e:pdf:0095]
   - category: concept
     query: 为什么关节角度会改变肌肉产生的力矩
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0053, basic-kinesiology-3e:pdf:0054, basic-kinesiology-3e:pdf:0057]
   - category: concept
     query: 开链运动和闭链运动有什么生物力学区别
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0020]
   - category: concept
     query: 髋关节稳定性由哪些结构共同提供
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0252, basic-kinesiology-3e:pdf:0253]
   - category: short
     query: 肩
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0072, basic-kinesiology-3e:pdf:0080, basic-kinesiology-3e:pdf:0083]
   - category: short
     query: 髋
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0252, basic-kinesiology-3e:pdf:0254, basic-kinesiology-3e:pdf:0276]
   - category: short
     query: 膝
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0309, basic-kinesiology-3e:pdf:0313, basic-kinesiology-3e:pdf:0320]
   - category: visual
     query: 肩胛平面和肩关节运动示意图
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0073]
   - category: visual
     query: 肌肉长度张力曲线图
+    relevant_page_ids: [basic-kinesiology-3e:pdf:0053, basic-kinesiology-3e:pdf:0054]

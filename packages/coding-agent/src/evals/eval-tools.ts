@@ -1,7 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import type { AgentTool } from "@fitclaw/agent-core";
+import {
+	createKnowledgeReadTool,
+	createKnowledgeSearchTool,
+	type KnowledgePage,
+	type KnowledgeSearchResult,
+	type KnowledgeStore,
+} from "@fitclaw/runtime";
 import { Type } from "typebox";
+import type { EvalKnowledgeFixture, EvalKnowledgePage } from "./types.js";
 
 const skillDataWriteSchema = Type.Object({
 	namespace: Type.String(),
@@ -58,7 +66,72 @@ function writeJson(path: string, value: unknown): void {
 	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
-export function createEvalTools(workspaceDir: string): AgentTool[] {
+function normalizeKnowledgeText(value: string): string {
+	return value
+		.normalize("NFKC")
+		.toLowerCase()
+		.replace(/[\p{P}\p{S}\s]+/gu, "");
+}
+
+function knowledgeScore(page: EvalKnowledgePage, query: string): number {
+	const normalizedQuery = normalizeKnowledgeText(query);
+	if (!normalizedQuery) return 0;
+	const normalizedKeywords = page.keywords.map(normalizeKnowledgeText);
+	const searchable = normalizeKnowledgeText([page.title, page.chapter ?? "", page.text, ...page.keywords].join(" "));
+	if (searchable.includes(normalizedQuery)) return 1000 + normalizedQuery.length;
+	const keywordMatches = normalizedKeywords.filter(
+		(keyword) => keyword.includes(normalizedQuery) || normalizedQuery.includes(keyword),
+	).length;
+	if (keywordMatches > 0) return 500 + keywordMatches;
+	const bigrams = Array.from({ length: Math.max(0, normalizedQuery.length - 1) }, (_, index) =>
+		normalizedQuery.slice(index, index + 2),
+	);
+	return bigrams.filter((bigram) => searchable.includes(bigram)).length;
+}
+
+function toKnowledgePage(page: EvalKnowledgePage): KnowledgePage {
+	return {
+		pageId: page.pageId,
+		sourceId: page.sourceId,
+		title: page.title,
+		edition: page.edition,
+		collection: page.collection,
+		tier: "primary",
+		status: "enabled",
+		chapter: page.chapter,
+		bookPage: page.bookPage,
+		pdfPage: page.pdfPage,
+		text: page.text,
+		needsVisual: page.needsVisual,
+	};
+}
+
+function createEvalKnowledgeStore(fixture: EvalKnowledgeFixture): KnowledgeStore {
+	const pagesById = new Map(fixture.pages.map((page) => [page.pageId, page]));
+	return {
+		async search(input): Promise<KnowledgeSearchResult[]> {
+			return fixture.pages
+				.filter((page) => page.collection === input.collection)
+				.map((page) => ({ page, score: knowledgeScore(page, input.query) }))
+				.filter((entry) => entry.score > 0)
+				.sort((left, right) => right.score - left.score || left.page.pdfPage - right.page.pdfPage)
+				.slice(0, input.limit)
+				.map(({ page }, index) => ({
+					...toKnowledgePage(page),
+					excerpt: page.text.slice(0, 600),
+					rank: index + 1,
+				}));
+		},
+		async read(input): Promise<KnowledgePage[]> {
+			return input.pageIds.flatMap((pageId) => {
+				const page = pagesById.get(pageId);
+				return page ? [toKnowledgePage(page)] : [];
+			});
+		},
+	};
+}
+
+export function createEvalTools(workspaceDir: string, knowledge?: EvalKnowledgeFixture): AgentTool[] {
 	const dataBodybuildingRead: AgentTool<typeof skillDataReadSchema> = {
 		name: "data_bodybuilding_read",
 		label: "Read Bodybuilding Data",
@@ -129,5 +202,13 @@ export function createEvalTools(workspaceDir: string): AgentTool[] {
 		},
 	};
 
-	return [dataBodybuildingRead, dataBodybuildingWrite];
+	const knowledgeStore = knowledge ? createEvalKnowledgeStore(knowledge) : undefined;
+	const knowledgeTools =
+		knowledge && knowledgeStore
+			? [
+					createKnowledgeSearchTool(knowledgeStore, knowledge.allowedCollections),
+					createKnowledgeReadTool(knowledgeStore, knowledge.allowedCollections),
+				]
+			: [];
+	return [dataBodybuildingRead, dataBodybuildingWrite, ...knowledgeTools];
 }

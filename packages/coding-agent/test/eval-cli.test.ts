@@ -61,4 +61,15 @@ describe("eval cli", () => {
 		expect(() => rmSync(join(outputDir, "workspaces", "skill-task"), { recursive: true })).not.toThrow();
 		expect(() => rmSync(join(outputDir, "workspaces", "tool-task"), { recursive: true })).toThrow();
 	});
+
+	it("requires an explicit provider and model for real evals", async () => {
+		const dir = createTempDir();
+		const tasksDir = join(dir, "tasks");
+		mkdirSync(tasksDir, { recursive: true });
+		writeTask(tasksDir, "real-task", "knowledge");
+
+		await expect(runEvalCli(["--tasks", tasksDir, "--mode", "real"])).rejects.toThrow(
+			"--mode real requires --provider and --model",
+		);
+	});
 });

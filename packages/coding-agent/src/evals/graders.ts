@@ -9,6 +9,8 @@ export type GradeInput = {
 	turnCount: number;
 };
 
+const CITATION_PATTERN = /《[^》]+》[^\r\n]{0,80}(?:第\d+页|前置页|PDF\s*第?\s*\d+\s*页)/u;
+
 function readJson(path: string): unknown {
 	return JSON.parse(readFileSync(path, "utf-8")) as unknown;
 }
@@ -160,6 +162,43 @@ export function gradeEval(grader: EvalGrader, input: GradeInput): EvalGraderResu
 			message: passed
 				? "Turn count is within the limit."
 				: `Expected at most ${grader.max} turns, got ${input.turnCount}.`,
+		};
+	}
+
+	if (grader.type === "retrieved_page_ids") {
+		const successfulCalls = input.toolCalls.filter((call) => !call.isError);
+		const calls = grader.tool ? successfulCalls.filter((call) => call.name === grader.tool) : successfulCalls;
+		const retrieved = new Set(calls.flatMap((call) => call.pageIds));
+		const missing = grader.pageIds.filter((pageId) => !retrieved.has(pageId));
+		return {
+			name: `retrieved_page_ids:${grader.pageIds.join(",")}`,
+			passed: missing.length === 0,
+			message:
+				missing.length === 0
+					? "Expected knowledge pages were returned by tools."
+					: `Knowledge tool results did not include ${JSON.stringify(missing)}.`,
+		};
+	}
+
+	if (grader.type === "citation_present") {
+		const bookPage = grader.bookPage === null ? "前置页" : `第${grader.bookPage}页`;
+		const citation = `[《${grader.title}》${grader.edition}，${bookPage}（PDF第${grader.pdfPage}页）]`;
+		const passed = input.finalAnswer.includes(citation);
+		return {
+			name: `citation_present:${grader.pdfPage}`,
+			passed,
+			message: passed ? "Final answer contains the expected citation." : `Final answer omitted ${citation}.`,
+		};
+	}
+
+	if (grader.type === "citation_absent") {
+		const passed = !CITATION_PATTERN.test(input.finalAnswer);
+		return {
+			name: "citation_absent",
+			passed,
+			message: passed
+				? "Final answer did not invent a textbook citation."
+				: "Final answer contained a textbook citation.",
 		};
 	}
 

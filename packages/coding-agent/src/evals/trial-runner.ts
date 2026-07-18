@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
-import { Agent, type AgentEvent } from "@fitclaw/agent-core";
-import type { Message, TextContent } from "@fitclaw/ai";
+import { Agent, type AgentEvent, type StreamFn } from "@fitclaw/agent-core";
+import { type Api, type AssistantMessage, type Message, type Model, streamSimple, type TextContent } from "@fitclaw/ai";
+import type { ModelRegistry } from "../core/model-registry.js";
 import { createEvalTools } from "./eval-tools.js";
 import { createEvalFauxStream, evalFauxModel } from "./faux-stream.js";
 import { gradeEvalTask } from "./graders.js";
@@ -12,6 +13,7 @@ export type RunEvalTaskOptions = {
 	outputDir: string;
 	trialIndex?: number;
 	totalTrials?: number;
+	execution?: { mode: "faux" } | { mode: "real"; model: Model<Api>; modelRegistry: ModelRegistry };
 };
 
 function resolveInside(root: string, relativePath: string): string {
@@ -55,13 +57,57 @@ function extractFinalAnswer(events: AgentEvent[]): string {
 		.trim();
 }
 
+export function extractEvalModelError(events: AgentEvent[]): string | undefined {
+	const assistantMessages = events
+		.filter((event): event is Extract<AgentEvent, { type: "message_end" }> => event.type === "message_end")
+		.map((event) => event.message)
+		.filter((message): message is AssistantMessage => message.role === "assistant");
+	const lastAssistant = assistantMessages[assistantMessages.length - 1];
+	if (!lastAssistant || lastAssistant.stopReason === "error" || lastAssistant.stopReason === "aborted") {
+		return lastAssistant?.errorMessage ?? "Model did not produce a completed assistant response.";
+	}
+	return undefined;
+}
+
 function extractToolCalls(events: AgentEvent[]): EvalToolCallRecord[] {
+	const completions = new Map(
+		events.filter((event) => event.type === "tool_execution_end").map((event) => [event.toolCallId, event] as const),
+	);
 	return events
 		.filter((event) => event.type === "tool_execution_start")
-		.map((event) => ({
-			name: event.toolName,
-			args: event.args as Record<string, unknown>,
-		}));
+		.map((event) => {
+			const completion = completions.get(event.toolCallId);
+			const result: unknown = completion?.result;
+			const details = isRecord(result) && isRecord(result.details) ? result.details : undefined;
+			const pageIds = Array.isArray(details?.pageIds)
+				? details.pageIds.filter((pageId): pageId is string => typeof pageId === "string")
+				: [];
+			return {
+				name: event.toolName,
+				args: event.args as Record<string, unknown>,
+				pageIds,
+				isError: completion?.isError ?? true,
+			};
+		});
+}
+
+function extractUsage(events: AgentEvent[]): { inputTokens: number; outputTokens: number; cost: number } {
+	return events
+		.filter((event): event is Extract<AgentEvent, { type: "message_end" }> => event.type === "message_end")
+		.map((event) => event.message)
+		.filter((message): message is AssistantMessage => message.role === "assistant")
+		.reduce(
+			(totals, message) => ({
+				inputTokens: totals.inputTokens + message.usage.input,
+				outputTokens: totals.outputTokens + message.usage.output,
+				cost: totals.cost + message.usage.cost.total,
+			}),
+			{ inputTokens: 0, outputTokens: 0, cost: 0 },
+		);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function seedInitialData(workspaceDir: string, initialData: Record<string, unknown>): void {
@@ -85,16 +131,37 @@ export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): 
 	mkdirSync(workspaceDir, { recursive: true });
 	seedInitialData(workspaceDir, task.initialData);
 
+	const execution = options.execution ?? { mode: "faux" as const };
+	if (execution.mode === "faux" && !task.fauxResponses?.length) {
+		throw new Error(`Eval task "${task.id}" requires fauxResponses in faux mode.`);
+	}
+	const model = execution.mode === "faux" ? evalFauxModel : execution.model;
+	const streamFn: StreamFn =
+		execution.mode === "faux"
+			? createEvalFauxStream(task.fauxResponses ?? [])
+			: async (requestedModel, context, streamOptions) => {
+					const auth = await execution.modelRegistry.getApiKeyAndHeaders(requestedModel);
+					if (!auth.ok) throw new Error(auth.error);
+					return streamSimple(requestedModel, context, {
+						...streamOptions,
+						apiKey: auth.apiKey,
+						headers:
+							auth.headers || streamOptions?.headers
+								? { ...auth.headers, ...streamOptions?.headers }
+								: undefined,
+					});
+				};
+
 	let events: AgentEvent[] = [];
 	const agent = new Agent({
 		initialState: {
-			systemPrompt: "You are running inside the FitClaw eval harness.",
-			model: evalFauxModel,
+			systemPrompt: task.systemPrompt ?? "You are running inside the FitClaw eval harness.",
+			model,
 			thinkingLevel: "off",
-			tools: createEvalTools(workspaceDir),
+			tools: createEvalTools(workspaceDir, task.knowledge),
 		},
 		convertToLlm: convertAgentMessages,
-		streamFn: createEvalFauxStream(task.fauxResponses),
+		streamFn,
 	});
 	const unsubscribe = agent.subscribe((event) => {
 		events = [...events, event];
@@ -107,7 +174,9 @@ export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): 
 	}
 
 	const finalAnswer = extractFinalAnswer(events);
+	const errorMessage = extractEvalModelError(events);
 	const toolCalls = extractToolCalls(events);
+	const usage = extractUsage(events);
 	const turnCount = events.filter((event) => event.type === "turn_end").length;
 	const graderResults = gradeEvalTask(task.graders, { workspaceDir, finalAnswer, toolCalls, turnCount });
 	writeTranscript(transcriptPath, events);
@@ -116,7 +185,9 @@ export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): 
 		taskId: task.id,
 		suite: task.suite,
 		trialIndex,
-		passed: graderResults.every((result) => result.passed),
+		modelId: `${model.provider}/${model.id}`,
+		passed: errorMessage === undefined && graderResults.every((result) => result.passed),
+		errorMessage,
 		finalAnswer,
 		toolCalls,
 		graderResults,
@@ -125,6 +196,7 @@ export async function runEvalTask(task: EvalTask, options: RunEvalTaskOptions): 
 			turnCount,
 			toolCallCount: toolCalls.length,
 			durationMs: Date.now() - startedAt,
+			...usage,
 		},
 	};
 }
