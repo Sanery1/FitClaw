@@ -26,10 +26,10 @@ export interface PrivateCoachTransport {
 export interface PrivateCoachServiceOptions {
 	relationships: CoachRelationshipStore;
 	transport: PrivateCoachTransport;
-	runCoach(event: FeishuEvent, scope: CoachSessionScope): Promise<void>;
+	runCoach(event: FeishuEvent, scope: CoachSessionScope, signal: AbortSignal): Promise<void>;
+	abortUserRuns?(scope: CoachUserScope): void | Promise<void>;
 	resolveUserScope(event: FeishuUserLifecycleEvent): CoachUserScope;
 	resolveSessionScope(event: FeishuEvent): CoachSessionScope;
-	queue?: KeyedTaskQueue;
 	now?: () => Date;
 }
 
@@ -38,12 +38,15 @@ export type InvitationResult =
 	| { status: "skipped" }
 	| { status: "failed"; reason: string };
 
+type MessagePreparation = { type: "handled" } | { type: "coach"; controller: AbortController };
+
 export class PrivateCoachService {
-	private readonly queue: KeyedTaskQueue;
+	private readonly stateQueue = new KeyedTaskQueue();
+	private readonly runQueue = new KeyedTaskQueue();
+	private readonly activeRunControllers = new Map<string, Set<AbortController>>();
 	private readonly now: () => Date;
 
 	constructor(private readonly options: PrivateCoachServiceOptions) {
-		this.queue = options.queue ?? new KeyedTaskQueue();
 		this.now = options.now ?? (() => new Date());
 	}
 
@@ -53,8 +56,9 @@ export class PrivateCoachService {
 
 	async inviteUser(event: FeishuUserLifecycleEvent, source: CoachInvitationSource): Promise<InvitationResult> {
 		const scope = this.options.resolveUserScope(event);
-		return this.queue.run(scope.userKey, async () => {
-			if (await this.options.relationships.load(scope)) return { status: "skipped" };
+		return this.stateQueue.run(scope.userKey, async () => {
+			const existing = await this.options.relationships.load(scope);
+			if (existing && existing.status !== "revoked") return { status: "skipped" };
 
 			const invitedAt = this.timestamp();
 			const pending = createRelationship(scope, "invited", invitedAt, {
@@ -90,17 +94,27 @@ export class PrivateCoachService {
 
 	async handleUserLeft(event: FeishuUserLifecycleEvent): Promise<void> {
 		const scope = this.options.resolveUserScope(event);
-		await this.queue.run(scope.userKey, async () => {
-			const existing = await this.options.relationships.load(scope);
-			const revokedAt = this.timestamp();
-			await this.options.relationships.save(scope, {
-				...(existing ?? createRelationship(scope, "revoked", revokedAt)),
-				status: "revoked",
-				trainingRemindersEnabled: false,
-				revokedAt,
-				updatedAt: revokedAt,
+		let stateError: unknown;
+		try {
+			await this.stateQueue.run(scope.userKey, async () => {
+				try {
+					await this.persistRevocation(scope, this.timestamp());
+				} finally {
+					this.abortActiveRuns(scope.userKey);
+				}
 			});
-		});
+		} catch (error) {
+			stateError = error;
+		}
+
+		let abortError: unknown;
+		try {
+			await this.options.abortUserRuns?.(scope);
+		} catch (error) {
+			abortError = error;
+		}
+		if (stateError) throw new Error("Failed to revoke the private coach relationship", { cause: stateError });
+		if (abortError) throw new Error("Failed to abort active private coach runs", { cause: abortError });
 	}
 
 	async handleMessage(event: FeishuEvent): Promise<void> {
@@ -110,83 +124,136 @@ export class PrivateCoachService {
 		}
 
 		const scope = this.options.resolveSessionScope(event);
-		await this.queue.run(scope.userKey, async () => {
-			let relationship = await this.options.relationships.load(scope);
-			const action = decideCoachRoute(event.chatType, event.text, relationship?.status);
+		const preparation = await this.stateQueue.run(scope.userKey, () => this.prepareMessage(event, scope));
+		if (preparation.type === "handled") return;
 
-			if (!relationship && (action === "activation_prompt" || action === "activate" || action === "decline")) {
-				const invitedAt = this.timestamp();
-				relationship = createRelationship(scope, "invited", invitedAt, {
-					invitationSource: "private_chat",
-					inviteState: "sent",
-					invitedAt,
-				});
-				await this.options.relationships.save(scope, relationship);
-			}
-
-			if (action === "activation_prompt") {
-				if (relationship?.status === "invite_failed") {
-					const invitedAt = this.timestamp();
-					relationship = {
-						...relationship,
-						status: "invited",
-						invitationSource: "private_chat",
-						inviteState: "sent",
-						invitedAt,
-						updatedAt: invitedAt,
-					};
-					await this.options.relationships.save(scope, relationship);
+		await this.runQueue.run(scope.userKey, async () => {
+			try {
+				if (!preparation.controller.signal.aborted) {
+					await this.options.runCoach(event, scope, preparation.controller.signal);
 				}
-				await this.options.transport.sendThreadMessage(event.messageId, PRIVATE_COACH_ACTIVATION_PROMPT);
-				return;
+			} finally {
+				this.unregisterActiveRun(scope.userKey, preparation.controller);
 			}
-
-			if (action === "activate" && relationship) {
-				const activatedAt = this.timestamp();
-				await this.options.relationships.save(scope, {
-					...relationship,
-					status: "active",
-					activatedAt,
-					memoryPolicyVersion: FITCLAW_MEMORY_POLICY_VERSION,
-					updatedAt: activatedAt,
-				});
-				await this.options.transport.sendThreadMessage(
-					event.messageId,
-					"私人教练已启用。训练提醒仍为关闭状态。你可以从目标、训练经验或可用器械开始告诉我。",
-				);
-				return;
-			}
-
-			if (action === "decline" && relationship) {
-				const declinedAt = this.timestamp();
-				await this.options.relationships.save(scope, {
-					...relationship,
-					status: "declined",
-					declinedAt,
-					updatedAt: declinedAt,
-				});
-				await this.options.transport.sendThreadMessage(
-					event.messageId,
-					"已选择暂不启用。我不会建立成长档案，也不会主动发送训练消息。",
-				);
-				return;
-			}
-
-			if (action === "blocked") {
-				await this.options.transport.sendThreadMessage(
-					event.messageId,
-					relationship?.status === "revoked"
-						? "当前私人教练关系已停用，无法访问原有成长档案。"
-						: "你尚未启用私人教练，我不会读取或写入成长档案。",
-				);
-				return;
-			}
-
-			if (action === "coach") await this.options.runCoach(event, scope);
 		});
+	}
+
+	private async prepareMessage(event: FeishuEvent, scope: CoachSessionScope): Promise<MessagePreparation> {
+		const relationship = await this.options.relationships.load(scope);
+		if (
+			!relationship ||
+			relationship.status === "invite_failed" ||
+			(relationship.status === "invited" && relationship.inviteState !== "sent")
+		) {
+			const invitedAt = this.timestamp();
+			const pending = createRelationship(scope, "invited", invitedAt, {
+				...(relationship ?? {}),
+				invitationSource: "private_chat",
+				inviteState: "pending",
+				invitedAt,
+			});
+			await this.options.relationships.save(scope, pending);
+			await this.options.transport.sendThreadMessage(event.messageId, PRIVATE_COACH_ACTIVATION_PROMPT);
+			await this.options.relationships.save(scope, {
+				...pending,
+				inviteState: "sent",
+				updatedAt: this.timestamp(),
+			});
+			return { type: "handled" };
+		}
+
+		const action = decideCoachRoute(event.chatType, event.text, relationship.status);
+		if (action === "activation_prompt") {
+			await this.options.transport.sendThreadMessage(event.messageId, PRIVATE_COACH_ACTIVATION_PROMPT);
+			return { type: "handled" };
+		}
+
+		if (action === "activate") {
+			const activatedAt = this.timestamp();
+			await this.options.relationships.save(scope, {
+				...relationship,
+				status: "active",
+				activatedAt,
+				memoryPolicyVersion: FITCLAW_MEMORY_POLICY_VERSION,
+				updatedAt: activatedAt,
+			});
+			await this.options.transport.sendThreadMessage(
+				event.messageId,
+				"私人教练已启用。训练提醒仍为关闭状态。你可以从目标、训练经验或可用器械开始告诉我。",
+			);
+			return { type: "handled" };
+		}
+
+		if (action === "decline" || action === "deactivate") {
+			const declinedAt = this.timestamp();
+			await this.options.relationships.save(scope, {
+				...relationship,
+				status: "declined",
+				trainingRemindersEnabled: false,
+				declinedAt,
+				updatedAt: declinedAt,
+			});
+			if (action === "deactivate") {
+				this.abortActiveRuns(scope.userKey);
+				await this.options.abortUserRuns?.(scope);
+				await this.options.transport.sendThreadMessage(
+					event.messageId,
+					"私人教练已停用。我不会继续读取或写入成长档案，也不会主动发送训练消息；原有数据不会自动删除。",
+				);
+				return { type: "handled" };
+			}
+			await this.options.transport.sendThreadMessage(
+				event.messageId,
+				"已选择暂不启用。我不会建立成长档案，也不会主动发送训练消息。",
+			);
+			return { type: "handled" };
+		}
+
+		if (action === "blocked") {
+			if (relationship.status === "revoked") return { type: "handled" };
+			await this.options.transport.sendThreadMessage(
+				event.messageId,
+				"你尚未启用私人教练，我不会读取或写入成长档案。",
+			);
+			return { type: "handled" };
+		}
+
+		if (action !== "coach") throw new Error(`Unexpected private coach route: ${action}`);
+		return { type: "coach", controller: this.registerActiveRun(scope.userKey) };
+	}
+
+	private registerActiveRun(userKey: string): AbortController {
+		const controller = new AbortController();
+		const controllers = this.activeRunControllers.get(userKey) ?? new Set<AbortController>();
+		controllers.add(controller);
+		this.activeRunControllers.set(userKey, controllers);
+		return controller;
+	}
+
+	private unregisterActiveRun(userKey: string, controller: AbortController): void {
+		const controllers = this.activeRunControllers.get(userKey);
+		controllers?.delete(controller);
+		if (controllers?.size === 0) this.activeRunControllers.delete(userKey);
+	}
+
+	private abortActiveRuns(userKey: string): void {
+		const controllers = this.activeRunControllers.get(userKey);
+		this.activeRunControllers.delete(userKey);
+		for (const controller of controllers ?? []) controller.abort();
 	}
 
 	private timestamp(): string {
 		return this.now().toISOString();
+	}
+
+	private async persistRevocation(scope: CoachUserScope, revokedAt: string): Promise<void> {
+		const existing = await this.options.relationships.load(scope);
+		await this.options.relationships.save(scope, {
+			...(existing ?? createRelationship(scope, "revoked", revokedAt)),
+			status: "revoked",
+			trainingRemindersEnabled: false,
+			revokedAt,
+			updatedAt: revokedAt,
+		});
 	}
 }

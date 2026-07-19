@@ -36,6 +36,7 @@ export function createAttachTool(
 			const fileName = basename(resolvedPath);
 			const normalizedTitle = title?.trim() || undefined;
 
+			signal?.throwIfAborted();
 			await uploadFile({ data, fileName, title: normalizedTitle });
 
 			return {

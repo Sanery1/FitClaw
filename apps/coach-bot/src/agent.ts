@@ -26,12 +26,13 @@ export interface PendingMessage {
 
 export interface AgentRunner {
 	run(ctx: BotContext, pendingMessages?: PendingMessage[]): Promise<{ stopReason: string; errorMessage?: string }>;
-	abort(): void;
+	abort(): Promise<void>;
 }
 
 export interface CoachRunnerOptions {
 	sandboxConfig: SandboxConfig;
 	workspaceDir: string;
+	userKey: string;
 	sessionKey: string;
 	sessionDir: string;
 	userDataDir: string;
@@ -56,7 +57,12 @@ function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
 }
 
-const sessionRunners = new Map<string, AgentRunner>();
+interface CachedRunner {
+	userKey: string;
+	runner: AgentRunner;
+}
+
+const sessionRunners = new Map<string, CachedRunner>();
 
 /**
  * Get or create an AgentRunner for a private session.
@@ -64,11 +70,22 @@ const sessionRunners = new Map<string, AgentRunner>();
  */
 export function getOrCreateRunner(options: CoachRunnerOptions): AgentRunner {
 	const existing = sessionRunners.get(options.sessionKey);
-	if (existing) return existing;
+	if (existing) return existing.runner;
 
 	const runner = createRunner(options);
-	sessionRunners.set(options.sessionKey, runner);
+	sessionRunners.set(options.sessionKey, { userKey: options.userKey, runner });
 	return runner;
+}
+
+export async function abortUserRunners(userKey: string): Promise<number> {
+	const runners: AgentRunner[] = [];
+	for (const [sessionKey, cached] of sessionRunners) {
+		if (cached.userKey !== userKey) continue;
+		sessionRunners.delete(sessionKey);
+		runners.push(cached.runner);
+	}
+	await Promise.all(runners.map((runner) => runner.abort()));
+	return runners.length;
 }
 
 /**
@@ -361,8 +378,8 @@ function createRunner(options: CoachRunnerOptions): AgentRunner {
 			return { stopReason: runState.stopReason, errorMessage: runState.errorMessage };
 		},
 
-		abort(): void {
-			session.abort();
+		abort(): Promise<void> {
+			return session.abort();
 		},
 	};
 }

@@ -2,10 +2,25 @@ import type * as Lark from "@larksuiteoapi/node-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { FeishuBot } from "../src/feishu.js";
 
-function createTestBot(options: { imageKey?: string; fileKey?: string } = {}) {
-	const imageCreate = vi.fn(async (_payload: unknown) =>
-		options.imageKey === undefined ? {} : { image_key: options.imageKey },
-	);
+interface TestBotOptions {
+	imageKey?: string;
+	fileKey?: string;
+	createImage?: () => Promise<{ image_key?: string }>;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve: (value: T) => void = () => undefined;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
+function createTestBot(options: TestBotOptions = {}) {
+	const imageCreate = vi.fn(async (_payload: unknown) => {
+		if (options.createImage) return options.createImage();
+		return options.imageKey === undefined ? {} : { image_key: options.imageKey };
+	});
 	const fileCreate = vi.fn(async (_payload: unknown) =>
 		options.fileKey === undefined ? {} : { file_key: options.fileKey },
 	);
@@ -61,6 +76,30 @@ describe("Feishu media replies", () => {
 		await expect(
 			bot.sendMediaReply("message-3", { data: Buffer.from("image-data"), fileName: "press.png" }),
 		).rejects.toThrow(/image_key/);
+		expect(reply).not.toHaveBeenCalled();
+	});
+
+	it("does not send a media reply when access is revoked during upload", async () => {
+		const uploadStarted = deferred<void>();
+		const uploadFinished = deferred<{ image_key: string }>();
+		const controller = new AbortController();
+		const { bot, reply } = createTestBot({
+			createImage: async () => {
+				uploadStarted.resolve();
+				return uploadFinished.promise;
+			},
+		});
+
+		const sending = bot.sendMediaReply(
+			"message-4",
+			{ data: Buffer.from("image-data"), fileName: "press.png" },
+			controller.signal,
+		);
+		await uploadStarted.promise;
+		controller.abort();
+		uploadFinished.resolve({ image_key: "img_test" });
+
+		await expect(sending).rejects.toThrow();
 		expect(reply).not.toHaveBeenCalled();
 	});
 });

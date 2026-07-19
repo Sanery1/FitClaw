@@ -190,9 +190,10 @@ export class FeishuBot {
 		}
 	}
 
-	async sendMediaReply(parentMessageId: string, upload: BotUpload): Promise<void> {
+	async sendMediaReply(parentMessageId: string, upload: BotUpload, signal?: AbortSignal): Promise<void> {
 		if (!parentMessageId) throw new Error("Feishu media reply requires a parent message ID");
 		if (upload.data.length === 0) throw new Error("Feishu cannot upload an empty file");
+		signal?.throwIfAborted();
 
 		const extension = extname(upload.fileName).toLowerCase();
 		let msgType: "image" | "file";
@@ -220,6 +221,7 @@ export class FeishuBot {
 			content = JSON.stringify({ file_key: response.file_key });
 		}
 
+		signal?.throwIfAborted();
 		const response = await this.client.im.message.reply({
 			path: { message_id: parentMessageId },
 			data: { content, msg_type: msgType },

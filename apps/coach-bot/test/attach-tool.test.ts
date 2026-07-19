@@ -66,4 +66,27 @@ describe("coach bot attach tool", () => {
 		expect(executor.readPaths).toEqual([]);
 		expect(uploadFile).not.toHaveBeenCalled();
 	});
+
+	it("does not upload when the run is aborted after reading the file", async () => {
+		const controller = new AbortController();
+		class AbortingExecutor extends RecordingExecutor {
+			override async readFile(path: string, options?: ReadFileOptions): Promise<Buffer> {
+				const data = await super.readFile(path, options);
+				controller.abort();
+				return data;
+			}
+		}
+		const executor = new AbortingExecutor();
+		const uploadFile = vi.fn(async (_upload: BotUpload) => {});
+		const tool = createAttachTool(executor, [skillRoot], uploadFile);
+
+		await expect(
+			tool.execute(
+				"attach",
+				{ label: "Share exercise image", path: `${skillRoot}/assets/press.jpg` },
+				controller.signal,
+			),
+		).rejects.toThrow();
+		expect(uploadFile).not.toHaveBeenCalled();
+	});
 });

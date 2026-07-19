@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeishuEvent, FeishuUserLifecycleEvent } from "../src/feishu.js";
-import { GROUP_PRIVACY_REDIRECT, PrivateCoachService } from "../src/private-coach-service.js";
+import {
+	GROUP_PRIVACY_REDIRECT,
+	PRIVATE_COACH_ACTIVATION_PROMPT,
+	PrivateCoachService,
+} from "../src/private-coach-service.js";
 import { FileCoachRelationshipStore } from "../src/relationships.js";
 import { resolveCoachSessionScope, resolveCoachUserScope } from "../src/runtime/coach-scope.js";
 
@@ -21,11 +25,20 @@ function message(text: string, chatType: "p2p" | "group" = "p2p"): FeishuEvent {
 
 const joined: FeishuUserLifecycleEvent = { type: "joined", tenantKey: "tenant_a", openId: "ou_user_a" };
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve: () => void = () => undefined;
+	const promise = new Promise<void>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 describe("PrivateCoachService", () => {
 	let workspaceDir: string;
 	let directMessages: string[];
 	let replies: string[];
 	let runCoach: ReturnType<typeof vi.fn>;
+	let abortUserRuns: ReturnType<typeof vi.fn>;
 	let service: PrivateCoachService;
 	let relationships: FileCoachRelationshipStore;
 
@@ -34,6 +47,7 @@ describe("PrivateCoachService", () => {
 		directMessages = [];
 		replies = [];
 		runCoach = vi.fn(async () => undefined);
+		abortUserRuns = vi.fn();
 		relationships = new FileCoachRelationshipStore();
 		service = new PrivateCoachService({
 			relationships,
@@ -47,6 +61,7 @@ describe("PrivateCoachService", () => {
 				},
 			},
 			runCoach,
+			abortUserRuns,
 			resolveUserScope: (event) => resolveCoachUserScope(workspaceDir, event),
 			resolveSessionScope: (event) =>
 				resolveCoachSessionScope(workspaceDir, {
@@ -61,8 +76,8 @@ describe("PrivateCoachService", () => {
 	afterEach(() => rmSync(workspaceDir, { recursive: true, force: true }));
 
 	it("sends exactly one invitation for duplicate employee events", async () => {
-		expect((await service.handleUserJoined(joined)).status).toBe("invited");
-		expect((await service.handleUserJoined(joined)).status).toBe("skipped");
+		const results = await Promise.all([service.handleUserJoined(joined), service.handleUserJoined(joined)]);
+		expect(results.map((result) => result.status).sort()).toEqual(["invited", "skipped"]);
 		expect(directMessages).toHaveLength(1);
 		const relationship = await relationships.load(resolveCoachUserScope(workspaceDir, joined));
 		expect(relationship).toMatchObject({ status: "invited", inviteState: "sent", inviteMessageId: "om_invitation" });
@@ -77,24 +92,106 @@ describe("PrivateCoachService", () => {
 		expect(runCoach).not.toHaveBeenCalled();
 	});
 
-	it("activates from private chat and only then runs the coach", async () => {
+	it("shows the memory policy before accepting a first-message activation", async () => {
+		await service.handleMessage(message("开始"));
+		const invited = await relationships.load(resolveCoachUserScope(workspaceDir, joined));
+		expect(invited).toMatchObject({ status: "invited", inviteState: "sent" });
+		expect(invited?.memoryPolicyVersion).toBeUndefined();
+		expect(replies).toEqual([PRIVATE_COACH_ACTIVATION_PROMPT]);
+		expect(runCoach).not.toHaveBeenCalled();
+
 		await service.handleMessage(message("开始"));
 		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("active");
-		expect(runCoach).not.toHaveBeenCalled();
 
 		await service.handleMessage(message("我的目标是增肌"));
 		expect(runCoach).toHaveBeenCalledOnce();
 	});
 
-	it("declines and revokes without invoking the coach", async () => {
+	it("allows opt-in after declining and lets an active user withdraw", async () => {
+		await service.handleMessage(message("你好"));
 		await service.handleMessage(message("暂不"));
 		await service.handleMessage(message("帮我读取计划"));
 		expect(runCoach).not.toHaveBeenCalled();
 
-		await service.handleUserLeft({ ...joined, type: "left" });
+		await service.handleMessage(message("开始"));
+		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("active");
+		await service.handleMessage(message("停用"));
+		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("declined");
+		expect(runCoach).not.toHaveBeenCalled();
+		expect(abortUserRuns).toHaveBeenCalledOnce();
+	});
+
+	it("persists an active user's withdrawal and aborts the current run immediately", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		const started = deferred();
+		let statusAtAbort: string | undefined;
+		runCoach.mockImplementationOnce(async (_event, scope, signal: AbortSignal) => {
+			started.resolve();
+			await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+			statusAtAbort = (await relationships.load(scope))?.status;
+		});
+
+		const running = service.handleMessage(message("开始今天的训练"));
+		await started.promise;
+		const withdrawing = service.handleMessage(message("停用"));
+
+		await Promise.all([running, withdrawing]);
+		expect(statusAtAbort).toBe("declined");
+		expect(abortUserRuns).toHaveBeenCalledOnce();
+		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("declined");
+	});
+
+	it("persists revocation and aborts an in-flight coach run", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		const started = deferred();
+		let didObserveAbort = false;
+		runCoach.mockImplementationOnce(async (_event, _scope, signal: AbortSignal) => {
+			started.resolve();
+			await new Promise<void>((resolve) => {
+				if (signal.aborted) resolve();
+				else signal.addEventListener("abort", () => resolve(), { once: true });
+			});
+			didObserveAbort = true;
+		});
+
+		const running = service.handleMessage(message("开始今天的训练"));
+		await started.promise;
+		const repliesBeforeRevocation = [...replies];
+		const queued = service.handleMessage(message("读取我的计划"));
+		abortUserRuns.mockImplementationOnce(async (scope) => {
+			expect((await relationships.load(scope))?.status).toBe("revoked");
+		});
+		const leaving = service.handleUserLeft({ ...joined, type: "left" });
+
+		await leaving;
+		await Promise.all([running, queued]);
+		expect(abortUserRuns).toHaveBeenCalledOnce();
+		expect(didObserveAbort).toBe(true);
+		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("revoked");
 		await service.handleMessage(message("开始"));
 		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("revoked");
+		expect(runCoach).toHaveBeenCalledOnce();
+		expect(replies).toEqual(repliesBeforeRevocation);
+	});
+
+	it("re-invites a revoked user without restoring access before consent", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		await service.handleUserLeft({ ...joined, type: "left" });
+
+		expect((await service.handleUserJoined(joined)).status).toBe("invited");
+		expect((await service.handleUserJoined(joined)).status).toBe("skipped");
+		expect(directMessages).toHaveLength(1);
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			status: "invited",
+			inviteState: "sent",
+		});
 		expect(runCoach).not.toHaveBeenCalled();
+
+		await service.handleMessage(message("开始"));
+		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("active");
 	});
 
 	it("redirects group messages without loading relationships or running the coach", async () => {
