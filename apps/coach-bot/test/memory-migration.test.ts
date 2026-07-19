@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type MemoryMigrationManifest, migrateCoachMemory } from "../src/memory-migration.js";
+
+const canCreateDirectoryLinks = detectDirectoryLinkSupport();
 
 describe("coach memory migration", () => {
 	let workspaceDir: string;
@@ -53,6 +55,68 @@ describe("coach memory migration", () => {
 		expect(existsSync(join(workspaceDir, "oc_private_a", "context.jsonl"))).toBe(true);
 	});
 
+	it("preflights every source before writing any destination", async () => {
+		writeFileSync(
+			join(workspaceDir, "oc_private_a", "sport-data", "bodybuilding", "z-invalid.json"),
+			"not json",
+			"utf-8",
+		);
+
+		await expect(migrateCoachMemory({ workspaceDir, manifest, apply: true })).rejects.toThrow(/Invalid JSON/);
+
+		expect(existsSync(join(workspaceDir, "tenants"))).toBe(false);
+	});
+
+	it("accumulates repeated destinations in dry-run exactly as apply does", async () => {
+		const secondSourceDir = join(workspaceDir, "oc_private_b");
+		mkdirSync(join(secondSourceDir, "sport-data", "bodybuilding"), { recursive: true });
+		writeFileSync(
+			join(secondSourceDir, "context.jsonl"),
+			`${JSON.stringify({ type: "message", id: "first" })}\n${JSON.stringify({ type: "message", id: "third" })}\n`,
+			"utf-8",
+		);
+		writeFileSync(
+			join(secondSourceDir, "sport-data", "bodybuilding", "training_log.json"),
+			JSON.stringify([{ exercise: "deadlift", sets: 3, reps: 3 }]),
+			"utf-8",
+		);
+		const repeatedDestinationManifest: MemoryMigrationManifest = {
+			version: 1,
+			sessions: [
+				...manifest.sessions,
+				{
+					chatId: "oc_private_a",
+					tenantKey: "tenant_a",
+					openId: "ou_user_a",
+					kind: "dm",
+					legacyPath: "oc_private_b",
+				},
+			],
+		};
+
+		const dryRun = await migrateCoachMemory({ workspaceDir, manifest: repeatedDestinationManifest });
+		const apply = await migrateCoachMemory({ workspaceDir, manifest: repeatedDestinationManifest, apply: true });
+
+		expect(dryRun.operations).toEqual(apply.operations);
+		expect(dryRun.operations.filter((operation) => operation.type === "session")[1]).toMatchObject({
+			action: "merge",
+			itemCount: 3,
+		});
+		expect(dryRun.operations.filter((operation) => operation.type === "sport_data")[1]).toMatchObject({
+			action: "merge",
+			itemCount: 2,
+		});
+		const userDir = join(workspaceDir, "tenants", "tenant_a", "users", "ou_user_a");
+		expect(
+			readFileSync(join(userDir, "sessions", "oc_private_a", "context.jsonl"), "utf-8")
+				.trim()
+				.split("\n"),
+		).toHaveLength(3);
+		expect(
+			JSON.parse(readFileSync(join(userDir, "sport-data", "bodybuilding", "training_log.json"), "utf-8")),
+		).toHaveLength(2);
+	});
+
 	it("archives group history and skips unconfirmed personal data", async () => {
 		const groupDir = join(workspaceDir, "oc_group_a", "ou_user_a");
 		mkdirSync(join(groupDir, "sport-data", "bodybuilding"), { recursive: true });
@@ -97,8 +161,51 @@ describe("coach memory migration", () => {
 		writeFileSync(destinationProfile, '{"goal":"hypertrophy"}');
 
 		await expect(migrateCoachMemory({ workspaceDir, manifest, apply: true })).rejects.toThrow(/--conflict/);
-		await migrateCoachMemory({ workspaceDir, manifest, apply: true, conflictStrategy: "legacy" });
+		expect(
+			existsSync(
+				join(
+					workspaceDir,
+					"tenants",
+					"tenant_a",
+					"users",
+					"ou_user_a",
+					"sessions",
+					"oc_private_a",
+					"context.jsonl",
+				),
+			),
+		).toBe(false);
+		const report = await migrateCoachMemory({ workspaceDir, manifest, apply: true, conflictStrategy: "legacy" });
 		expect(JSON.parse(readFileSync(destinationProfile, "utf-8"))).toEqual({ goal: "strength" });
+		expect(report.operations.find((operation) => operation.source === sourceProfile)?.action).toBe("replace");
+	});
+
+	it("detects conflicts between sources sharing a virtual destination", async () => {
+		writeFileSync(
+			join(workspaceDir, "oc_private_a", "sport-data", "bodybuilding", "user_profile.json"),
+			'{"goal":"strength"}',
+		);
+		const secondSourceDir = join(workspaceDir, "oc_private_b", "sport-data", "bodybuilding");
+		mkdirSync(secondSourceDir, { recursive: true });
+		writeFileSync(join(secondSourceDir, "user_profile.json"), '{"goal":"hypertrophy"}');
+		const conflictingManifest: MemoryMigrationManifest = {
+			version: 1,
+			sessions: [
+				...manifest.sessions,
+				{
+					chatId: "oc_private_b",
+					tenantKey: "tenant_a",
+					openId: "ou_user_a",
+					kind: "dm",
+				},
+			],
+		};
+
+		await expect(migrateCoachMemory({ workspaceDir, manifest: conflictingManifest })).rejects.toThrow(/--conflict/);
+		await expect(migrateCoachMemory({ workspaceDir, manifest: conflictingManifest, apply: true })).rejects.toThrow(
+			/--conflict/,
+		);
+		expect(existsSync(join(workspaceDir, "tenants"))).toBe(false);
 	});
 
 	it("maps legacy fitness-data namespaces and prefers canonical sport-data sources", async () => {
@@ -152,4 +259,132 @@ describe("coach memory migration", () => {
 
 		await expect(migrateCoachMemory({ workspaceDir, manifest: unsafeManifest })).rejects.toThrow(/multiple users/);
 	});
+
+	it.skipIf(!canCreateDirectoryLinks)("rejects a legacy source symlink that escapes the workspace", async () => {
+		const outsideDir = mkdtempSync(join(tmpdir(), "fitclaw-migration-outside-"));
+		try {
+			writeFileSync(join(outsideDir, "context.jsonl"), `${JSON.stringify({ type: "message", id: "outside" })}\n`);
+			const linkedSource = join(workspaceDir, "oc_external_alias");
+			createDirectoryLink(outsideDir, linkedSource);
+			const unsafeManifest: MemoryMigrationManifest = {
+				version: 1,
+				sessions: [
+					{
+						chatId: "oc_external_alias",
+						tenantKey: "tenant_a",
+						openId: "ou_user_a",
+						kind: "dm",
+					},
+				],
+			};
+
+			await expect(migrateCoachMemory({ workspaceDir, manifest: unsafeManifest })).rejects.toThrow(/symbolic link/);
+		} finally {
+			rmSync(outsideDir, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(!canCreateDirectoryLinks)("detects aliases of one real source mapped to multiple users", async () => {
+		createDirectoryLink(join(workspaceDir, "oc_private_a"), join(workspaceDir, "oc_private_alias"));
+		const unsafeManifest: MemoryMigrationManifest = {
+			version: 1,
+			sessions: [
+				...manifest.sessions,
+				{
+					chatId: "oc_private_alias",
+					tenantKey: "tenant_a",
+					openId: "ou_user_b",
+					kind: "dm",
+				},
+			],
+		};
+
+		await expect(migrateCoachMemory({ workspaceDir, manifest: unsafeManifest })).rejects.toThrow(/multiple users/);
+	});
+
+	it.skipIf(!canCreateDirectoryLinks)(
+		"rejects internal source symlinks instead of silently omitting data",
+		async () => {
+			const linkedDataDir = join(workspaceDir, "oc_private_a", "linked-sport-data");
+			mkdirSync(linkedDataDir);
+			writeFileSync(join(linkedDataDir, "linked.json"), '[{"exercise":"row"}]');
+			createDirectoryLink(linkedDataDir, join(workspaceDir, "oc_private_a", "sport-data", "bodybuilding", "linked"));
+
+			await expect(migrateCoachMemory({ workspaceDir, manifest, apply: true })).rejects.toThrow(
+				/source symbolic links are not supported/,
+			);
+			expect(existsSync(join(workspaceDir, "tenants"))).toBe(false);
+		},
+	);
+
+	it.skipIf(!canCreateDirectoryLinks)(
+		"rejects an escaping destination parent symlink before applying earlier operations",
+		async () => {
+			const outsideDir = mkdtempSync(join(tmpdir(), "fitclaw-migration-destination-outside-"));
+			const groupDir = join(workspaceDir, "oc_group_destination");
+			mkdirSync(join(groupDir, "sport-data", "bodybuilding"), { recursive: true });
+			writeFileSync(join(groupDir, "context.jsonl"), `${JSON.stringify({ type: "message", id: "group" })}\n`);
+			writeFileSync(join(groupDir, "sport-data", "bodybuilding", "user_profile.json"), '{"goal":"strength"}');
+			createDirectoryLink(outsideDir, join(workspaceDir, "tenants"));
+			const groupManifest: MemoryMigrationManifest = {
+				version: 1,
+				sessions: [
+					{
+						chatId: "oc_group_destination",
+						tenantKey: "tenant_a",
+						openId: "ou_user_a",
+						kind: "group",
+						confirmedPersonalData: true,
+					},
+				],
+			};
+
+			try {
+				await expect(migrateCoachMemory({ workspaceDir, manifest: groupManifest, apply: true })).rejects.toThrow(
+					/destination symbolic links are not supported/,
+				);
+				expect(existsSync(join(workspaceDir, "migration-archive"))).toBe(false);
+				expect(existsSync(join(outsideDir, "tenant_a"))).toBe(false);
+			} finally {
+				rmSync(join(workspaceDir, "tenants"), { recursive: true, force: true });
+				rmSync(outsideDir, { recursive: true, force: true });
+			}
+		},
+	);
+
+	it.skipIf(!canCreateDirectoryLinks)("rejects a destination link into another user's directory", async () => {
+		const usersDir = join(workspaceDir, "tenants", "tenant_a", "users");
+		const otherUserDir = join(usersDir, "ou_user_b");
+		mkdirSync(otherUserDir, { recursive: true });
+		createDirectoryLink(otherUserDir, join(usersDir, "ou_user_a"));
+
+		await expect(migrateCoachMemory({ workspaceDir, manifest, apply: true })).rejects.toThrow(
+			/destination symbolic links are not supported/,
+		);
+		expect(existsSync(join(otherUserDir, "sessions"))).toBe(false);
+		expect(existsSync(join(otherUserDir, "sport-data"))).toBe(false);
+	});
 });
+
+function detectDirectoryLinkSupport(): boolean {
+	const probeDir = mkdtempSync(join(tmpdir(), "fitclaw-link-probe-"));
+	try {
+		const targetDir = join(probeDir, "target");
+		mkdirSync(targetDir);
+		createDirectoryLink(targetDir, join(probeDir, "link"));
+		return true;
+	} catch (error) {
+		if (isNodeError(error) && ["EACCES", "EPERM", "ENOTSUP"].includes(error.code ?? "")) return false;
+		throw error;
+	} finally {
+		rmSync(probeDir, { recursive: true, force: true });
+	}
+}
+
+function createDirectoryLink(target: string, path: string): void {
+	symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
+}

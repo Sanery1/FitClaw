@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveCoachSessionScope } from "./runtime/coach-scope.js";
 
 export interface MemoryMigrationEntry {
@@ -29,7 +28,7 @@ export interface MemoryMigrationOperation {
 	type: "session" | "group_archive" | "sport_data";
 	source: string;
 	destination: string;
-	action: "copy" | "merge" | "skip";
+	action: "copy" | "merge" | "replace" | "skip";
 	itemCount: number;
 	hash: string;
 }
@@ -42,60 +41,98 @@ export interface MemoryMigrationReport {
 	warnings: string[];
 }
 
+interface PlannedMigration {
+	operation: MemoryMigrationOperation;
+	content: string;
+}
+
 export async function migrateCoachMemory(options: MemoryMigrationOptions): Promise<MemoryMigrationReport> {
-	const workspaceDir = resolve(options.workspaceDir);
+	const workspaceDir = await resolveCanonicalWorkspace(options.workspaceDir);
 	const manifest = validateManifest(options.manifest);
 	const startedAt = new Date().toISOString();
 	const operations: MemoryMigrationOperation[] = [];
 	const warnings: string[] = [];
 	const resolvedSourceOwners = new Map<string, string>();
+	const virtualDestinations = new Map<string, string>();
+	const plannedWrites = new Map<string, string>();
 
 	for (const entry of manifest.sessions) {
 		const scope = resolveCoachSessionScope(workspaceDir, entry);
-		const sourceDir = resolveLegacyPath(workspaceDir, entry.legacyPath ?? entry.chatId);
-		const existingOwner = resolvedSourceOwners.get(sourceDir);
-		if (existingOwner && existingOwner !== scope.userKey) {
-			throw new Error(`Legacy path ${relative(workspaceDir, sourceDir)} is mapped to multiple users`);
-		}
-		resolvedSourceOwners.set(sourceDir, scope.userKey);
-		if (!existsSync(sourceDir)) {
-			warnings.push(`Legacy session not found: ${relative(workspaceDir, sourceDir)}`);
+		const requestedSourceDir = resolveLegacyPath(workspaceDir, entry.legacyPath ?? entry.chatId);
+		const sourceDir = await resolveExistingLegacySource(workspaceDir, requestedSourceDir);
+		if (!sourceDir) {
+			warnings.push(`Legacy session not found: ${relative(workspaceDir, requestedSourceDir)}`);
 			continue;
 		}
+		const existingOwner = resolvedSourceOwners.get(sourceDir);
+		if (existingOwner && existingOwner !== scope.userKey) {
+			throw new Error(
+				`Legacy path ${relative(workspaceDir, requestedSourceDir)} resolves to a source mapped to multiple users`,
+			);
+		}
+		resolvedSourceOwners.set(sourceDir, scope.userKey);
 
-		const sourceContext = join(sourceDir, "context.jsonl");
-		if (existsSync(sourceContext)) {
+		const sourceContext = await resolveExistingSourceEntry(
+			workspaceDir,
+			sourceDir,
+			join(sourceDir, "context.jsonl"),
+			"file",
+		);
+		if (sourceContext) {
 			const destinationContext =
 				entry.kind === "dm"
 					? join(scope.sessionDir, "context.jsonl")
 					: join(workspaceDir, "migration-archive", "groups", entry.chatId, entry.openId, "context.jsonl");
-			operations.push(
-				await migrateJsonLines(
+			recordPlannedMigration(
+				await planJsonLines(
+					workspaceDir,
 					sourceContext,
 					destinationContext,
 					entry.kind === "dm" ? "session" : "group_archive",
-					options.apply === true,
+					virtualDestinations,
 				),
+				operations,
+				virtualDestinations,
+				plannedWrites,
 			);
 		}
 
-		const sourceSportData = join(sourceDir, "sport-data");
-		if (existsSync(sourceSportData)) {
+		const sourceSportData = await resolveExistingSourceEntry(
+			workspaceDir,
+			sourceDir,
+			join(sourceDir, "sport-data"),
+			"directory",
+		);
+		if (sourceSportData) {
 			if (entry.kind === "group" && entry.confirmedPersonalData !== true) {
 				warnings.push(`Skipped unconfirmed group sport data: ${relative(workspaceDir, sourceSportData)}`);
 				continue;
 			}
-			for (const sourceFile of await collectJsonFiles(sourceSportData)) {
+			for (const sourceFile of await collectJsonFiles(sourceSportData, workspaceDir)) {
 				const relativeFile = relative(sourceSportData, sourceFile);
 				const destinationFile = join(scope.userDataDir, "sport-data", relativeFile);
-				operations.push(
-					await migrateJsonFile(sourceFile, destinationFile, options.apply === true, options.conflictStrategy),
+				recordPlannedMigration(
+					await planJsonFile(
+						workspaceDir,
+						sourceFile,
+						destinationFile,
+						virtualDestinations,
+						options.conflictStrategy,
+					),
+					operations,
+					virtualDestinations,
+					plannedWrites,
 				);
 			}
 		}
 
-		const legacyFitnessData = join(sourceDir, "fitness-data.json");
-		if (existsSync(legacyFitnessData)) {
+		const legacyFitnessData = await resolveExistingSourceEntry(
+			workspaceDir,
+			sourceDir,
+			join(sourceDir, "fitness-data.json"),
+			"file",
+		);
+		if (legacyFitnessData) {
 			if (entry.kind === "group" && entry.confirmedPersonalData !== true) {
 				warnings.push(`Skipped unconfirmed group fitness data: ${relative(workspaceDir, legacyFitnessData)}`);
 				continue;
@@ -104,25 +141,38 @@ export async function migrateCoachMemory(options: MemoryMigrationOptions): Promi
 			if (!isRecord(legacyData)) throw new Error(`Legacy fitness data must be an object: ${legacyFitnessData}`);
 			const legacyNamespaces = getLegacyFitnessNamespaces(legacyData);
 			for (const [namespace, data] of legacyNamespaces) {
-				const canonicalSource = join(sourceSportData, "bodybuilding", `${namespace}.json`);
-				if (existsSync(canonicalSource)) {
+				const canonicalSource = sourceSportData
+					? await resolveExistingSourceEntry(
+							workspaceDir,
+							sourceDir,
+							join(sourceSportData, "bodybuilding", `${namespace}.json`),
+							"file",
+						)
+					: null;
+				if (canonicalSource) {
 					warnings.push(
 						`Skipped fitness-data.json#${namespace} because canonical sport-data exists: ${relative(workspaceDir, canonicalSource)}`,
 					);
 					continue;
 				}
-				operations.push(
-					await migrateJsonData(
+				recordPlannedMigration(
+					await planJsonData(
+						workspaceDir,
 						data,
 						`${legacyFitnessData}#${namespace}`,
 						join(scope.userDataDir, "sport-data", "bodybuilding", `${namespace}.json`),
-						options.apply === true,
+						virtualDestinations,
 						options.conflictStrategy,
 					),
+					operations,
+					virtualDestinations,
+					plannedWrites,
 				);
 			}
 		}
 	}
+
+	if (options.apply === true) await applyPlannedWrites(workspaceDir, plannedWrites);
 
 	return {
 		mode: options.apply === true ? "apply" : "dry-run",
@@ -181,16 +231,16 @@ export async function runMemoryMigrationCli(args: string[]): Promise<void> {
 	process.stdout.write(output);
 }
 
-async function migrateJsonLines(
+async function planJsonLines(
+	workspaceDir: string,
 	source: string,
 	destination: string,
 	type: "session" | "group_archive",
-	apply: boolean,
-): Promise<MemoryMigrationOperation> {
+	virtualDestinations: ReadonlyMap<string, string>,
+): Promise<PlannedMigration> {
 	const sourceItems = parseJsonLines(await readFile(source, "utf-8"), source);
-	const destinationItems = existsSync(destination)
-		? parseJsonLines(await readFile(destination, "utf-8"), destination)
-		: [];
+	const destinationSnapshot = await readDestinationSnapshot(workspaceDir, destination, virtualDestinations);
+	const destinationItems = destinationSnapshot.exists ? parseJsonLines(destinationSnapshot.content, destination) : [];
 	const seen = new Set(destinationItems.map(canonicalJson));
 	const additions = sourceItems.filter((item) => {
 		const key = canonicalJson(item);
@@ -201,36 +251,37 @@ async function migrateJsonLines(
 	const merged = [...destinationItems, ...additions];
 	const content = merged.map((item) => JSON.stringify(item)).join("\n") + (merged.length > 0 ? "\n" : "");
 	const action = destinationItems.length === 0 ? "copy" : additions.length === 0 ? "skip" : "merge";
-	if (apply && action !== "skip") {
-		await atomicWrite(destination, content);
-		await verifyWrittenContent(destination, content);
-	}
-	return { type, source, destination, action, itemCount: merged.length, hash: sha256(content) };
+	return {
+		operation: { type, source, destination, action, itemCount: merged.length, hash: sha256(content) },
+		content,
+	};
 }
 
-async function migrateJsonFile(
+async function planJsonFile(
+	workspaceDir: string,
 	source: string,
 	destination: string,
-	apply: boolean,
+	virtualDestinations: ReadonlyMap<string, string>,
 	conflictStrategy?: "legacy" | "destination",
-): Promise<MemoryMigrationOperation> {
+): Promise<PlannedMigration> {
 	const sourceData = parseJson(await readFile(source, "utf-8"), source);
-	return migrateJsonData(sourceData, source, destination, apply, conflictStrategy);
+	return planJsonData(workspaceDir, sourceData, source, destination, virtualDestinations, conflictStrategy);
 }
 
-async function migrateJsonData(
+async function planJsonData(
+	workspaceDir: string,
 	sourceData: unknown,
 	source: string,
 	destination: string,
-	apply: boolean,
+	virtualDestinations: ReadonlyMap<string, string>,
 	conflictStrategy?: "legacy" | "destination",
-): Promise<MemoryMigrationOperation> {
-	const hasDestination = existsSync(destination);
-	const destinationData = hasDestination ? parseJson(await readFile(destination, "utf-8"), destination) : undefined;
+): Promise<PlannedMigration> {
+	const destinationSnapshot = await readDestinationSnapshot(workspaceDir, destination, virtualDestinations);
+	const destinationData = destinationSnapshot.exists ? parseJson(destinationSnapshot.content, destination) : undefined;
 	let merged = sourceData;
 	let action: MemoryMigrationOperation["action"] = "copy";
 
-	if (hasDestination) {
+	if (destinationSnapshot.exists) {
 		if (Array.isArray(sourceData) && Array.isArray(destinationData)) {
 			const seen = new Set(destinationData.map(canonicalJson));
 			merged = [
@@ -248,7 +299,7 @@ async function migrateJsonData(
 			action = "skip";
 		} else if (conflictStrategy === "legacy") {
 			merged = sourceData;
-			action = "merge";
+			action = "replace";
 		} else if (conflictStrategy === "destination") {
 			merged = destinationData;
 			action = "skip";
@@ -258,18 +309,60 @@ async function migrateJsonData(
 	}
 
 	const content = `${JSON.stringify(merged, null, 2)}\n`;
-	if (apply && action !== "skip") {
-		await atomicWrite(destination, content);
-		await verifyWrittenContent(destination, content);
-	}
 	return {
-		type: "sport_data",
-		source,
-		destination,
-		action,
-		itemCount: Array.isArray(merged) ? merged.length : 1,
-		hash: sha256(content),
+		operation: {
+			type: "sport_data",
+			source,
+			destination,
+			action,
+			itemCount: Array.isArray(merged) ? merged.length : 1,
+			hash: sha256(content),
+		},
+		content,
 	};
+}
+
+function recordPlannedMigration(
+	plan: PlannedMigration,
+	operations: MemoryMigrationOperation[],
+	virtualDestinations: Map<string, string>,
+	plannedWrites: Map<string, string>,
+): void {
+	operations.push(plan.operation);
+	virtualDestinations.set(plan.operation.destination, plan.content);
+	if (plan.operation.action !== "skip") plannedWrites.set(plan.operation.destination, plan.content);
+}
+
+async function readDestinationSnapshot(
+	workspaceDir: string,
+	destination: string,
+	virtualDestinations: ReadonlyMap<string, string>,
+): Promise<{ exists: boolean; content: string }> {
+	const existsOnDisk = await assertSafeDestinationPath(workspaceDir, destination);
+	const virtualContent = virtualDestinations.get(destination);
+	if (virtualContent !== undefined) return { exists: true, content: virtualContent };
+	if (!existsOnDisk) return { exists: false, content: "" };
+	return { exists: true, content: await readFile(destination, "utf-8") };
+}
+
+async function applyPlannedWrites(workspaceDir: string, plannedWrites: ReadonlyMap<string, string>): Promise<void> {
+	for (const destination of plannedWrites.keys()) await assertSafeDestinationPath(workspaceDir, destination);
+	for (const [destination, content] of plannedWrites) {
+		await atomicWriteMigrationDestination(workspaceDir, destination, content);
+	}
+}
+
+async function atomicWriteMigrationDestination(
+	workspaceDir: string,
+	destination: string,
+	content: string,
+): Promise<void> {
+	await assertSafeDestinationPath(workspaceDir, destination);
+	await mkdir(dirname(destination), { recursive: true });
+	await assertSafeDestinationPath(workspaceDir, destination);
+	await atomicWrite(destination, content);
+	await assertSafeDestinationPath(workspaceDir, destination);
+	await verifyWrittenContent(destination, content);
 }
 
 function getLegacyFitnessNamespaces(data: Record<string, unknown>): Map<string, unknown> {
@@ -288,12 +381,15 @@ function getLegacyFitnessNamespaces(data: Record<string, unknown>): Map<string, 
 	return namespaces;
 }
 
-async function collectJsonFiles(dir: string): Promise<string[]> {
+async function collectJsonFiles(dir: string, workspaceDir: string): Promise<string[]> {
 	const entries = await readdir(dir, { withFileTypes: true });
 	const files: string[] = [];
 	for (const entry of entries) {
 		const path = join(dir, entry.name);
-		if (entry.isDirectory()) files.push(...(await collectJsonFiles(path)));
+		if (entry.isSymbolicLink()) {
+			throw new Error(`Legacy source symbolic links are not supported: ${relative(workspaceDir, path)}`);
+		}
+		if (entry.isDirectory()) files.push(...(await collectJsonFiles(path, workspaceDir)));
 		else if (entry.isFile() && entry.name.endsWith(".json")) files.push(path);
 	}
 	return files.sort();
@@ -343,10 +439,117 @@ function resolveLegacyPath(workspaceDir: string, path: string): string {
 	if (!path || isAbsolute(path)) throw new Error(`Legacy path must be relative: ${path}`);
 	const resolved = resolve(workspaceDir, path);
 	const relativePath = relative(workspaceDir, resolved);
-	if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+	if (!relativePath || isOutsidePath(relativePath)) {
 		throw new Error(`Legacy path escapes the workspace: ${path}`);
 	}
 	return resolved;
+}
+
+async function resolveCanonicalWorkspace(path: string): Promise<string> {
+	const resolved = resolve(path);
+	let canonicalPath: string;
+	try {
+		canonicalPath = await realpath(resolved);
+	} catch (error) {
+		if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+			throw new Error(`Migration workspace does not exist: ${resolved}`);
+		}
+		throw error;
+	}
+	if (!(await stat(canonicalPath)).isDirectory()) {
+		throw new Error(`Migration workspace is not a directory: ${resolved}`);
+	}
+	return canonicalPath;
+}
+
+async function resolveExistingLegacySource(workspaceDir: string, requestedPath: string): Promise<string | null> {
+	const canonicalPath = await realpathIfExists(requestedPath);
+	if (!canonicalPath) return null;
+	if (!isPathInside(canonicalPath, workspaceDir)) {
+		throw new Error(
+			`Legacy path escapes the workspace through a symbolic link: ${relative(workspaceDir, requestedPath)}`,
+		);
+	}
+	if (!(await stat(canonicalPath)).isDirectory()) {
+		throw new Error(`Legacy path is not a directory: ${relative(workspaceDir, requestedPath)}`);
+	}
+	return canonicalPath;
+}
+
+async function resolveExistingSourceEntry(
+	workspaceDir: string,
+	sourceDir: string,
+	path: string,
+	expectedType: "file" | "directory",
+): Promise<string | null> {
+	const canonicalPath = await realpathIfExists(path);
+	if (!canonicalPath) return null;
+	assertSourcePathInsideBoundaries(workspaceDir, sourceDir, path, canonicalPath);
+	const pathStat = await stat(canonicalPath);
+	const hasExpectedType = expectedType === "file" ? pathStat.isFile() : pathStat.isDirectory();
+	if (!hasExpectedType) throw new Error(`Legacy source ${path} is not a ${expectedType}`);
+	return canonicalPath;
+}
+
+function assertSourcePathInsideBoundaries(
+	workspaceDir: string,
+	sourceDir: string,
+	requestedPath: string,
+	canonicalPath: string,
+): void {
+	if (!isPathInsideOrEqual(canonicalPath, workspaceDir) || !isPathInsideOrEqual(canonicalPath, sourceDir)) {
+		throw new Error(`Legacy source path escapes its workspace through a symbolic link: ${requestedPath}`);
+	}
+}
+
+async function assertSafeDestinationPath(workspaceDir: string, destination: string): Promise<boolean> {
+	const resolvedDestination = resolve(destination);
+	if (!isPathInside(resolvedDestination, workspaceDir)) {
+		throw new Error(`Migration destination escapes the workspace: ${destination}`);
+	}
+
+	const relativeDestination = relative(workspaceDir, resolvedDestination);
+	const parts = relativeDestination.split(sep);
+	let candidate = workspaceDir;
+	for (let index = 0; index < parts.length; index++) {
+		candidate = join(candidate, parts[index]);
+		try {
+			const candidateStat = await lstat(candidate);
+			if (candidateStat.isSymbolicLink()) {
+				throw new Error(`Migration destination symbolic links are not supported: ${relativeDestination}`);
+			}
+			if (index < parts.length - 1 && !candidateStat.isDirectory()) {
+				throw new Error(`Migration destination parent is not a directory: ${candidate}`);
+			}
+		} catch (error) {
+			if (isNodeError(error) && error.code === "ENOENT") return false;
+			throw error;
+		}
+	}
+	return true;
+}
+
+async function realpathIfExists(path: string): Promise<string | null> {
+	try {
+		return await realpath(path);
+	} catch (error) {
+		if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return null;
+		throw error;
+	}
+}
+
+function isPathInside(candidatePath: string, rootPath: string): boolean {
+	const relativePath = relative(rootPath, candidatePath);
+	return relativePath !== "" && !isOutsidePath(relativePath);
+}
+
+function isPathInsideOrEqual(candidatePath: string, rootPath: string): boolean {
+	const relativePath = relative(rootPath, candidatePath);
+	return relativePath === "" || !isOutsidePath(relativePath);
+}
+
+function isOutsidePath(relativePath: string): boolean {
+	return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath);
 }
 
 function parseJsonLines(content: string, path: string): unknown[] {
@@ -409,4 +612,8 @@ function requireValue(args: string[], index: number, flag: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
 }
