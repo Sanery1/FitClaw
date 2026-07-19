@@ -11,44 +11,44 @@ lives in `@fitclaw/coach-core`; Skill discovery and persisted namespaces live in
 
 ## Run
 
-Configure the existing Bot environment variables:
-
-The `MOM_*` prefix is retained as the current deployment contract. Application
-code and user-facing identity use FitClaw Coach terminology.
-DeepSeek V4 Pro is the current default selection, not a provider lock-in. The
-same fields can select another built-in model or register an API-compatible
-custom provider without changing Coach application code.
+Run deployment commands from the repository root. Docker is the recommended
+path:
 
 ```bash
+cp .env.example .env
+chmod 600 .env
+# Fill in the Feishu and model credentials. Never commit or share this file.
+docker compose up -d --build
+```
+
+The `MOM_*` prefix is retained as the Docker deployment contract. At startup,
+the container entrypoint writes `auth.json` and `models.json`; built-in models
+keep their catalog metadata, and unknown API-compatible provider/model pairs
+are registered from the same fields.
+
+For a local source run, install dependencies and build the workspace first.
+Built-in providers use their standard key environment variable; for DeepSeek
+that is `DEEPSEEK_API_KEY`. Custom provider registration requires Docker or an
+explicit `~/.fitclaw/agent/models.json` and `auth.json` configuration.
+
+```bash
+npm install
+npm run build --workspace @fitclaw/coach-bot
 export MOM_FEISHU_APP_ID=cli-xxxxxxxx
 export MOM_FEISHU_APP_SECRET=xxxxxxxx
 export MOM_FEISHU_BOT_NAME=FitClaw
 export MOM_LLM_PROVIDER=deepseek
 export MOM_LLM_MODEL=deepseek-v4-pro
-export MOM_LLM_API_KEY=sk-xxxxxxxx
-export MOM_LLM_BASE_URL=https://api.deepseek.com
-export MOM_LLM_API_TYPE=openai-completions
-
-fitclaw-coach ./data
+export DEEPSEEK_API_KEY=sk-xxxxxxxx
+npm exec --workspace @fitclaw/coach-bot -- fitclaw-coach ./data
 ```
 
-Docker remains the recommended deployment path:
-
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
-
-At startup, built-in models keep their catalog capabilities, pricing, context,
-and compatibility metadata. Unknown provider/model pairs are added to the
-runtime model registry with `MOM_LLM_API_KEY` referenced from the environment.
-Credentials, model metadata, and the active model selection remain separate
-runtime concerns even though `.env` is the deployment entry point.
-
-The Feishu application must subscribe to `im.message.receive_v1`,
-`contact.user.created_v3`, and `contact.user.deleted_v3`. It also needs message
-sending permission and an application availability scope containing the users
-who may receive an invitation.
+In the Feishu developer console, select long-connection event delivery and
+subscribe to `im.message.receive_v1`, `contact.user.created_v3`, and
+`contact.user.deleted_v3`. Grant the permissions used to receive and send
+messages, upload/download message resources, and receive those contact events.
+Publish the application version and include every intended user in the
+application availability scope; otherwise invitations or events will fail.
 
 Docker Compose runs Skill commands in a separate `fitclaw-skill-runner`
 container. The Runner has `network_mode: none`, a read-only workspace mount,
@@ -61,6 +61,9 @@ FitClaw is one enterprise Bot with a separate private coach relationship for
 each `tenant_key + open_id`. New employees receive one private invitation. The
 relationship becomes active only after the user replies `开始`; group mentions
 only receive a private-chat redirect and never enter the Coach Agent.
+An active user can send `停用` to withdraw access, then send `开始` later to
+consent again. Existing data is retained but remains inaccessible while the
+relationship is inactive.
 
 ```text
 tenants/{tenantKey}/users/{openId}/
@@ -76,7 +79,8 @@ a separate release-governance policy and are not performed automatically.
 ## Memory Migration
 
 Legacy private sessions require an administrator-provided mapping. The command
-is dry-run by default and copies rather than moves source files:
+is dry-run by default. It never changes or deletes source files, but apply mode
+can merge and atomically replace destination files:
 
 ```json
 {
@@ -101,15 +105,21 @@ is dry-run by default and copies rather than moves source files:
 ```
 
 ```bash
-# Report only
-fitclaw-coach migrate-memory ./data --mapping ./mapping.json
+# Build once before using the workspace command
+npm run build --workspace @fitclaw/coach-bot
 
-# Copy and verify data; object conflicts require an explicit source choice
-fitclaw-coach migrate-memory ./data --mapping ./mapping.json --apply --conflict destination
+# Report only; inspect the identity mapping and every warning
+npm exec --workspace @fitclaw/coach-bot -- fitclaw-coach migrate-memory ./data --mapping ./mapping.json
+
+# Back up the workspace and stop the Bot before apply. The migration does not
+# share a write lock with a running conversation session.
+docker compose stop fitclaw-bot
+npm exec --workspace @fitclaw/coach-bot -- fitclaw-coach migrate-memory ./data --mapping ./mapping.json --apply --conflict destination
+docker compose start fitclaw-bot
 
 # Preview existing employees, then explicitly send one invitation
-fitclaw-coach invite-existing ./data --mapping ./mapping.json
-fitclaw-coach invite-existing ./data --mapping ./mapping.json --send
+npm exec --workspace @fitclaw/coach-bot -- fitclaw-coach invite-existing ./data --mapping ./mapping.json
+npm exec --workspace @fitclaw/coach-bot -- fitclaw-coach invite-existing ./data --mapping ./mapping.json --send
 ```
 
 Group transcripts are archived under `migration-archive/groups` and are never
