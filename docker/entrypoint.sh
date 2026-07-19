@@ -25,20 +25,8 @@ JSON.stringify(
 )
 " > "$AGENT_DIR/auth.json"
 
-# Override the built-in provider transport without replacing its model metadata.
-node -p "
-JSON.stringify(
-  {
-    providers: {
-      [process.env.MOM_LLM_PROVIDER]: {
-        baseUrl: process.env.MOM_LLM_BASE_URL,
-        api: process.env.MOM_LLM_API_TYPE
-      }
-    }
-  },
-  null, 2
-)
-" > "$AGENT_DIR/models.json"
+# Preserve built-in metadata while still registering unknown providers/models.
+node /opt/fitclaw/node_modules/@fitclaw/coach-bot/dist/deployment-model-config-main.js > "$AGENT_DIR/models.json"
 
 echo "Config files generated: $AGENT_DIR/auth.json, $AGENT_DIR/models.json"
 echo "Bot starting..."

@@ -12,6 +12,9 @@ Configure the existing Bot environment variables:
 
 The `MOM_*` prefix is retained as the current deployment contract. Application
 code and user-facing identity use FitClaw Coach terminology.
+DeepSeek V4 Pro is the current default selection, not a provider lock-in. The
+same fields can select another built-in model or register an API-compatible
+custom provider without changing Coach application code.
 
 ```bash
 export MOM_FEISHU_APP_ID=cli-xxxxxxxx
@@ -32,6 +35,12 @@ Docker remains the recommended deployment path:
 cp .env.example .env
 docker compose up -d --build
 ```
+
+At startup, built-in models keep their catalog capabilities, pricing, context,
+and compatibility metadata. Unknown provider/model pairs are added to the
+runtime model registry with `MOM_LLM_API_KEY` referenced from the environment.
+Credentials, model metadata, and the active model selection remain separate
+runtime concerns even though `.env` is the deployment entry point.
 
 Docker Compose runs Skill commands in a separate `fitclaw-skill-runner`
 container. The Runner has `network_mode: none`, a read-only workspace mount,
