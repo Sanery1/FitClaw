@@ -1,5 +1,7 @@
 # FitClaw Coach Bot
 
+[简体中文](./README.zh-CN.md) | English
+
 The primary FitClaw application: a Feishu-first personal AI fitness coach.
 
 The app owns Feishu transport, card rendering, private user relationships,
