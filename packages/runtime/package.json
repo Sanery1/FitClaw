@@ -3,6 +3,9 @@
 	"version": "0.70.5",
 	"description": "Shared Skill discovery, persistence, and runtime primitives for FitClaw applications",
 	"type": "module",
+	"bin": {
+		"fitclaw-data": "dist/cli/fitclaw-data.js"
+	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
@@ -33,7 +36,7 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
-		"build": "tsgo -p tsconfig.build.json",
+		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli/fitclaw-data.js",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"

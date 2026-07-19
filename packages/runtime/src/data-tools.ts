@@ -57,6 +57,18 @@ interface SchemaIssue {
 	message: string;
 }
 
+class AppendSchemaValidationError extends Error {
+	constructor(readonly issues: SchemaIssue[]) {
+		super("Appended data does not match its declared schema");
+	}
+}
+
+class AppendToNonArrayError extends Error {
+	constructor(readonly actualType: string) {
+		super("Cannot append to non-array data");
+	}
+}
+
 function getSchemaIssues(schema: XSchema | undefined, data: unknown): SchemaIssue[] {
 	if (schema === undefined) return [];
 
@@ -82,6 +94,23 @@ function schemaValidationResult(key: string, issues: SchemaIssue[]) {
 			},
 		],
 		details: { namespace: key, error: "schema_validation", issues } as unknown as Record<string, unknown>,
+	};
+}
+
+function appendToNonArrayResult(key: string, actualType: string) {
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: JSON.stringify({
+					error: `cannot append to "${key}": current data is ${actualType}, not array. Use mode="replace" to overwrite.`,
+				}),
+			},
+		],
+		details: {
+			namespace: key,
+			error: "append_to_non_array",
+		} as unknown as Record<string, unknown>,
 	};
 }
 
@@ -246,49 +275,16 @@ export function createSkillDataWriteTool(
 					};
 				}
 
-				// Append mode
-				const existing = await store.load<unknown[]>(ns);
-				if (existing === null) {
-					const nextData = [params.data];
-					const issues = getSchemaIssues(decl.schema, nextData);
-					if (issues.length > 0) return schemaValidationResult(key, issues);
-
-					// No existing data, create new array
-					await store.save(ns, nextData);
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text: JSON.stringify({ success: true, namespace: key, mode: "append", newLength: 1 }),
-							},
-						],
-						details: { namespace: key, mode: "append", newLength: 1 } as unknown as Record<string, unknown>,
-					};
-				}
-
-				if (!Array.isArray(existing)) {
-					// Auto-downgrade: cannot append to non-array
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text: JSON.stringify({
-									error: `cannot append to "${key}": current data is ${typeof existing}, not array. Use mode="replace" to overwrite.`,
-								}),
-							},
-						],
-						details: {
-							namespace: key,
-							error: "append_to_non_array",
-						} as unknown as Record<string, unknown>,
-					};
-				}
-
-				const nextData = [...existing, params.data];
-				const issues = getSchemaIssues(decl.schema, nextData);
-				if (issues.length > 0) return schemaValidationResult(key, issues);
-
-				await store.save(ns, nextData);
+				// Append mode must read and merge while holding the store's cross-process lock.
+				const nextData = await store.update<unknown[]>(ns, (existing) => {
+					if (existing !== null && !Array.isArray(existing)) {
+						throw new AppendToNonArrayError(typeof existing);
+					}
+					const next = [...(existing ?? []), params.data];
+					const issues = getSchemaIssues(decl.schema, next);
+					if (issues.length > 0) throw new AppendSchemaValidationError(issues);
+					return next;
+				});
 				return {
 					content: [
 						{
@@ -307,8 +303,10 @@ export function createSkillDataWriteTool(
 						newLength: nextData.length,
 					} as unknown as Record<string, unknown>,
 				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
+			} catch (error) {
+				if (error instanceof AppendSchemaValidationError) return schemaValidationResult(key, error.issues);
+				if (error instanceof AppendToNonArrayError) return appendToNonArrayResult(key, error.actualType);
+				const message = error instanceof Error ? error.message : String(error);
 				return {
 					content: [
 						{

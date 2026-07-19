@@ -210,7 +210,7 @@ FitClaw 配置目录：`~/.fitclaw/agent/`
 | swimming-coach Skill | `.fitclaw/skills/swimming-coach/` (SKILL.md + 3 份 references) |
 | Skill 加载与解析 | `packages/runtime/src/skills.ts` |
 | data 工具注册 | `packages/coding-agent/src/core/sdk.ts` `createAgentSession()` |
-| fitclaw-data CLI | `packages/coding-agent/src/cli/fitclaw-data.ts` |
+| fitclaw-data CLI | `packages/runtime/src/cli/fitclaw-data.ts` |
 | Coach Bot 工具注册 | `apps/coach-bot/src/runtime/skills.ts` |
 | 共享会话生命周期 | `packages/runtime/src/session/managed-agent-session.ts` |
 | JSONL 会话格式与迁移 | `packages/runtime/src/session/session-format.ts` |

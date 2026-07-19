@@ -101,6 +101,29 @@ describe("skill data tools", () => {
 		expect(await store.load("bodybuilding/training_log")).toEqual([{ id: "existing" }, { id: "next" }]);
 	});
 
+	it("preserves concurrent appends from independent store instances", async () => {
+		const namespace = "bodybuilding/training_log";
+		await store.save(namespace, []);
+		const firstStore = new FileSkillDataStore(tempDir);
+		const secondStore = new FileSkillDataStore(tempDir);
+		await Promise.all([firstStore.load(namespace), secondStore.load(namespace)]);
+		const firstTool = createSkillDataWriteTool(firstStore, "bodybuilding", dataNamespaces);
+		const secondTool = createSkillDataWriteTool(secondStore, "bodybuilding", dataNamespaces);
+
+		const results = await Promise.all([
+			firstTool.execute("call-1", { namespace: "training_log", data: { id: "first" }, mode: "append" }),
+			secondTool.execute("call-2", { namespace: "training_log", data: { id: "second" }, mode: "append" }),
+		]);
+
+		expect(results.map(parseTextResult)).toEqual([
+			expect.objectContaining({ success: true, mode: "append" }),
+			expect.objectContaining({ success: true, mode: "append" }),
+		]);
+		const persisted = await new FileSkillDataStore(tempDir).load<Array<{ id: string }>>(namespace);
+		expect(persisted).toHaveLength(2);
+		expect(persisted).toEqual(expect.arrayContaining([{ id: "first" }, { id: "second" }]));
+	});
+
 	it("rejects schema-invalid replacements without changing persisted data", async () => {
 		const writeTool = createSkillDataWriteTool(store, "bodybuilding", dataNamespaces);
 		const existing = { goal: "strength", experience_level: "intermediate" };
