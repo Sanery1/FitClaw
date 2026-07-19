@@ -25,15 +25,14 @@ JSON.stringify(
 )
 " > "$AGENT_DIR/auth.json"
 
-# Generate models.json with provider override (baseUrl + api + models)
+# Override the built-in provider transport without replacing its model metadata.
 node -p "
 JSON.stringify(
   {
     providers: {
       [process.env.MOM_LLM_PROVIDER]: {
         baseUrl: process.env.MOM_LLM_BASE_URL,
-        api: process.env.MOM_LLM_API_TYPE,
-        models: [{ id: process.env.MOM_LLM_MODEL }]
+        api: process.env.MOM_LLM_API_TYPE
       }
     }
   },

@@ -54,8 +54,8 @@ export interface CreateCoachSessionOptions {
 export function createCoachSession(options: CreateCoachSessionOptions) {
 	const authStorage = AuthStorage.create(join(homedir(), ".fitclaw", "agent", "auth.json"));
 	const modelRegistry = ModelRegistry.create(authStorage);
-	const provider = process.env.MOM_LLM_PROVIDER || "minimax";
-	const modelId = process.env.MOM_LLM_MODEL || "MiniMax-M2.7-highspeed";
+	const provider = process.env.MOM_LLM_PROVIDER || "deepseek";
+	const modelId = process.env.MOM_LLM_MODEL || "deepseek-v4-pro";
 	const model = modelRegistry.find(provider, modelId);
 
 	if (!model) {
@@ -78,7 +78,7 @@ export function createCoachSession(options: CreateCoachSessionOptions) {
 			if (!auth.ok || !auth.apiKey) {
 				throw new Error(
 					`No API key found for "${model.provider}".\n\n` +
-						"Set API key via auth.json or environment variable (e.g., MINIMAX_API_KEY).",
+						"Set the provider API key via auth.json or its supported environment variable.",
 				);
 			}
 			return auth.apiKey;

@@ -103,6 +103,30 @@ describe("ModelRegistry", () => {
 			expect(anthropicModels.some((m) => m.id.includes("claude"))).toBe(true);
 		});
 
+		test("DeepSeek transport override preserves V4 Pro metadata", () => {
+			writeRawModelsJson({
+				deepseek: {
+					baseUrl: "https://api.deepseek.com",
+					api: "openai-completions",
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("deepseek", "deepseek-v4-pro");
+			const compat = model?.compat as OpenAICompletionsCompat | undefined;
+
+			expect(model?.reasoning).toBe(true);
+			expect(model?.contextWindow).toBe(1_000_000);
+			expect(model?.maxTokens).toBe(384_000);
+			expect(model?.cost).toEqual({
+				input: 0.435,
+				output: 0.87,
+				cacheRead: 0.003625,
+				cacheWrite: 0,
+			});
+			expect(compat?.thinkingFormat).toBe("deepseek");
+		});
+
 		test("overriding baseUrl changes URL on all built-in models", () => {
 			writeRawModelsJson({
 				anthropic: overrideConfig("https://my-proxy.example.com/v1"),

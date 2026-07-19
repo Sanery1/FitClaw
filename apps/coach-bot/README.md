@@ -17,10 +17,10 @@ code and user-facing identity use FitClaw Coach terminology.
 export MOM_FEISHU_APP_ID=cli-xxxxxxxx
 export MOM_FEISHU_APP_SECRET=xxxxxxxx
 export MOM_FEISHU_BOT_NAME=FitCoach
-export MOM_LLM_PROVIDER=minimax
-export MOM_LLM_MODEL=MiniMax-M2.7-highspeed
+export MOM_LLM_PROVIDER=deepseek
+export MOM_LLM_MODEL=deepseek-v4-pro
 export MOM_LLM_API_KEY=sk-xxxxxxxx
-export MOM_LLM_BASE_URL=https://example.com/v1
+export MOM_LLM_BASE_URL=https://api.deepseek.com
 export MOM_LLM_API_TYPE=openai-completions
 
 fitclaw-coach ./data
