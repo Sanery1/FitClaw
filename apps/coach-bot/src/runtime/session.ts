@@ -46,7 +46,8 @@ class WorkspaceSettingsStorage implements CoachSettingsStorage {
 }
 
 export interface CreateCoachSessionOptions {
-	channelDir: string;
+	workspaceDir: string;
+	sessionDir: string;
 	systemPrompt: string;
 	tools: AgentTool[];
 }
@@ -85,8 +86,8 @@ export function createCoachSession(options: CreateCoachSessionOptions) {
 		},
 	});
 
-	const sessionManager = SessionManager.open(join(options.channelDir, "context.jsonl"), options.channelDir);
-	const settingsManager = SettingsManager.fromStorage(new WorkspaceSettingsStorage(join(options.channelDir, "..")));
+	const sessionManager = SessionManager.open(join(options.sessionDir, "context.jsonl"), options.sessionDir);
+	const settingsManager = SettingsManager.fromStorage(new WorkspaceSettingsStorage(options.workspaceDir));
 	const session = new ManagedAgentSession({
 		agent,
 		sessionManager,

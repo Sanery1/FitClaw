@@ -7,6 +7,7 @@ export interface SkillRunnerCommand {
 	executable: string;
 	args: string[];
 	timeout?: number;
+	dataDir?: string;
 }
 
 export type SkillRunnerRequest = { type: "ping" } | ({ type: "execute" } & SkillRunnerCommand);
@@ -57,11 +58,15 @@ export function parseSkillRunnerRequest(line: string): SkillRunnerRequest {
 	if (!isValidTimeout(value.timeout)) {
 		throw new Error(`Skill Runner timeout must be between 1 and ${MAX_SKILL_COMMAND_TIMEOUT_SECONDS} seconds`);
 	}
+	if (value.dataDir !== undefined && (typeof value.dataDir !== "string" || !isAbsolute(value.dataDir))) {
+		throw new Error("Skill Runner dataDir must be an absolute path");
+	}
 	return {
 		type: "execute",
 		executable: value.executable,
 		args: [...value.args],
 		timeout: value.timeout,
+		dataDir: value.dataDir,
 	};
 }
 
@@ -100,3 +105,5 @@ export function parseSkillRunnerResponse(line: string): SkillRunnerResponse {
 export function encodeSkillRunnerMessage(message: SkillRunnerRequest | SkillRunnerResponse): string {
 	return `${JSON.stringify(message)}\n`;
 }
+
+import { isAbsolute } from "node:path";

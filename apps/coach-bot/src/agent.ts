@@ -13,14 +13,8 @@ import * as log from "./log.js";
 import { createCoachRunState, createCoachSessionEventHandler, createEmptyUsageTotals } from "./runtime/events.js";
 import { appendRunTrace } from "./runtime/run-trace.js";
 import { createCoachSession } from "./runtime/session.js";
-import {
-	configureCoachSkillDataRoot,
-	createCoachActiveTools,
-	loadCoachSkills,
-	resolveCoachHostWorkspacePath,
-} from "./runtime/skills.js";
+import { createCoachActiveTools, loadCoachSkills } from "./runtime/skills.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
-import type { ChannelStore } from "./store.js";
 import type { BotContext } from "./types.js";
 
 export interface PendingMessage {
@@ -31,12 +25,16 @@ export interface PendingMessage {
 }
 
 export interface AgentRunner {
-	run(
-		ctx: BotContext,
-		store: ChannelStore,
-		pendingMessages?: PendingMessage[],
-	): Promise<{ stopReason: string; errorMessage?: string }>;
+	run(ctx: BotContext, pendingMessages?: PendingMessage[]): Promise<{ stopReason: string; errorMessage?: string }>;
 	abort(): void;
+}
+
+export interface CoachRunnerOptions {
+	sandboxConfig: SandboxConfig;
+	workspaceDir: string;
+	sessionKey: string;
+	sessionDir: string;
+	userDataDir: string;
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -58,31 +56,30 @@ function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
 }
 
-// Cache runners per channel
-const channelRunners = new Map<string, AgentRunner>();
+const sessionRunners = new Map<string, AgentRunner>();
 
 /**
- * Get or create an AgentRunner for a channel.
- * Runners are cached - one per channel, persistent across messages.
+ * Get or create an AgentRunner for a private session.
+ * Runners are cached per tenant/user/chat session and persist across messages.
  */
-export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
-	const existing = channelRunners.get(channelId);
+export function getOrCreateRunner(options: CoachRunnerOptions): AgentRunner {
+	const existing = sessionRunners.get(options.sessionKey);
 	if (existing) return existing;
 
-	const runner = createRunner(sandboxConfig, channelId, channelDir);
-	channelRunners.set(channelId, runner);
+	const runner = createRunner(options);
+	sessionRunners.set(options.sessionKey, runner);
 	return runner;
 }
 
 /**
- * Create a new AgentRunner for a channel.
+ * Create a new AgentRunner for a private session.
  * Sets up the session and subscribes to events once.
  */
-function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
-	const executor = createExecutor(sandboxConfig);
-	const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, channelId);
-	const workspacePath = executor.getWorkspacePath(hostWorkspacePath);
-	const knowledgePaths = createKnowledgePaths(hostWorkspacePath);
+function createRunner(options: CoachRunnerOptions): AgentRunner {
+	const { sandboxConfig, workspaceDir, sessionKey, sessionDir, userDataDir } = options;
+	const executor = createExecutor(sandboxConfig, { workspaceRoot: workspaceDir, dataDir: userDataDir });
+	const workspacePath = executor.getWorkspacePath(workspaceDir);
+	const knowledgePaths = createKnowledgePaths(workspaceDir);
 	const knowledgeStore = new SqliteKnowledgeStore({
 		databasePath: knowledgePaths.database,
 		knowledgeRoot: knowledgePaths.root,
@@ -92,28 +89,27 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	});
 
 	// Initial system prompt (updated each run with freshly loaded skills)
-	const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
+	const skills = loadCoachSkills(sessionDir, workspacePath, workspaceDir);
 	const systemPrompt = buildCoachSystemPrompt(skills);
 
-	// Model B: auto-register data persistence tools for skills with data: declarations
-	configureCoachSkillDataRoot(channelDir);
-	const tools = createCoachActiveTools(executor, channelDir, skills, undefined, knowledgeStore);
+	const tools = createCoachActiveTools(executor, userDataDir, skills, undefined, knowledgeStore);
 
 	const contextWindowOptions = getCoachContextWindowOptions();
 	const session = createCoachSession({
-		channelDir,
+		workspaceDir,
+		sessionDir,
 		systemPrompt,
 		tools,
 	});
 	const { model: resolvedModel, sessionManager } = session;
-	log.logInfo(`[${channelId}] Using model: ${resolvedModel.provider}/${resolvedModel.id}`);
+	log.logInfo(`[${sessionKey}] Using model: ${resolvedModel.provider}/${resolvedModel.id}`);
 
 	// Load existing messages
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
 		const windowedContext = windowCoachContext(loadedSession.messages, contextWindowOptions);
 		session.agent.state.messages = windowedContext.messages;
-		log.logInfo(`[${channelId}] Loaded ${formatContextWindowStats(windowedContext)} from context.jsonl`);
+		log.logInfo(`[${sessionKey}] Loaded ${formatContextWindowStats(windowedContext)} from context.jsonl`);
 	}
 
 	const runState = createCoachRunState();
@@ -138,17 +134,15 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	return {
 		async run(
 			ctx: BotContext,
-			_store: ChannelStore,
 			_pendingMessages?: PendingMessage[],
 		): Promise<{ stopReason: string; errorMessage?: string }> {
-			// Ensure channel directory exists
-			await mkdir(channelDir, { recursive: true });
+			await mkdir(sessionDir, { recursive: true });
 
 			// Sync messages from log.jsonl that arrived while we were offline or busy
 			// Exclude the current message (it will be added via prompt())
-			const syncedCount = syncLogToSessionManager(sessionManager, channelDir, ctx.message.ts);
+			const syncedCount = syncLogToSessionManager(sessionManager, sessionDir, ctx.message.ts);
 			if (syncedCount > 0) {
-				log.logInfo(`[${channelId}] Synced ${syncedCount} messages from log.jsonl`);
+				log.logInfo(`[${sessionKey}] Synced ${syncedCount} messages from log.jsonl`);
 			}
 
 			// Reload messages from context.jsonl
@@ -157,13 +151,13 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			if (reloadedSession.messages.length > 0) {
 				const windowedContext = windowCoachContext(reloadedSession.messages, contextWindowOptions);
 				session.agent.state.messages = windowedContext.messages;
-				log.logInfo(`[${channelId}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
+				log.logInfo(`[${sessionKey}] Reloaded ${formatContextWindowStats(windowedContext)} from context`);
 			}
 
 			// Update the system prompt and tools with freshly loaded skills
-			const skills = loadCoachSkills(channelDir, workspacePath, hostWorkspacePath);
+			const skills = loadCoachSkills(sessionDir, workspacePath, workspaceDir);
 			const systemPrompt = buildCoachSystemPrompt(skills);
-			const activeTools = createCoachActiveTools(executor, channelDir, skills, ctx.uploadFile, knowledgeStore);
+			const activeTools = createCoachActiveTools(executor, userDataDir, skills, ctx.uploadFile, knowledgeStore);
 			session.updateRuntime(systemPrompt, activeTools);
 
 			// Reset per-run state
@@ -261,7 +255,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				newUserMessage: userMessage,
 				imageAttachmentCount: imageAttachments.length,
 			};
-			await writeFile(join(channelDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2));
+			await writeFile(join(sessionDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2));
 
 			try {
 				await session.prompt(userMessage, imageAttachments);
@@ -270,7 +264,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				runState.errorMessage = error instanceof Error ? error.message : String(error);
 				runState.errorCode = "model_error";
 				try {
-					await appendRunTrace(hostWorkspacePath, runState);
+					await appendRunTrace(workspaceDir, runState);
 				} catch (traceError) {
 					log.logWarning(
 						"Failed to append run trace",
@@ -354,7 +348,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			}
 
 			try {
-				await appendRunTrace(hostWorkspacePath, runState);
+				await appendRunTrace(workspaceDir, runState);
 			} catch (error) {
 				log.logWarning("Failed to append run trace", error instanceof Error ? error.message : String(error));
 			}
@@ -371,25 +365,4 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			session.abort();
 		},
 	};
-}
-
-/**
- * Translate container path back to host path for file operations
- */
-function _translateToHostPath(
-	containerPath: string,
-	channelDir: string,
-	workspacePath: string,
-	channelId: string,
-): string {
-	if (workspacePath === "/workspace") {
-		const prefix = `/workspace/${channelId}/`;
-		if (containerPath.startsWith(prefix)) {
-			return join(channelDir, containerPath.slice(prefix.length));
-		}
-		if (containerPath.startsWith("/workspace/")) {
-			return join(channelDir, "..", containerPath.slice("/workspace/".length));
-		}
-	}
-	return containerPath;
 }

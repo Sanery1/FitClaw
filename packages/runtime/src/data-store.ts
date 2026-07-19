@@ -1,5 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import lockfile from "proper-lockfile";
 
 /** Generic persisted data boundary for a Skill's declared namespaces. */
 export interface SkillDataStore {
@@ -68,9 +70,21 @@ export class FileSkillDataStore implements SkillDataStore {
 
 	async save<T>(namespace: string, data: T): Promise<void> {
 		const filePath = this.resolveNamespacePath(namespace);
+		const sportDataDir = resolve(this.dataDir, "sport-data");
 		await mkdir(dirname(filePath), { recursive: true });
-		await writeFile(filePath, JSON.stringify(data, null, 2));
-		this.cache.set(namespace, data);
+		const release = await lockfile.lock(sportDataDir, {
+			realpath: false,
+			retries: { retries: 5, factor: 2, minTimeout: 10, maxTimeout: 200 },
+		});
+		const tempPath = join(dirname(filePath), `.${process.pid}.${randomUUID()}.tmp`);
+		try {
+			await writeFile(tempPath, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+			await rename(tempPath, filePath);
+			this.cache.set(namespace, data);
+		} finally {
+			await rm(tempPath, { force: true });
+			await release();
+		}
 	}
 }
 

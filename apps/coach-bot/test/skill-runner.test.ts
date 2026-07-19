@@ -32,10 +32,11 @@ describe("skill runner", () => {
 		scriptName: string,
 		skillPath = join(workspacePath, "skills", "test-skill"),
 		skillName = "test-skill",
+		script = "process.stdout.write(process.argv.slice(2).join('|'));\n",
 	): string {
 		mkdirSync(join(skillPath, "scripts"), { recursive: true });
 		const scriptPath = join(skillPath, "scripts", scriptName);
-		writeFileSync(scriptPath, "process.stdout.write(process.argv.slice(2).join('|'));\n", "utf-8");
+		writeFileSync(scriptPath, script, "utf-8");
 		writeFileSync(
 			join(skillPath, "SKILL.md"),
 			["---", `name: ${skillName}`, "description: Test runner skill.", "---", "# Test Skill"].join("\n"),
@@ -104,5 +105,55 @@ describe("skill runner", () => {
 		await expect(executor.execFile("node", ["script.mjs"], { network: "deny" })).rejects.toThrow(
 			/NETWORK_ISOLATION_UNAVAILABLE/,
 		);
+	});
+
+	it("scopes FITCLAW_DATA_DIR to one isolated command", async () => {
+		const scriptPath = writeSkill(
+			"data-dir.mjs",
+			undefined,
+			undefined,
+			"process.stdout.write(process.env.FITCLAW_DATA_DIR || 'missing');\n",
+		);
+		const dataDir = join(workspacePath, "tenants", "tenant-a", "users", "user-a");
+		const result = await executeSkillRunnerCommand(socketPath, {
+			executable: "node",
+			args: [scriptPath],
+			dataDir,
+		});
+
+		expect(result.stdout).toBe(dataDir);
+		expect(process.env.FITCLAW_DATA_DIR).toBeUndefined();
+	});
+
+	it("rejects an isolated data directory outside the runner workspace", async () => {
+		const scriptPath = writeSkill("outside-data.mjs");
+		await expect(
+			executeSkillRunnerCommand(socketPath, {
+				executable: "node",
+				args: [scriptPath],
+				dataDir: join(workspacePath, "..", "outside"),
+			}),
+		).rejects.toThrow(/SECURITY_BLOCKED/);
+	});
+
+	it("does not mutate the host process environment between user executors", async () => {
+		const firstDataDir = join(workspacePath, "tenants", "tenant-a", "users", "user-a");
+		const secondDataDir = join(workspacePath, "tenants", "tenant-a", "users", "user-b");
+		const firstExecutor = createExecutor(
+			{ type: "host" },
+			{ skillRunnerSocketPath: null, workspaceRoot: workspacePath, dataDir: firstDataDir },
+		);
+		const secondExecutor = createExecutor(
+			{ type: "host" },
+			{ skillRunnerSocketPath: null, workspaceRoot: workspacePath, dataDir: secondDataDir },
+		);
+
+		const [first, second] = await Promise.all([
+			firstExecutor.execFile("node", ["-e", "process.stdout.write(process.env.FITCLAW_DATA_DIR || '')"]),
+			secondExecutor.execFile("node", ["-e", "process.stdout.write(process.env.FITCLAW_DATA_DIR || '')"]),
+		]);
+		expect(first.stdout).toBe(firstDataDir);
+		expect(second.stdout).toBe(secondDataDir);
+		expect(process.env.FITCLAW_DATA_DIR).toBeUndefined();
 	});
 });

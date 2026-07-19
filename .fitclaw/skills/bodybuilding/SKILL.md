@@ -63,11 +63,24 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 
 ### 记忆契约
 
+私人教练关系激活后，自动判断信息是否值得长期保存，不需要每次询问用户：
+
+- 用户明确表达且长期有用的目标、经验、可用器械、固定训练日程和持续性训练限制：更新 `user_profile`
+- 用户明确完成的训练：追加到 `training_log`；明确报告的体重、围度或体脂等身体指标：追加到 `body_metrics`
+- 用户明确说“应用这个计划”“保存这个调整”或同等确认语句：更新 `training_plan`
+- 当天疲劳、临时安排、假设、举例、普通咨询和尚未确认的计划建议：只留在当前会话，不写入长期数据
+- 第三方信息、模型推断和不属于当前用户的信息：禁止保存到当前用户档案
+- 动作、数值或事实含糊时：先追问澄清，不写入任何长期数据
+- 用户报告急性疼痛时：先给出保守的安全处理建议，不直接把它判断或保存为长期伤病；只有用户明确说明是持续性限制时才更新画像
+
 对象 namespace 表示当前状态，写入时必须是完整对象：
+
 - 更新 `user_profile` 前，先 read 旧数据，保留仍然有效的目标、经验、器械、训练频率、伤病限制等字段，再用 `replace` 写回完整对象
+- 用户纠正旧信息时，必须先 read 旧画像，只修改被纠正的字段，不能丢失其他仍然有效的字段
 - 更新 `training_plan` 时，只在用户确认保存或应用计划后，用 `replace` 写回完整当前计划
 
 数组 namespace 表示历史记录，写入时只追加一条新记录：
+
 - `training_log`、`body_metrics`、`progression`、`personal_records` 使用 `append`
 - 不要为了新增一条训练或体测记录而 replace 整个历史数组
 - 训练记录信息不足时，先追问动作名称或可衡量训练值，不要写入含糊历史
@@ -83,9 +96,11 @@ python scripts/query_exercises.py --muscle chest --equipment dumbbell
 旧数据可能存在 `weightKg` 等历史字段；除非后续明确做迁移，不要仅为了命名清理重写完整历史。
 
 **重要规则**：
-- 收集到用户信息后**立即**调用 write 保存，不要仅保留在内存中
-- 每次训练记录后**立即** append 到 `training_log`
-- 生成新计划后，用户确认保存时**立即** replace 到 `training_plan`
+
+- 只对符合上述长期记忆条件的信息调用 write；临时或不确定信息不能因为“持久化优先”而保存
+- 明确且长期有用的用户信息在读取并合并旧画像后**立即**保存
+- 明确完成且信息完整的训练记录**立即** append 到 `training_log`
+- 用户确认保存或应用新计划时**立即** replace 到 `training_plan`
 - 开始对话时先 read user_profile 检查是否有已保存的用户数据
 - 调整当前计划或回答“下一次练什么”前，必须 read `training_plan`；不要只依赖对话上下文中的计划
 - 总结训练历史或基于近期训练给建议前，必须 read `training_log`；需要个人纪录时再 read `personal_records`
@@ -355,7 +370,7 @@ data_bodybuilding_write("progression", {date, type, reason}, "append")
 3. **安全第一**：有伤病或不确定时，优先保守建议
 4. **个性化**：根据用户反馈持续调整
 5. **激励为主**：正向反馈比批评更有效
-6. **持久化优先**：每次信息变更后立即调用 data_bodybuilding_write 保存
+6. **持久化有边界**：只保存明确、属于当前用户且长期有用的信息；临时、含糊、第三方或推断信息不保存
 
 ## 参考资源（按需读取）
 

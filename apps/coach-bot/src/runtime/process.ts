@@ -6,6 +6,7 @@ const MAX_PROCESS_ERROR_BYTES = 1024 * 1024;
 export interface ProcessOptions {
 	timeout?: number;
 	signal?: AbortSignal;
+	environment?: Readonly<Record<string, string>>;
 }
 
 export interface BufferedProcessResult {
@@ -23,6 +24,7 @@ export function runProcess(
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, args, {
 			detached: true,
+			env: options?.environment ? { ...process.env, ...options.environment } : process.env,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		const stdoutChunks: Buffer[] = [];

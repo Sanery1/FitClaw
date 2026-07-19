@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, realpath, rm, stat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { networkInterfaces } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { loadSkillsFromDir } from "@fitclaw/runtime";
 import { createAllowedCommands, findAllowedCommand } from "./runtime/permissions.js";
 import { DEFAULT_MAX_PROCESS_OUTPUT_BYTES, runProcess } from "./runtime/process.js";
@@ -105,10 +105,15 @@ async function executeRequest(
 		);
 	}
 
+	const dataDir = request.dataDir ? await resolveRunnerDataDir(request.dataDir, workspacePath) : undefined;
 	const result = await runProcess(
 		request.executable,
 		normalizedArgs,
-		{ signal, timeout: request.timeout ?? DEFAULT_SKILL_COMMAND_TIMEOUT_SECONDS },
+		{
+			signal,
+			timeout: request.timeout ?? DEFAULT_SKILL_COMMAND_TIMEOUT_SECONDS,
+			...(dataDir ? { environment: { FITCLAW_DATA_DIR: dataDir } } : {}),
+		},
 		DEFAULT_MAX_PROCESS_OUTPUT_BYTES,
 	);
 	return {
@@ -120,6 +125,20 @@ async function executeRequest(
 			code: result.code,
 		},
 	};
+}
+
+async function resolveRunnerDataDir(dataDir: string, workspacePath: string): Promise<string> {
+	const canonicalWorkspace = await realpath(workspacePath);
+	const candidate = resolve(dataDir);
+	if (!isPathInside(candidate, canonicalWorkspace)) {
+		throw new Error("SECURITY_BLOCKED: Skill dataDir is outside the Runner workspace");
+	}
+	await mkdir(candidate, { recursive: true });
+	const canonicalDataDir = await realpath(candidate);
+	if (!isPathInside(canonicalDataDir, canonicalWorkspace)) {
+		throw new Error("SECURITY_BLOCKED: Skill dataDir resolves outside the Runner workspace");
+	}
+	return canonicalDataDir;
 }
 
 function handleConnection(socket: Socket, workspacePath: string): void {

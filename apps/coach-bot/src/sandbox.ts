@@ -1,4 +1,5 @@
 import { readFile as readHostFile, realpath, stat } from "node:fs/promises";
+import { isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { spawn } from "child_process";
 import { DEFAULT_MAX_PROCESS_OUTPUT_BYTES, runProcess } from "./runtime/process.js";
 import { executeSkillRunnerCommand } from "./runtime/skill-runner-client.js";
@@ -9,6 +10,8 @@ export type SandboxConfig = { type: "host" } | { type: "docker"; container: stri
 
 export interface ExecutorOptions {
 	skillRunnerSocketPath?: string | null;
+	workspaceRoot?: string;
+	dataDir?: string;
 }
 
 export function parseSandboxArg(value: string): SandboxConfig {
@@ -84,10 +87,11 @@ export function createExecutor(config: SandboxConfig, options: ExecutorOptions =
 		options.skillRunnerSocketPath === undefined
 			? process.env.FITCLAW_SKILL_RUNNER_SOCKET
 			: (options.skillRunnerSocketPath ?? undefined);
+	const dataPaths = resolveExecutorDataPaths(config, options);
 	if (config.type === "host") {
-		return new HostExecutor(skillRunnerSocketPath);
+		return new HostExecutor(skillRunnerSocketPath, dataPaths?.hostDataDir);
 	}
-	return new DockerExecutor(config.container, skillRunnerSocketPath);
+	return new DockerExecutor(config.container, skillRunnerSocketPath, dataPaths?.executorDataDir);
 }
 
 export interface Executor {
@@ -130,7 +134,10 @@ export interface ExecResult {
 }
 
 class HostExecutor implements Executor {
-	constructor(private readonly skillRunnerSocketPath?: string) {}
+	constructor(
+		private readonly skillRunnerSocketPath?: string,
+		private readonly dataDir?: string,
+	) {}
 
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
 		if (options?.network === "deny") {
@@ -148,7 +155,7 @@ class HostExecutor implements Executor {
 			}
 			return executeSkillRunnerCommand(
 				this.skillRunnerSocketPath,
-				{ executable, args: [...args], timeout: options.timeout },
+				{ executable, args: [...args], timeout: options.timeout, dataDir: this.dataDir },
 				{ signal: options.signal },
 			);
 		}
@@ -172,7 +179,12 @@ class HostExecutor implements Executor {
 	}
 
 	private async spawnProcess(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
-		const result = await runProcess(executable, args, options, DEFAULT_MAX_PROCESS_OUTPUT_BYTES);
+		const result = await runProcess(
+			executable,
+			args,
+			this.dataDir ? { ...options, environment: { FITCLAW_DATA_DIR: this.dataDir } } : options,
+			DEFAULT_MAX_PROCESS_OUTPUT_BYTES,
+		);
 		return {
 			stdout: result.stdout.toString("utf-8"),
 			stderr: result.stderr.toString("utf-8"),
@@ -189,22 +201,30 @@ class DockerExecutor implements Executor {
 	constructor(
 		private readonly container: string,
 		private readonly skillRunnerSocketPath?: string,
+		private readonly executorDataDir?: string,
 	) {}
 
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
 		if (options?.network === "deny") {
 			throw new Error("NETWORK_ISOLATION_UNAVAILABLE: shell commands cannot use the Skill Runner");
 		}
-		const hostExecutor = new HostExecutor(this.skillRunnerSocketPath);
-		return hostExecutor.execFile("docker", ["exec", this.container, "sh", "-c", command], options);
+		const hostExecutor = new HostExecutor();
+		return hostExecutor.execFile("docker", this.dockerExecArgs(["sh", "-c", command]), options);
 	}
 
 	async execFile(executable: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult> {
-		const hostExecutor = new HostExecutor(this.skillRunnerSocketPath);
 		if (options?.network === "deny") {
-			return hostExecutor.execFile(executable, args, options);
+			if (!this.skillRunnerSocketPath) {
+				throw new Error("NETWORK_ISOLATION_UNAVAILABLE: FITCLAW_SKILL_RUNNER_SOCKET is not configured");
+			}
+			return executeSkillRunnerCommand(
+				this.skillRunnerSocketPath,
+				{ executable, args: [...args], timeout: options.timeout, dataDir: this.executorDataDir },
+				{ signal: options.signal },
+			);
 		}
-		return hostExecutor.execFile("docker", ["exec", this.container, executable, ...args], options);
+		const hostExecutor = new HostExecutor();
+		return hostExecutor.execFile("docker", this.dockerExecArgs([executable, ...args]), options);
 	}
 
 	async resolvePath(path: string, options?: ExecOptions): Promise<string> {
@@ -227,6 +247,36 @@ class DockerExecutor implements Executor {
 		// Docker container sees /workspace
 		return "/workspace";
 	}
+
+	private dockerExecArgs(command: readonly string[]): string[] {
+		return [
+			"exec",
+			...(this.executorDataDir ? ["--env", `FITCLAW_DATA_DIR=${this.executorDataDir}`] : []),
+			this.container,
+			...command,
+		];
+	}
+}
+
+function resolveExecutorDataPaths(
+	config: SandboxConfig,
+	options: ExecutorOptions,
+): { hostDataDir: string; executorDataDir: string } | undefined {
+	if (options.dataDir === undefined) return undefined;
+	if (!options.workspaceRoot) throw new Error("workspaceRoot is required when dataDir is configured");
+	const workspaceRoot = resolve(options.workspaceRoot);
+	const hostDataDir = resolve(options.dataDir);
+	if (!isAbsolute(options.workspaceRoot) || !isPathInside(hostDataDir, workspaceRoot)) {
+		throw new Error("Executor dataDir must be inside its absolute workspaceRoot");
+	}
+	if (config.type === "host") return { hostDataDir, executorDataDir: hostDataDir };
+	const relativeDataDir = relative(workspaceRoot, hostDataDir).split(sep).join(posix.sep);
+	return { hostDataDir, executorDataDir: posix.join("/workspace", relativeDataDir) };
+}
+
+function isPathInside(candidatePath: string, rootPath: string): boolean {
+	const relativePath = relative(rootPath, candidatePath);
+	return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 function getMaxFileBytes(options?: ReadFileOptions): number {

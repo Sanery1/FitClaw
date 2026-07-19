@@ -1,0 +1,20 @@
+id: feishu-temporary-fatigue-no-memory
+suite: session
+prompt: "我今天临时有点累，原计划先少做一组，别改我的长期计划。"
+fauxResponses:
+  - text: |
+      可以，今天临时少做一组，并把强度控制在动作稳定、没有明显不适的范围内。这只是本次训练调整，不会写入你的长期画像或当前训练计划。
+graders:
+  - type: final_contains
+    text: "临时"
+  - type: final_contains_any
+    texts:
+      - "不会写入"
+      - "不会保存"
+      - "不保存"
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

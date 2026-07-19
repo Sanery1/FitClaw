@@ -1,0 +1,22 @@
+id: feishu-third-party-fact-no-memory
+suite: session
+prompt: "我同事小王每周练五天、目标是增肌，你记一下，以后帮我参考。"
+fauxResponses:
+  - text: |
+      这是你同事的信息，不属于你的个人成长档案，所以我不会保存。你可以把它作为当前讨论里的参考，但我不会写入你的长期记忆。
+graders:
+  - type: final_contains_any
+    texts:
+      - "同事的信息"
+      - "不属于你的"
+      - "第三方"
+  - type: final_contains_any
+    texts:
+      - "不会保存"
+      - "不会写入"
+  - type: tool_not_called
+    tool: data_bodybuilding_write
+  - type: max_tool_calls
+    max: 0
+  - type: max_turns
+    max: 1

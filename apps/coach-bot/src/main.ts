@@ -3,11 +3,15 @@
 import { join, resolve } from "path";
 import { renderFeishuCard } from "./adapters/feishu/card-renderer.js";
 import { type AgentRunner, getOrCreateRunner } from "./agent.js";
+import { runExistingUserInvitationCli } from "./existing-user-invitations.js";
 import { FeishuBot, type FeishuEvent } from "./feishu.js";
 import { runKnowledgeCli } from "./knowledge/cli.js";
 import * as log from "./log.js";
+import { runMemoryMigrationCli } from "./memory-migration.js";
+import { PrivateCoachService } from "./private-coach-service.js";
+import { FileCoachRelationshipStore } from "./relationships.js";
+import { resolveCoachSessionScope, resolveCoachUserScope } from "./runtime/coach-scope.js";
 import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
-import { ChannelStore } from "./store.js";
 import type { BotContext } from "./types.js";
 
 // ============================================================================
@@ -16,11 +20,55 @@ import type { BotContext } from "./types.js";
 
 const FEISHU_APP_ID = process.env.MOM_FEISHU_APP_ID;
 const FEISHU_APP_SECRET = process.env.MOM_FEISHU_APP_SECRET;
-const FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitCoach";
+const FEISHU_BOT_NAME = process.env.MOM_FEISHU_BOT_NAME || "FitClaw";
 
 if (process.argv[2] === "knowledge") {
 	try {
 		await runKnowledgeCli(process.argv.slice(3));
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+	process.exit(0);
+}
+
+if (process.argv[2] === "migrate-memory") {
+	try {
+		await runMemoryMigrationCli(process.argv.slice(3));
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+	process.exit(0);
+}
+
+if (process.argv[2] === "invite-existing") {
+	try {
+		let invitationService: PrivateCoachService | undefined;
+		await runExistingUserInvitationCli(process.argv.slice(3), async (invitationWorkspace, event) => {
+			if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
+				throw new Error("MOM_FEISHU_APP_ID and MOM_FEISHU_APP_SECRET are required with --send");
+			}
+			if (!invitationService) {
+				const invitationBot = new FeishuBot(
+					{ appId: FEISHU_APP_ID, appSecret: FEISHU_APP_SECRET, botName: FEISHU_BOT_NAME },
+					invitationWorkspace,
+				);
+				invitationService = new PrivateCoachService({
+					relationships: new FileCoachRelationshipStore(),
+					transport: invitationBot,
+					runCoach: async () => undefined,
+					resolveUserScope: (lifecycleEvent) => resolveCoachUserScope(invitationWorkspace, lifecycleEvent),
+					resolveSessionScope: (messageEvent) =>
+						resolveCoachSessionScope(invitationWorkspace, {
+							tenantKey: messageEvent.tenantKey,
+							openId: messageEvent.user.openId,
+							chatId: messageEvent.chatId,
+						}),
+				});
+			}
+			return invitationService.inviteUser(event, "migration");
+		});
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exit(1);
@@ -74,28 +122,28 @@ const { workingDir, sandbox } = { workingDir: parsedArgs.workingDir, sandbox: pa
 await validateSandbox(sandbox);
 
 // ============================================================================
-// State (per channel)
+// State (per private session)
 // ============================================================================
 
-interface ChannelState {
-	running: boolean;
+interface PrivateSessionState {
 	runner: AgentRunner;
-	store: ChannelStore;
 }
 
-const channelStates = new Map<string, ChannelState>();
+const sessionStates = new Map<string, PrivateSessionState>();
 
-function getState(channelId: string, userId?: string): ChannelState {
-	const stateKey = userId ? `${channelId}/${userId}` : channelId;
-	let state = channelStates.get(stateKey);
+function getState(scope: ReturnType<typeof resolveCoachSessionScope>): PrivateSessionState {
+	let state = sessionStates.get(scope.sessionKey);
 	if (!state) {
-		const channelDir = userId ? join(workingDir, channelId, userId) : join(workingDir, channelId);
 		state = {
-			running: false,
-			runner: getOrCreateRunner(sandbox, stateKey, channelDir),
-			store: new ChannelStore({ workingDir }),
+			runner: getOrCreateRunner({
+				sandboxConfig: sandbox,
+				workspaceDir: workingDir,
+				sessionKey: scope.sessionKey,
+				sessionDir: scope.sessionDir,
+				userDataDir: scope.userDataDir,
+			}),
 		};
-		channelStates.set(stateKey, state);
+		sessionStates.set(scope.sessionKey, state);
 	}
 	return state;
 }
@@ -104,7 +152,7 @@ function getState(channelId: string, userId?: string): ChannelState {
 // Feishu Context Adapter
 // ============================================================================
 
-function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: ChannelState): BotContext {
+function createFeishuContext(event: FeishuEvent, bot: FeishuBot): BotContext {
 	let accumulatedText = "";
 	let _isWorking = true;
 	let updatePromise = Promise.resolve();
@@ -202,45 +250,68 @@ function createFeishuContext(event: FeishuEvent, bot: FeishuBot, _state: Channel
 log.logStartup(workingDir, sandbox.type === "host" ? "host" : `docker:${sandbox.container}`);
 
 const bot = new FeishuBot({ appId: FEISHU_APP_ID, appSecret: FEISHU_APP_SECRET, botName: FEISHU_BOT_NAME }, workingDir);
-
-bot.onMessage(async (event) => {
-	// Download attachments before processing
-	if (event.files) {
-		for (const f of event.files) {
-			try {
-				f.downloadedPath = await bot.downloadFile(f.messageId, f.fileKey, f.type);
-			} catch (err) {
-				log.logWarning("Feishu download attachment error", err instanceof Error ? err.message : String(err));
+const relationships = new FileCoachRelationshipStore();
+const service = new PrivateCoachService({
+	relationships,
+	transport: bot,
+	resolveUserScope: (event) => resolveCoachUserScope(workingDir, event),
+	resolveSessionScope: (event) =>
+		resolveCoachSessionScope(workingDir, {
+			tenantKey: event.tenantKey,
+			openId: event.user.openId,
+			chatId: event.chatId,
+		}),
+	runCoach: async (event, scope) => {
+		if (event.files) {
+			const attachmentDir = join(scope.sessionDir, "attachments");
+			for (const file of event.files) {
+				try {
+					file.downloadedPath = await bot.downloadFile(file.messageId, file.fileKey, file.type, attachmentDir);
+				} catch (error) {
+					log.logWarning(
+						"Feishu download attachment error",
+						error instanceof Error ? error.message : String(error),
+					);
+				}
 			}
 		}
-	}
 
-	const isGroup = event.type === "mention";
-	const userId = isGroup ? event.user.openId : undefined;
-	const state = getState(event.chatId, userId);
-	state.running = true;
-
-	log.logInfo(`[${event.chatId}] Feishu ${event.type}: ${event.text.substring(0, 50)}`);
-
-	try {
-		const ctx = createFeishuContext(event, bot, state);
-		await ctx.setTyping(true);
-		await ctx.setWorking(true);
-		const result = await state.runner.run(ctx, state.store);
-		await ctx.setWorking(false);
-
-		if (result.errorMessage) {
-			await ctx.respond(`Error: ${result.errorMessage}`);
+		const state = getState(scope);
+		log.logInfo(`Running private coach session ${scope.sessionKey} for message ${event.messageId}`);
+		const ctx = createFeishuContext(event, bot);
+		try {
+			await ctx.setTyping(true);
+			await ctx.setWorking(true);
+			const result = await state.runner.run(ctx);
+			if (result.errorMessage) await ctx.respond(`Error: ${result.errorMessage}`);
+		} finally {
+			await ctx.setWorking(false);
 		}
-	} catch (err) {
-		log.logWarning(`[${event.chatId}] Run error`, err instanceof Error ? err.message : String(err));
-	} finally {
-		state.running = false;
+	},
+});
+
+bot.onMessage(async (event) => {
+	try {
+		await service.handleMessage(event);
+	} catch (error) {
+		log.logWarning(
+			`Feishu message ${event.messageId} failed`,
+			error instanceof Error ? error.message : String(error),
+		);
 	}
 });
 
+bot.onUserJoined(async (event) => {
+	const result = await service.handleUserJoined(event);
+	if (result.status === "failed") log.logWarning("FitClaw private invitation failed", result.reason);
+});
+
+bot.onUserLeft(async (event) => {
+	await service.handleUserLeft(event);
+});
+
 await bot.start();
-log.logInfo("FitClaw Feishu Bot (FitCoach) is running. Press Ctrl+C to exit.");
+log.logInfo("FitClaw Feishu Bot is running. Press Ctrl+C to exit.");
 
 // Handle shutdown
 process.on("SIGINT", () => {

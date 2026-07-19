@@ -1,15 +1,9 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { KnowledgeStore } from "@fitclaw/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	configureCoachSkillDataRoot,
-	createCoachActiveTools,
-	createCoachSkillDataTools,
-	loadCoachSkills,
-	resolveCoachHostWorkspacePath,
-} from "../src/runtime/skills.js";
+import { createCoachActiveTools, createCoachSkillDataTools, loadCoachSkills } from "../src/runtime/skills.js";
 import type { ExecOptions, ExecResult, Executor } from "../src/sandbox.js";
 
 class RecordingExecutor implements Executor {
@@ -67,7 +61,7 @@ describe("coach bot skill loading", () => {
 		const channelDir = join(workspaceDir, "chat-1", "user-1");
 		mkdirSync(channelDir, { recursive: true });
 
-		const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, "chat-1/user-1");
+		const hostWorkspacePath = workspaceDir;
 		const skills = loadCoachSkills(channelDir, "/workspace", hostWorkspacePath);
 
 		const bodybuilding = skills.find((skill) => skill.name === "bodybuilding");
@@ -106,7 +100,7 @@ describe("coach bot skill loading", () => {
 			"utf-8",
 		);
 
-		const hostWorkspacePath = resolveCoachHostWorkspacePath(channelDir, "chat-1/user-1");
+		const hostWorkspacePath = workspaceDir;
 		const skills = loadCoachSkills(channelDir, "/workspace", hostWorkspacePath);
 
 		const bodybuilding = skills.find((skill) => skill.name === "bodybuilding");
@@ -238,21 +232,27 @@ describe("coach bot skill loading", () => {
 		expect(toolNames).toEqual(["read", "exercise_search"]);
 	});
 
-	it("sets FITCLAW_DATA_DIR to the channel data root used by FileSkillDataStore", () => {
-		const previousDataDir = process.env.FITCLAW_DATA_DIR;
-		const channelId = `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-		const channelDir = join(workspaceDir, channelId);
-		mkdirSync(channelDir, { recursive: true });
+	it("keeps Skill data rooted outside the private session directory", async () => {
+		const sessionDir = join(workspaceDir, "tenants", "tenant-1", "users", "user-1", "sessions", "chat-1");
+		const userDataDir = join(workspaceDir, "tenants", "tenant-1", "users", "user-1");
+		const skill = {
+			name: "bodybuilding",
+			dataNamespaces: new Map([["training_log", { type: "array" as const }]]),
+		} as Parameters<typeof createCoachSkillDataTools>[1][number];
+		const writeTool = createCoachSkillDataTools(userDataDir, [skill]).find(
+			(tool) => tool.name === "data_bodybuilding_write",
+		);
 
-		configureCoachSkillDataRoot(channelDir);
-		try {
-			expect(process.env.FITCLAW_DATA_DIR).toBe(channelDir);
-		} finally {
-			if (previousDataDir === undefined) {
-				delete process.env.FITCLAW_DATA_DIR;
-			} else {
-				process.env.FITCLAW_DATA_DIR = previousDataDir;
-			}
-		}
+		await writeTool?.execute("call-1", {
+			namespace: "training_log",
+			data: { exercise: "squat" },
+			mode: "append",
+		});
+
+		expect(sessionDir).not.toBe(userDataDir);
+		expect(readFileSync(join(userDataDir, "sport-data", "bodybuilding", "training_log.json"), "utf-8")).toContain(
+			"squat",
+		);
+		expect(existsSync(join(sessionDir, "sport-data"))).toBe(false);
 	});
 });

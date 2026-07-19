@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,5 +33,19 @@ describe("FileSkillDataStore", () => {
 		const store = new FileSkillDataStore(tempDir);
 
 		await expect(store.load("bodybuilding/training_log")).rejects.toThrow(/invalid JSON/i);
+	});
+
+	it("uses atomic replacement and leaves no temporary or lock files", async () => {
+		const store = new FileSkillDataStore(tempDir);
+		await store.save("bodybuilding/training_log", [{ id: "first" }]);
+		await store.save("bodybuilding/training_log", [{ id: "first" }, { id: "second" }]);
+
+		const dataDir = join(tempDir, "sport-data", "bodybuilding");
+		expect(JSON.parse(await readFile(join(dataDir, "training_log.json"), "utf-8"))).toEqual([
+			{ id: "first" },
+			{ id: "second" },
+		]);
+		expect(readdirSync(dataDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+		expect(existsSync(join(tempDir, "sport-data.lock"))).toBe(false);
 	});
 });
