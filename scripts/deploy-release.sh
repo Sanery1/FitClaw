@@ -343,7 +343,7 @@ copy_workspace() {
 		remove_release_path "$STAGE/feishu-workspace"
 	fi
 	sudo mv -- "$copy_path" "$STAGE/feishu-workspace"
-	sync -f "$STAGE/feishu-workspace"
+	sudo sync -f "$STAGE/feishu-workspace"
 	set_status workspace_copied
 }
 
@@ -379,7 +379,7 @@ sync_canonical_skills() {
 	RUNTIME_MANIFEST="$RELEASE_RECORD_DIR/$RELEASE_ID-workspace-runtime.sha256"
 	workspace_manifest "$STAGE/feishu-workspace" "$RUNTIME_MANIFEST"
 	CUTOVER_MANIFEST="$RUNTIME_MANIFEST"
-	sync -f "$STAGE/feishu-workspace"
+	sudo sync -f "$STAGE/feishu-workspace"
 	set_status skills_synced
 }
 

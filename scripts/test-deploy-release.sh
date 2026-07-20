@@ -222,7 +222,7 @@ if [[ "${1:-}" == "-n" ]]; then
 fi
 case "${1:-}" in
 	systemctl | chown) exit 0 ;;
-	*) exec "$@" ;;
+	*) FAKE_SUDO_ACTIVE=1 exec "$@" ;;
 esac
 EOF
 
@@ -271,6 +271,10 @@ exit 0
 EOF
 	cat >"$fake_bin/sync" <<'EOF'
 #!/usr/bin/env bash
+
+if [[ "${1:-}" == "-f" && "${2:-}" == */feishu-workspace && "${FAKE_SUDO_ACTIVE:-0}" != "1" ]]; then
+	exit 1
+fi
 exit 0
 EOF
 	chmod +x "$fake_bin"/*
