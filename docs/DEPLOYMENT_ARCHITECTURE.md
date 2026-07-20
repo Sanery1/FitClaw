@@ -313,6 +313,44 @@ git rev-parse --verify HEAD
 
 ## 8. 日常发布流程
 
+### 推荐入口：可重入普通发布脚本
+
+对不涉及 migration、Schema 或不兼容存储合同的普通代码发布，优先使用 `scripts/deploy-release.sh`。脚本把第 8.2 至 8.7 节的高风险机械步骤收敛为一个状态机，但不会替操作员决定数据迁移、回滚数据或真实飞书验收。
+
+本地先按第 8.1 节完成检查、提交、推送并取得远端已有的完整 SHA。服务器当前 checkout 不需要切换分支或执行 `git pull`；只把该 SHA 中的脚本取到临时路径：
+
+```bash
+set -euo pipefail
+APP="/home/ubuntu/fitclaw"
+RELEASE_SHA="<40-character-commit-sha>"
+DEPLOY_TMP="$(mktemp -d /tmp/fitclaw-deploy.XXXXXX)"
+
+git -C "$APP" fetch --no-tags origin "$RELEASE_SHA"
+git -C "$APP" show "$RELEASE_SHA:scripts/deploy-release.sh" > "$DEPLOY_TMP/deploy-release.sh"
+git -C "$APP" show "$RELEASE_SHA:scripts/deploy-release-state.sh" > "$DEPLOY_TMP/deploy-release-state.sh"
+chmod 700 "$DEPLOY_TMP/deploy-release.sh"
+chmod 600 "$DEPLOY_TMP/deploy-release-state.sh"
+bash "$DEPLOY_TMP/deploy-release.sh" "$RELEASE_SHA"
+```
+
+脚本要求非 root 操作员、可无交互使用的 `sudo`、正常 Docker/Compose、当前两个容器和 mode `0600` 的 `.env`。完整 SHA 同时是确定性的 attempt key；候选目录、旧 release 和 record 分别为：
+
+```text
+/home/ubuntu/fitclaw-release-<full-sha>
+/home/ubuntu/fitclaw-previous-<full-sha>
+/home/ubuntu/fitclaw-release-records/<full-sha>.env
+```
+
+构建、停写复制、manifest 核对、canonical Skills 同步、动态 UID/GID、socket 改权、目录切换和容器健康检查成功后，状态只到 `containers_started`。完成第 8.7 节的真实飞书 smoke 和关键数据抽查后，才显式标记：
+
+```bash
+bash /home/ubuntu/fitclaw/scripts/deploy-release.sh verify "$RELEASE_SHA"
+```
+
+同一 SHA 在 `initialized` 到 `skills_synced` 阶段中断时可以重跑同一命令。若中断发生在新容器启动前的目录切换阶段，脚本先恢复旧 release，再重新制作停写快照；一旦状态进入 `starting`，新版本可能已经产生写入，失败会冻结新容器并标记 `recovery_required`，此时不得反复重跑，必须按第 10 节选择保留最新数据或恢复迁移前快照。
+
+脚本会对 canonical Skill 删除、重命名及 workspace-only 同名冲突 fail closed。此类变更先人工完成归档和 runtime inventory 评审；历史数据迁移始终走第 9 节，不能把 `migrate-memory --apply` 塞进普通发布脚本。
+
 ### 8.1 本地：形成唯一发布 SHA
 
 ```bash
@@ -339,7 +377,7 @@ git rev-parse --verify origin/main
 
 不要在 `/home/ubuntu/fitclaw` 中直接 `git pull` 和构建。使用独立候选目录，让旧容器在构建期间继续服务。
 
-第 8.2 至 8.7 节默认在同一个 SSH shell 中连续执行，后续命令依赖前面定义的变量和 `workspace_stats`。TAT 每次“执行命令”可能是新 shell；使用 TAT 时必须在每次操作前重新定义并核对变量，尤其不能在 `$APP`、`$STAGE` 或 `$BACKUP` 为空时执行复制、移动或删除。
+以下命令是脚本实现、故障审计和特殊发布的低层参考，普通发布不要与脚本步骤交叉执行。纯手工执行第 8.2 至 8.7 节时，必须在同一个 SSH shell 中连续执行，后续命令依赖前面定义的变量和 `workspace_stats`。TAT 每次“执行命令”可能是新 shell；使用 TAT 时必须在每次操作前重新定义并核对变量，尤其不能在 `$APP`、`$STAGE` 或 `$BACKUP` 为空时执行复制、移动或删除。
 
 ```bash
 set -euo pipefail
@@ -973,6 +1011,7 @@ docker compose up -d --force-recreate --no-build
 - [ ] `npm run check`、`npm run test`、`npm run build` 通过。
 - [ ] 只提交本次文件并推送 `origin/main`。
 - [ ] 记录完整 Git SHA。
+- [ ] 已确认是普通、存储兼容发布；默认使用 `deploy-release.sh <full-sha>`，不与手工步骤混用。
 - [ ] 服务器磁盘、内存、Docker 和当前容器正常。
 - [ ] 候选目录检出并验证精确 SHA。
 - [ ] 候选 project 完成镜像构建，旧服务仍在线。
@@ -982,7 +1021,7 @@ docker compose up -d --force-recreate --no-build
 - [ ] runtime Skill inventory/hash 已记录；删除/改名经过显式处理。
 - [ ] 停 Runner，目录交换，候选镜像重新标记并 recreate。
 - [ ] SHA、image ID、Runner health、日志、workspace 和飞书 smoke 通过。
-- [ ] 人工验收后才把 release record 标记为 verified。
+- [ ] 人工验收后才执行 `deploy-release.sh verify <full-sha>`，把 release record 标记为 verified。
 - [ ] 记录 backup 路径并保留回滚镜像；明确代码/数据回滚路径。
 
 ### 数据迁移发布

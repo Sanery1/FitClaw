@@ -6747,7 +6747,7 @@ session    = tenants/{tenantKey}/users/{openId}/sessions/{chatId}/context.jsonl
 
 **当前架构的承载能力：** 尚无压测数据，不能给出并发用户上限。已知风险是 Runner 缓存无回收、LLM 调用无全局并发限制，以及 Provider/飞书 API 限流。
 
-完整技术选型、发布和回滚流程见 [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)。
+普通、存储兼容的单机发布由 `scripts/deploy-release.sh <full-sha>` 执行；它不会自动进行历史迁移或把 release 标为已验收。完整技术选型、首次安装、迁移和回滚流程见 [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)。
 
 ---
 
