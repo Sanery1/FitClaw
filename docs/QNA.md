@@ -6647,89 +6647,42 @@ if (seenEventIds.size > MAX_SEEN_EVENTS) {
 
 ---
 
-### Q28: 频道独立 AgentRunner 的隔离级别是进程级、线程级还是协程级？资源上限如何管控？
+### Q28: 私人 session 的 AgentRunner 是什么隔离级别？资源上限如何管控？
 
 **A:**
 
-**隔离级别：协程级（Node.js 单线程内的异步隔离）。**
+**AgentRunner 是 Bot 单进程内的异步状态隔离，不是每用户一个进程或线程。** `sessionRunners` 以 `tenantKey/openId/chatId` 组成的 `sessionKey` 缓存 Runner；不同 session 可在 Node.js 事件循环中并发等待 I/O。独立的 Skill Runner 容器只隔离 Skill 命令执行，不会把每个 AgentRunner 变成独立进程。
 
-**实现（`agent.ts`）：**
-```typescript
-const channelRunners = new Map<string, AgentRunner>();
+每个 session Runner 拥有独立的 Agent/SessionManager、session 目录和按当前用户目录创建的数据工具。`PrivateCoachService` 还用 `KeyedTaskQueue` 按 `userKey` 串行化关系状态和 Coach run，避免同一用户的消息同时修改状态。
 
-function getOrCreateRunner(sandboxConfig, channelId, channelDir): AgentRunner {
-  if (channelRunners.has(channelId)) return channelRunners.get(channelId);
-  const runner = createRunner(sandboxConfig, channelId, channelDir);
-  channelRunners.set(channelId, runner);
-  return runner;
-}
-```
+当前没有 Runner TTL/LRU、全局 LLM 并发上限、单 Runner 内存限制或 Compose CPU/内存限制。`sessionRunners` 创建后常驻，Provider 限流也是全局共享风险；在没有压测和指标前不能声称具体承载上限。
 
-**每个 AgentRunner 拥有独立的：**
-- `Agent` 实例（状态机）
-- `SessionManager`（JSONL 文件）
-- `FileSkillDataStore`（运动数据）
-- workspace/channel Skills
-- 系统提示词
-
-**隔离的实际含义：**
-- 不同频道的 Agent 并发运行在同一个 Node.js 进程中
-- 通过 `async/await` 实现协作式并发，不是真正的并行
-- 一个频道的 Agent 执行 LLM 调用（I/O 阻塞）时，其他频道的 Agent 可以运行
-
-**资源上限管控：**
-- **当前没有显式的资源管控**：
-  - 没有最大并发 Runner 数限制
-  - 没有单个 Runner 的内存限制
-  - 没有 LLM API 调用的并发限制（可能导致 API 限流）
-- **隐式限制**：
-  - Node.js 堆内存限制（默认 ~1.7 GB）
-  - LLM Provider 的 API 限流（由 Provider 侧控制）
-  - 文件描述符限制（每个 Runner 打开多个 JSONL 文件）
-
-**潜在风险：**
-- 大量频道同时活跃时，内存可能溢出
-- 没有 Runner 回收机制——创建后一直存在于 Map 中
-- 没有 LLM 调用排队机制——可能触发 Provider 限流
-
-**核心文件：** `apps/coach-bot/src/agent.ts`（channelRunners Map）
+**核心文件：** `apps/coach-bot/src/agent.ts`、`apps/coach-bot/src/private-coach-service.ts`、`apps/coach-bot/src/runtime/keyed-task-queue.ts`
 
 ---
 
-### Q29: 会话状态隔离在内存中的数据结构是怎样的？如何避免高并发场景下不同频道的会话数据串扰？
+### Q29: 私人会话状态如何隔离？如何避免不同用户串扰？
 
 **A:**
 
-**内存数据结构：**
+隔离键和磁盘路径都来自经过格式校验的飞书身份：
 
-```typescript
-// main.ts
-interface ChannelState {
-  running: boolean;      // 当前是否正在处理消息
-  runner: AgentRunner;   // 频道独立的 Agent 运行器
-  store: ChannelStore;   // 频道独立的消息存储
-}
-const channelStates = new Map<string, ChannelState>();
+```text
+userKey    = tenantKey/openId
+sessionKey = tenantKey/openId/chatId
+user data  = tenants/{tenantKey}/users/{openId}/sport-data/...
+session    = tenants/{tenantKey}/users/{openId}/sessions/{chatId}/context.jsonl
 ```
 
-**状态隔离方式：**
+- `sessionRunners` 按 `sessionKey` 隔离 Agent 和会话上下文。
+- `stateQueue`/`runQueue` 按 `userKey` 串行化同一用户的状态变更和运行。
+- `activeRunControllers` 让停用或离职可以中止该用户在途运行。
+- 群聊不会进入 Coach Agent，而是重定向到私聊，避免群上下文读取私人数据。
+- data tool 只拿到当前 `userDataDir`，namespace 还受 Skill 声明约束。
 
-1. **Map 键隔离**：`channelStates` 以 `channelId`（或 `channelId/userId` for group mentions）为键，每个键对应完全独立的 `ChannelState`
-2. **Agent 实例隔离**：每个 `AgentRunner` 创建独立的 `Agent` 实例，拥有独立的 `AgentState`（systemPrompt、model、messages、tools）
-3. **文件系统隔离**：每个频道有独立的目录（`feishu-workspace/{channelId}/`），包含独立的 `context.jsonl`、`log.jsonl`、`sport-data/`
-4. **SkillDataStore 隔离**：每个 Runner 创建独立的 `FileSkillDataStore`，内存缓存（Map）独立
+不能把这些保障夸大为“绝不会串扰”：Bot 进程、Provider 凭据和外部限流仍然共享；多实例也没有分布式锁。Node.js 单线程不等于没有异步竞态，当前正确性依赖 scope 校验、用户级队列、文件原子写和单实例部署共同成立。
 
-**避免串扰的保障：**
-
-- **无共享可变状态**：不同频道的 Agent 不共享任何可变对象
-- **Node.js 单线程**：不存在真正的并发写入，async/await 是协作式的
-- **文件路径隔离**：数据文件路径包含 channelId，不可能写错目录
-
-**唯一潜在串扰点：**
-- LLM Provider 的 API Key 共享——所有频道使用同一个 API Key，Provider 侧的 rate limit 是全局的
-- `channelRunners` Map 是全局的——但每个 Runner 的内部状态独立
-
-**核心文件：** `apps/coach-bot/src/main.ts`（channelStates Map）、`apps/coach-bot/src/agent.ts`（createRunner）
+**核心文件：** `apps/coach-bot/src/runtime/coach-scope.ts`、`apps/coach-bot/src/private-coach-service.ts`、`apps/coach-bot/src/agent.ts`
 
 ---
 
@@ -6776,25 +6729,25 @@ const channelStates = new Map<string, ChannelState>();
 
 | 方式 | 架构 | 说明 |
 |------|------|------|
-| Docker | 单容器 | `docker compose up -d` 启动一个容器 |
-| PM2 | 单进程 | `pm2 start ecosystem.config.cjs` |
+| Docker Compose | 单机、双容器 | `fitclaw-bot` 负责飞书与 Agent；`fitclaw-skill-runner` 以无网络、只读 workspace 运行 Skill 命令 |
+| PM2 | 单进程 | 只能管理 Bot，不能提供当前 Runner 的权限隔离，不作为等价生产方案 |
 | 裸机 | 单进程 | `node apps/coach-bot/dist/main.js` |
 
 **没有横向伸缩：**
-- 所有频道的 AgentRunner 运行在同一个进程中
-- `channelStates` Map 是进程内存中的数据结构，无法跨进程共享
+- 所有私人 session 的 AgentRunner 运行在同一个 Bot 进程中
+- `sessionRunners` Map、用户级 `KeyedTaskQueue` 和 active run controller 都是进程内状态，无法跨进程共享
 - 没有分布式锁、消息队列或服务发现机制
-- `feishu-workspace/` 是本地文件系统（Docker volume），不支持多实例共享
+- `feishu-workspace/` 是本地文件系统（宿主机 bind mount），不支持多实例共享
 
 **如果要横向伸缩，需要解决：**
-1. **状态外置**：`channelStates` Map → Redis/数据库
-2. **消息分发**：飞书消息路由到正确的实例（需要消息队列如 Kafka/RabbitMQ）
+1. **状态与幂等外置**：运行状态、关系状态和任务去重不能只在单进程内存中
+2. **消息分发**：飞书消息必须稳定路由到拥有对应用户/session 的实例
 3. **数据共享**：`feishu-workspace/` → 分布式文件系统或对象存储
-4. **会话锁**：同一频道的消息不能被多个实例同时处理
+4. **用户/session 锁**：同一用户的消息不能被多个实例并发处理
 
-**当前架构的承载能力：**
-- 单进程 Node.js 可以处理数十个并发频道（受 LLM API 延迟限制，不是 CPU 限制）
-- 主要瓶颈是 LLM API 调用的并发数和飞书 API 的限流
+**当前架构的承载能力：** 尚无压测数据，不能给出并发用户上限。已知风险是 Runner 缓存无回收、LLM 调用无全局并发限制，以及 Provider/飞书 API 限流。
+
+完整技术选型、发布和回滚流程见 [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)。
 
 ---
 
@@ -6808,11 +6761,9 @@ const channelStates = new Map<string, ChannelState>();
 
 | 类型 | 位置 | 内容 |
 |------|------|------|
-| 调试日志 | `~/.fitclaw/agent/fitclaw-debug.log` | 启动信息、模型选择、工具调用 |
-| 会话日志 | `{channelDir}/log.jsonl` | 用户消息、Bot 回复（结构化 JSONL） |
-| 会话上下文 | `{channelDir}/context.jsonl` | 完整的消息历史（含 toolCall + toolResult） |
-| 容器日志 | `docker compose logs` | stdout/stderr |
-| PM2 日志 | `pm2 logs` | stdout/stderr |
+| 进程/容器日志 | `docker compose logs` | Bot/Runner stdout/stderr、启动和工具执行信息 |
+| 会话上下文 | `tenants/{tenant}/users/{openId}/sessions/{chatId}/context.jsonl` | SessionManager 消息历史和状态事件 |
+| 运行追踪 | `feishu-workspace/traces/{date}.jsonl` | trace ID、状态、耗时、模型、Skill 文件、工具、token 和成本 |
 
 **Agent 生命周期事件：**
 
@@ -6824,20 +6775,20 @@ const channelStates = new Map<string, ChannelState>();
 
 **能否追踪完整调用链路？**
 
-**可以，但需要手动拼接：**
+**可以定位单次 Agent run，但跨系统仍需手动拼接：**
 
-1. `context.jsonl` 包含完整的消息序列（user → assistant → toolResult → assistant → ...），可以重建完整的推理链路
-2. 每条 assistant 消息包含 `model`、`provider`、`api`、`usage`、`stopReason`
-3. 每条 toolResult 消息包含 `toolCallId`、`toolName`、`content`、`isError`
+1. `context.jsonl` 保存会话消息和工具结果，可重建会话上下文。
+2. 每次运行会写 `trace_id`、duration、status、model、Skill read、工具状态和 usage/cost。
+3. 容器 stdout 提供实时执行日志，但没有统一查询界面。
 
 **缺失的：**
 - 没有分布式追踪（如 OpenTelemetry）
-- 没有请求级别的 traceId（无法跨组件追踪）
+- trace ID 没有传播到飞书和 LLM 等外部系统
 - 没有性能指标采集（如 P50/P95 延迟、错误率）
 - 没有告警机制
 - 没有 Dashboard
 
-**核心文件：** `apps/coach-bot/src/agent.ts`（事件订阅）、`packages/runtime/src/session/session-manager.ts` 与 `session-format.ts`（JSONL 结构）
+**核心文件：** `apps/coach-bot/src/agent.ts`、`apps/coach-bot/src/runtime/run-trace.ts`、`packages/runtime/src/session/session-manager.ts`
 
 ---
 
@@ -6866,7 +6817,7 @@ const channelStates = new Map<string, ChannelState>();
 | 类型校验 | TypeBox | JSON Schema 生成 + 校验 |
 | 测试 | Vitest | 单元测试 + 集成测试 |
 | 容器化 | Docker | node:22-slim 基础镜像 |
-| 进程管理 | PM2 | 裸机部署时使用 |
+| 容器与进程管理 | Docker Compose | 生产环境启动 Bot 与隔离的 Skill Runner |
 | Python | Python 3（Dockerfile 通过 apt 安装，未固定小版本） | 仅用于 Skill 脚本（动作数据库查询） |
 
 **一个应用和八个支撑包：**
@@ -7407,7 +7358,7 @@ model.id       -> 上游请求里的 model 字段
 为什么不用 MySQL：
 
 1. **数据量小**：个人训练日志、体测和计划不构成数据库规模瓶颈。
-2. **部署简单**：Bot Docker volume 挂载后即可运行，不需要额外数据库服务。
+2. **部署简单**：Bot 通过宿主机 bind mount 持久化 workspace，不需要额外数据库服务。
 3. **Skill 可移植**：Skill 作者声明 namespace 和可选 JSON Schema，不接触存储实现和迁移执行机制。
 4. **边界清晰**：每个 Skill 只能读写自己声明过的 namespace。
 5. **方便调试**：JSON 文件可直接查看，适合早期 Agent 行为排查。
@@ -7480,53 +7431,45 @@ session_entries(id, parent_id, session_id, type, payload, created_at)
 
 ---
 
-### Q48: 为什么 Bot 按频道维护独立 AgentRunner？这个设计在生产中最大的风险是什么？
+### Q48: 为什么 Bot 按私人 session 维护独立 AgentRunner？这个设计在生产中最大的风险是什么？
 
 **A:**
 
-**一句话结论：频道级 AgentRunner 解决会话隔离，但当前实现是单进程内存 Map，生产风险是资源无上限和多实例不可扩展。**
+**一句话结论：session 级 AgentRunner 解决对话上下文隔离，用户级队列保护同一用户的状态顺序；当前仍是单进程内存状态，风险是资源无上限和多实例不可扩展。**
 
 > 隔离级别（协程级 vs 进程级/线程级）、资源管控现状与代码位置，参见 Q28。
 
 当前设计：
 
 ```typescript
-const channelRunners = new Map<string, AgentRunner>();
+const sessionRunners = new Map<string, CachedRunner>();
 ```
 
-每个频道独立拥有：
+每个 `tenantKey/openId/chatId` session 独立拥有 Agent 与 SessionManager；`sport-data` 则按 `tenantKey/openId` 归属用户，不能再描述为“每频道一份私人数据”。`PrivateCoachService` 的 `runQueue` 按用户串行化运行，群聊只重定向到私聊。
 
-- `Agent` 实例
-- `SessionManager`
-- `context.jsonl`
-- `log.jsonl`
-- `sport-data/`
-- system prompt
-- Skill data tools
+为什么要按 session 隔离：
 
-为什么要按频道隔离：
-
-1. **上下文隔离**：不同频道的对话历史不能串。
-2. **数据隔离**：不同频道的训练记录写入不同 `sport-data` 目录。
-3. **并发隔离**：频道 A 正在 compaction，不影响频道 B 的 AgentRunner。
-4. **Prompt 隔离**：不同频道可加载不同的 workspace/channel Skills。
+1. **上下文隔离**：不同私聊 session 的对话历史不能串。
+2. **用户数据归属**：同一用户的多个 session 共享该用户的长期训练数据，不与其他用户共享。
+3. **并发顺序**：同一用户的消息经 keyed queue 串行，不同用户仍可异步等待 I/O。
+4. **Prompt/Skill 隔离**：Runner 每次运行重新加载 workspace 与 session Skills。
 
 当前生产风险：
 
 | 风险 | 原因 |
 |------|------|
-| Runner 无回收 | Map 创建后常驻，频道多时内存增长 |
-| 无并发上限 | 多频道同时调用 LLM，可能触发 Provider 限流 |
+| Runner 无回收 | Map 创建后常驻，session 多时内存增长 |
+| 无全局并发上限 | 多用户同时调用 LLM，可能触发 Provider 限流 |
 | 单进程状态 | 多实例部署时 Map 无法共享 |
 | 本地文件存储 | `feishu-workspace/` 不支持跨机器共享 |
-| 无频道锁 | 多实例场景同一频道可能被并发处理 |
+| 无分布式用户锁 | 多实例场景同一用户可能被并发处理 |
 
 生产化演进：
 
-1. 给 `channelRunners` 增加 TTL/LRU 回收。
+1. 给 `sessionRunners` 增加 TTL/LRU 回收。
 2. 加全局 LLM 并发队列和 Provider 限流器。
-3. 把频道状态外置到 Redis/PostgreSQL。
-4. 用消息队列串行化同一频道消息。
+3. 外置需要跨实例共享的用户/session 状态。
+4. 用幂等和分布式队列串行化同一用户消息。
 5. 文件数据迁移到共享存储或数据库。
 
 面试官真正想看的不是“我用了 Map”，而是你是否知道 Map 只能解决单进程隔离，不能解决分布式一致性。

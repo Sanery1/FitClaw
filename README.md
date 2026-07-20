@@ -72,6 +72,8 @@ docker compose up -d --build
 node packages/coding-agent/dist/cli.js
 ```
 
+上述 Docker 命令只适用于已经初始化 `feishu-workspace` 的环境。服务器首次安装、日常发布、数据迁移和回滚请按 [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md) 执行。
+
 Bot 也可以从源码启动：
 
 ```bash
@@ -114,6 +116,7 @@ npm run eval -- --suite session
 - [健身记忆契约](openspec/specs/fitness-memory-contract/spec.md)
 - [第一阶段 MVP](docs/FIRST_STAGE_MVP_CHECKLIST.md)
 - [当前闭环状态](docs/FEISHU_FITNESS_LOOP_STATUS.md)
+- [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md)
 
 ## License
 
