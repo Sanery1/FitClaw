@@ -1,5 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { CoachPersonalityId } from "@fitclaw/coach-core";
 import type { CoachRunState } from "./events.js";
 
 export interface RunTraceV1 {
@@ -8,6 +9,8 @@ export interface RunTraceV1 {
 	duration_ms: number;
 	status: "success" | "error" | "aborted";
 	model_id: string;
+	personality_id: CoachPersonalityId | "unknown";
+	personality_policy_version: string;
 	skill_files_read: readonly string[];
 	tools: readonly {
 		tool_name: string;
@@ -41,6 +44,8 @@ export function buildRunTrace(runState: CoachRunState, completedAt = Date.now())
 		duration_ms: Math.max(0, completedAt - runState.startedAtMs),
 		status: traceStatus(runState),
 		model_id: runState.modelId,
+		personality_id: runState.personalityId,
+		personality_policy_version: runState.personalityPolicyVersion,
 		skill_files_read: Array.from(runState.skillFilesRead).sort(),
 		tools: runState.toolTraces.map((tool) => ({
 			tool_name: tool.toolName,

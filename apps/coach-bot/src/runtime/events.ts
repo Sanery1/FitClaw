@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { COACH_PERSONALITY_POLICY_VERSION, type CoachPersonalityId } from "@fitclaw/coach-core";
 import * as log from "../log.js";
 import type { BotContext } from "../types.js";
 import type { CoachSessionEvent } from "./session.js";
@@ -40,6 +41,8 @@ export interface CoachRunState {
 	traceId: string;
 	startedAtMs: number;
 	modelId: string;
+	personalityId: CoachPersonalityId | "unknown";
+	personalityPolicyVersion: string;
 	errorCode?: string;
 	totalUsage: CoachUsageTotals;
 	stopReason: string;
@@ -67,6 +70,8 @@ export function createCoachRunState(): CoachRunState {
 		traceId: randomUUID(),
 		startedAtMs: Date.now(),
 		modelId: "unknown",
+		personalityId: "unknown",
+		personalityPolicyVersion: COACH_PERSONALITY_POLICY_VERSION,
 		totalUsage: createEmptyUsageTotals(),
 		stopReason: "stop",
 		errorMessage: undefined,

@@ -1,7 +1,16 @@
+import { COACH_PERSONALITIES, type CoachPersonalityId } from "@fitclaw/coach-core";
+import { renderFeishuCard } from "./adapters/feishu/card-renderer.js";
 import type { FeishuEvent, FeishuUserLifecycleEvent } from "./feishu.js";
-import { decideCoachRoute } from "./relationship-routing.js";
+import * as log from "./log.js";
+import {
+	buildPersonalitySelectionPrompt,
+	isSwitchPersonalityCommand,
+	resolvePersonalitySelection,
+} from "./personality-selection.js";
+import { decideCoachRoute, normalizeCoachCommand } from "./relationship-routing.js";
 import {
 	type CoachInvitationSource,
+	type CoachRelationship,
 	type CoachRelationshipStore,
 	createRelationship,
 	FITCLAW_MEMORY_POLICY_VERSION,
@@ -21,12 +30,18 @@ export const GROUP_PRIVACY_REDIRECT = "为了保护你的训练和身体数据�
 export interface PrivateCoachTransport {
 	sendDirectMessage(openId: string, text: string): Promise<string>;
 	sendThreadMessage(parentMessageId: string, text: string): Promise<void>;
+	sendCardMessage(parentMessageId: string, card: Record<string, unknown>): Promise<void>;
 }
 
 export interface PrivateCoachServiceOptions {
 	relationships: CoachRelationshipStore;
 	transport: PrivateCoachTransport;
-	runCoach(event: FeishuEvent, scope: CoachSessionScope, signal: AbortSignal): Promise<void>;
+	runCoach(
+		event: FeishuEvent,
+		scope: CoachSessionScope,
+		personalityId: CoachPersonalityId,
+		signal: AbortSignal,
+	): Promise<void>;
 	abortUserRuns?(scope: CoachUserScope): void | Promise<void>;
 	resolveUserScope(event: FeishuUserLifecycleEvent): CoachUserScope;
 	resolveSessionScope(event: FeishuEvent): CoachSessionScope;
@@ -38,7 +53,9 @@ export type InvitationResult =
 	| { status: "skipped" }
 	| { status: "failed"; reason: string };
 
-type MessagePreparation = { type: "handled" } | { type: "coach"; controller: AbortController };
+type MessagePreparation =
+	| { type: "handled" }
+	| { type: "coach"; controller: AbortController; personalityId: CoachPersonalityId };
 
 export class PrivateCoachService {
 	private readonly stateQueue = new KeyedTaskQueue();
@@ -130,7 +147,7 @@ export class PrivateCoachService {
 		await this.runQueue.run(scope.userKey, async () => {
 			try {
 				if (!preparation.controller.signal.aborted) {
-					await this.options.runCoach(event, scope, preparation.controller.signal);
+					await this.options.runCoach(event, scope, preparation.personalityId, preparation.controller.signal);
 				}
 			} finally {
 				this.unregisterActiveRun(scope.userKey, preparation.controller);
@@ -170,17 +187,23 @@ export class PrivateCoachService {
 
 		if (action === "activate") {
 			const activatedAt = this.timestamp();
-			await this.options.relationships.save(scope, {
+			const activated: CoachRelationship = {
 				...relationship,
 				status: "active",
 				activatedAt,
 				memoryPolicyVersion: FITCLAW_MEMORY_POLICY_VERSION,
+				personalitySelectionPending: relationship.personalityId === undefined,
 				updatedAt: activatedAt,
-			});
-			await this.options.transport.sendThreadMessage(
-				event.messageId,
-				"私人教练已启用。训练提醒仍为关闭状态。你可以从目标、训练经验或可用器械开始告诉我。",
-			);
+			};
+			await this.options.relationships.save(scope, activated);
+			if (activated.personalityId) {
+				await this.options.transport.sendThreadMessage(
+					event.messageId,
+					`私人教练已启用，将继续使用“${COACH_PERSONALITIES[activated.personalityId].displayName}”。训练提醒仍为关闭状态。`,
+				);
+			} else {
+				await this.sendPersonalitySelectionPrompt(event.messageId, false, false);
+			}
 			return { type: "handled" };
 		}
 
@@ -189,6 +212,7 @@ export class PrivateCoachService {
 			await this.options.relationships.save(scope, {
 				...relationship,
 				status: "declined",
+				personalitySelectionPending: false,
 				trainingRemindersEnabled: false,
 				declinedAt,
 				updatedAt: declinedAt,
@@ -219,7 +243,99 @@ export class PrivateCoachService {
 		}
 
 		if (action !== "coach") throw new Error(`Unexpected private coach route: ${action}`);
-		return { type: "coach", controller: this.registerActiveRun(scope.userKey) };
+
+		const command = normalizeCoachCommand(event.text);
+		if (relationship.personalitySelectionPending || !relationship.personalityId) {
+			return this.handlePersonalitySelection(event, scope, relationship, command);
+		}
+
+		if (isSwitchPersonalityCommand(command)) {
+			const updatedAt = this.timestamp();
+			await this.options.relationships.save(scope, {
+				...relationship,
+				personalitySelectionPending: true,
+				updatedAt,
+			});
+			this.abortActiveRuns(scope.userKey);
+			await this.options.abortUserRuns?.(scope);
+			await this.sendPersonalitySelectionPrompt(event.messageId, true, false);
+			return { type: "handled" };
+		}
+
+		return {
+			type: "coach",
+			controller: this.registerActiveRun(scope.userKey),
+			personalityId: relationship.personalityId,
+		};
+	}
+
+	private async handlePersonalitySelection(
+		event: FeishuEvent,
+		scope: CoachSessionScope,
+		relationship: CoachRelationship,
+		command: string,
+	): Promise<MessagePreparation> {
+		const personalityId = resolvePersonalitySelection(command);
+		if (personalityId) {
+			const updatedAt = this.timestamp();
+			await this.options.relationships.save(scope, {
+				...relationship,
+				personalityId,
+				personalitySelectionPending: false,
+				updatedAt,
+			});
+			await this.options.transport.sendThreadMessage(
+				event.messageId,
+				`已选择“${COACH_PERSONALITIES[personalityId].displayName}”。现在可以继续告诉我你的训练目标或问题。`,
+			);
+			return { type: "handled" };
+		}
+
+		if (command === "取消" && relationship.personalityId) {
+			const updatedAt = this.timestamp();
+			await this.options.relationships.save(scope, {
+				...relationship,
+				personalitySelectionPending: false,
+				updatedAt,
+			});
+			await this.options.transport.sendThreadMessage(
+				event.messageId,
+				`已保留“${COACH_PERSONALITIES[relationship.personalityId].displayName}”。`,
+			);
+			return { type: "handled" };
+		}
+
+		const isLegacySelection = !relationship.personalitySelectionPending && !relationship.personalityId;
+		if (!relationship.personalitySelectionPending) {
+			await this.options.relationships.save(scope, {
+				...relationship,
+				personalitySelectionPending: true,
+				updatedAt: this.timestamp(),
+			});
+		}
+		await this.sendPersonalitySelectionPrompt(
+			event.messageId,
+			relationship.personalityId !== undefined,
+			isLegacySelection,
+		);
+		return { type: "handled" };
+	}
+
+	private async sendPersonalitySelectionPrompt(
+		messageId: string,
+		canCancel: boolean,
+		shouldResendMessage: boolean,
+	): Promise<void> {
+		const prompt = buildPersonalitySelectionPrompt({ canCancel, shouldResendMessage });
+		try {
+			await this.options.transport.sendCardMessage(messageId, renderFeishuCard(prompt));
+		} catch (error) {
+			log.logWarning(
+				"Failed to send personality selection card; falling back to text",
+				error instanceof Error ? error.message : String(error),
+			);
+			await this.options.transport.sendThreadMessage(messageId, prompt);
+		}
 	}
 
 	private registerActiveRun(userKey: string): AbortController {
@@ -251,6 +367,7 @@ export class PrivateCoachService {
 		await this.options.relationships.save(scope, {
 			...(existing ?? createRelationship(scope, "revoked", revokedAt)),
 			status: "revoked",
+			personalitySelectionPending: false,
 			trainingRemindersEnabled: false,
 			revokedAt,
 			updatedAt: revokedAt,

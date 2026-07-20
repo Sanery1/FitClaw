@@ -19,7 +19,7 @@ export function decideCoachRoute(
 	status?: CoachRelationshipStatus,
 ): CoachRouteAction {
 	if (chatType === "group") return "group_redirect";
-	const command = text.trim().replace(/[。.!！?？]+$/u, "");
+	const command = normalizeCoachCommand(text);
 	if (status === "active") return DEACTIVATION_COMMANDS.has(command) ? "deactivate" : "coach";
 	if (status === "revoked") return "blocked";
 	if (status === "declined") return ACTIVATION_COMMANDS.has(command) ? "activate" : "blocked";
@@ -27,4 +27,8 @@ export function decideCoachRoute(
 	if (ACTIVATION_COMMANDS.has(command)) return "activate";
 	if (DECLINE_COMMANDS.has(command)) return "decline";
 	return "activation_prompt";
+}
+
+export function normalizeCoachCommand(text: string): string {
+	return text.trim().replace(/[。.!！?？]+$/u, "");
 }

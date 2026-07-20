@@ -161,6 +161,7 @@ describe("coach session events", () => {
 		const runState = createCoachRunState();
 		runState.startedAtMs = 1_000;
 		runState.modelId = "provider/model";
+		runState.personalityId = "strict";
 		runState.skillFilesRead.add("bodybuilding/SKILL.md");
 		runState.toolTraces.push({
 			toolName: "knowledge_read",
@@ -173,7 +174,13 @@ describe("coach session events", () => {
 
 		const trace = buildRunTrace(runState, 1_050);
 		const serialized = JSON.stringify(trace);
-		expect(trace).toMatchObject({ duration_ms: 50, model_id: "provider/model", status: "success" });
+		expect(trace).toMatchObject({
+			duration_ms: 50,
+			model_id: "provider/model",
+			personality_id: "strict",
+			personality_policy_version: "2026-07-20",
+			status: "success",
+		});
 		expect(serialized).not.toMatch(/private prompt|textbook body|[A-Z]:\\|user_id|channel/);
 	});
 

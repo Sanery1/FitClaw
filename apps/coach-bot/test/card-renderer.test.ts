@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderFeishuCard } from "../src/adapters/feishu/card-renderer.js";
+import { buildPersonalitySelectionPrompt } from "../src/personality-selection.js";
 
 describe("renderFeishuCard", () => {
 	it("renders plain text into a card with default element", () => {
@@ -64,5 +65,18 @@ describe("renderFeishuCard", () => {
 	it("produces fallback element for empty input", () => {
 		const result = renderFeishuCard("");
 		expect(result.elements?.[0].text?.content).toBe("");
+	});
+
+	it("renders all personality options without interactive controls", () => {
+		const result = renderFeishuCard(buildPersonalitySelectionPrompt({ canCancel: true }));
+		const serialized = JSON.stringify(result);
+
+		expect(result.header?.title?.content).toBe("选择你的教练风格");
+		expect(serialized).toContain("暖心鼓励");
+		expect(serialized).toContain("温和理性");
+		expect(serialized).toContain("严格督导");
+		expect(serialized).toContain("取消");
+		expect(serialized).not.toContain('"tag":"button"');
+		expect(serialized).not.toContain('"actions"');
 	});
 });

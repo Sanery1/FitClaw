@@ -245,7 +245,7 @@ const service = new PrivateCoachService({
 		const abortedCount = await abortUserRunners(scope.userKey);
 		log.logInfo(`Aborted ${abortedCount} private coach session(s) for ${scope.userKey}`);
 	},
-	runCoach: async (event, scope, signal) => {
+	runCoach: async (event, scope, personalityId, signal) => {
 		const runner = getOrCreateRunner({
 			sandboxConfig: sandbox,
 			workspaceDir: workingDir,
@@ -253,6 +253,7 @@ const service = new PrivateCoachService({
 			sessionKey: scope.sessionKey,
 			sessionDir: scope.sessionDir,
 			userDataDir: scope.userDataDir,
+			personalityId,
 		});
 		const abortRunner = () => {
 			void runner
@@ -290,7 +291,7 @@ const service = new PrivateCoachService({
 			try {
 				await ctx.setTyping(true);
 				await ctx.setWorking(true);
-				const result = await runner.run(ctx);
+				const result = await runner.run(ctx, personalityId);
 				if (result.errorMessage) await ctx.respond(`Error: ${result.errorMessage}`);
 			} finally {
 				let isStillActive = false;

@@ -8,7 +8,7 @@ import {
 	PRIVATE_COACH_ACTIVATION_PROMPT,
 	PrivateCoachService,
 } from "../src/private-coach-service.js";
-import { FileCoachRelationshipStore } from "../src/relationships.js";
+import { createRelationship, FileCoachRelationshipStore } from "../src/relationships.js";
 import { resolveCoachSessionScope, resolveCoachUserScope } from "../src/runtime/coach-scope.js";
 
 function message(text: string, chatType: "p2p" | "group" = "p2p"): FeishuEvent {
@@ -37,6 +37,7 @@ describe("PrivateCoachService", () => {
 	let workspaceDir: string;
 	let directMessages: string[];
 	let replies: string[];
+	let cards: Record<string, unknown>[];
 	let runCoach: ReturnType<typeof vi.fn>;
 	let abortUserRuns: ReturnType<typeof vi.fn>;
 	let service: PrivateCoachService;
@@ -46,6 +47,7 @@ describe("PrivateCoachService", () => {
 		workspaceDir = join(tmpdir(), `fitclaw-private-coach-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		directMessages = [];
 		replies = [];
+		cards = [];
 		runCoach = vi.fn(async () => undefined);
 		abortUserRuns = vi.fn();
 		relationships = new FileCoachRelationshipStore();
@@ -58,6 +60,9 @@ describe("PrivateCoachService", () => {
 				},
 				sendThreadMessage: async (_messageId, text) => {
 					replies.push(text);
+				},
+				sendCardMessage: async (_messageId, card) => {
+					cards.push(card);
 				},
 			},
 			runCoach,
@@ -101,10 +106,24 @@ describe("PrivateCoachService", () => {
 		expect(runCoach).not.toHaveBeenCalled();
 
 		await service.handleMessage(message("开始"));
-		expect((await relationships.load(resolveCoachUserScope(workspaceDir, joined)))?.status).toBe("active");
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			status: "active",
+			personalitySelectionPending: true,
+		});
+		expect(cards).toHaveLength(1);
 
 		await service.handleMessage(message("我的目标是增肌"));
+		expect(runCoach).not.toHaveBeenCalled();
+		expect(cards).toHaveLength(2);
+
+		await service.handleMessage(message("2"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "balanced",
+			personalitySelectionPending: false,
+		});
+		await service.handleMessage(message("我的目标是增肌"));
 		expect(runCoach).toHaveBeenCalledOnce();
+		expect(runCoach.mock.calls[0]?.[2]).toBe("balanced");
 	});
 
 	it("allows opt-in after declining and lets an active user withdraw", async () => {
@@ -124,9 +143,10 @@ describe("PrivateCoachService", () => {
 	it("persists an active user's withdrawal and aborts the current run immediately", async () => {
 		await service.handleMessage(message("你好"));
 		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("2"));
 		const started = deferred();
 		let statusAtAbort: string | undefined;
-		runCoach.mockImplementationOnce(async (_event, scope, signal: AbortSignal) => {
+		runCoach.mockImplementationOnce(async (_event, scope, _personalityId, signal: AbortSignal) => {
 			started.resolve();
 			await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 			statusAtAbort = (await relationships.load(scope))?.status;
@@ -145,9 +165,10 @@ describe("PrivateCoachService", () => {
 	it("persists revocation and aborts an in-flight coach run", async () => {
 		await service.handleMessage(message("你好"));
 		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("2"));
 		const started = deferred();
 		let didObserveAbort = false;
-		runCoach.mockImplementationOnce(async (_event, _scope, signal: AbortSignal) => {
+		runCoach.mockImplementationOnce(async (_event, _scope, _personalityId, signal: AbortSignal) => {
 			started.resolve();
 			await new Promise<void>((resolve) => {
 				if (signal.aborted) resolve();
@@ -203,6 +224,148 @@ describe("PrivateCoachService", () => {
 		expect(runCoach).not.toHaveBeenCalled();
 	});
 
+	it("keeps ordinary numbers as coach input outside personality selection", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("1"));
+
+		await service.handleMessage(message("2"));
+
+		expect(runCoach).toHaveBeenCalledOnce();
+		expect(runCoach.mock.calls[0]?.[0].text).toBe("2");
+		expect(runCoach.mock.calls[0]?.[2]).toBe("supportive");
+	});
+
+	it("switches, cancels, and reselects a personality without running the coach", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("1"));
+
+		await service.handleMessage(message("切换人格"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "supportive",
+			personalitySelectionPending: true,
+		});
+		expect(abortUserRuns).toHaveBeenCalledOnce();
+		expect(JSON.stringify(cards.at(-1))).toContain("取消");
+
+		await service.handleMessage(message("取消"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "supportive",
+			personalitySelectionPending: false,
+		});
+
+		await service.handleMessage(message("更换人格。"));
+		await service.handleMessage(message("3"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "strict",
+			personalitySelectionPending: false,
+		});
+
+		await service.handleMessage(message("切换人格"));
+		await service.handleMessage(message("3"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "strict",
+			personalitySelectionPending: false,
+		});
+		expect(runCoach).not.toHaveBeenCalled();
+	});
+
+	it("preserves the selected personality across deactivation and reactivation", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("3"));
+		const cardCount = cards.length;
+
+		await service.handleMessage(message("停用"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			status: "declined",
+			personalityId: "strict",
+			personalitySelectionPending: false,
+		});
+
+		await service.handleMessage(message("开始"));
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			status: "active",
+			personalityId: "strict",
+			personalitySelectionPending: false,
+		});
+		expect(cards).toHaveLength(cardCount);
+
+		await service.handleMessage(message("给我今天的建议"));
+		expect(runCoach.mock.calls.at(-1)?.[2]).toBe("strict");
+	});
+
+	it("gates a legacy active relationship without replaying the triggering message", async () => {
+		const scope = resolveCoachUserScope(workspaceDir, joined);
+		await relationships.save(
+			scope,
+			createRelationship(scope, "active", "2026-07-19T08:00:00.000Z", { activatedAt: "2026-07-19T08:00:00.000Z" }),
+		);
+
+		await service.handleMessage(message("帮我安排今天的训练"));
+
+		expect(runCoach).not.toHaveBeenCalled();
+		expect(await relationships.load(scope)).toMatchObject({ personalitySelectionPending: true });
+		expect(JSON.stringify(cards.at(-1))).toContain("重新发送你刚才的问题");
+	});
+
+	it("aborts an in-flight old-personality run before showing the switch prompt", async () => {
+		await service.handleMessage(message("你好"));
+		await service.handleMessage(message("开始"));
+		await service.handleMessage(message("1"));
+		const started = deferred();
+		let didObserveAbort = false;
+		runCoach.mockImplementationOnce(async (_event, _scope, personalityId, signal: AbortSignal) => {
+			expect(personalityId).toBe("supportive");
+			started.resolve();
+			await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+			didObserveAbort = true;
+		});
+
+		const running = service.handleMessage(message("开始今天的训练"));
+		await started.promise;
+		await service.handleMessage(message("切换人格"));
+		await running;
+
+		expect(didObserveAbort).toBe(true);
+		expect(abortUserRuns).toHaveBeenCalledOnce();
+		expect(await relationships.load(resolveCoachUserScope(workspaceDir, joined))).toMatchObject({
+			personalityId: "supportive",
+			personalitySelectionPending: true,
+		});
+	});
+
+	it("falls back to text when the personality card cannot be sent", async () => {
+		const fallbackReplies: string[] = [];
+		const fallbackService = new PrivateCoachService({
+			relationships,
+			transport: {
+				sendDirectMessage: async () => "om_invitation",
+				sendThreadMessage: async (_messageId, text) => {
+					fallbackReplies.push(text);
+				},
+				sendCardMessage: async () => {
+					throw new Error("card unavailable");
+				},
+			},
+			runCoach,
+			resolveUserScope: (event) => resolveCoachUserScope(workspaceDir, event),
+			resolveSessionScope: (event) =>
+				resolveCoachSessionScope(workspaceDir, {
+					tenantKey: event.tenantKey,
+					openId: event.user.openId,
+					chatId: event.chatId,
+				}),
+		});
+
+		await fallbackService.handleMessage(message("你好"));
+		await fallbackService.handleMessage(message("开始"));
+
+		expect(fallbackReplies.at(-1)).toContain("选择你的教练风格");
+		expect(fallbackReplies.at(-1)).toContain("1 / 2 / 3");
+	});
+
 	it("persists a clear invitation failure and does not retry duplicate callbacks", async () => {
 		const failedService = new PrivateCoachService({
 			relationships,
@@ -211,6 +374,7 @@ describe("PrivateCoachService", () => {
 					throw new Error("user is outside app availability");
 				},
 				sendThreadMessage: async () => undefined,
+				sendCardMessage: async () => undefined,
 			},
 			runCoach,
 			resolveUserScope: (event) => resolveCoachUserScope(workspaceDir, event),

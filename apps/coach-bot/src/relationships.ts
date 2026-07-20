@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type CoachPersonalityId, isCoachPersonalityId } from "@fitclaw/coach-core";
 import lockfile from "proper-lockfile";
 import type { CoachUserScope } from "./runtime/coach-scope.js";
 
@@ -26,6 +27,8 @@ export interface CoachRelationship {
 	declinedAt?: string;
 	revokedAt?: string;
 	memoryPolicyVersion?: string;
+	personalityId?: CoachPersonalityId;
+	personalitySelectionPending?: boolean;
 	trainingRemindersEnabled: boolean;
 	updatedAt: string;
 }
@@ -92,6 +95,12 @@ function parseRelationship(value: unknown, scope: CoachUserScope): CoachRelation
 	}
 	if (!isRelationshipStatus(value.status) || typeof value.trainingRemindersEnabled !== "boolean") {
 		throw new Error(`Invalid relationship state for ${scope.userKey}`);
+	}
+	if (value.personalityId !== undefined && !isCoachPersonalityId(value.personalityId)) {
+		throw new Error(`Invalid relationship personality for ${scope.userKey}`);
+	}
+	if (value.personalitySelectionPending !== undefined && typeof value.personalitySelectionPending !== "boolean") {
+		throw new Error(`Invalid relationship personality selection state for ${scope.userKey}`);
 	}
 	if (typeof value.updatedAt !== "string") throw new Error(`Invalid relationship timestamp for ${scope.userKey}`);
 	return value as unknown as CoachRelationship;

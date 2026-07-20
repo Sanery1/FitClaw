@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, ImageContent } from "@fitclaw/ai";
-import { buildCoachSystemPrompt } from "@fitclaw/coach-core";
+import { buildCoachSystemPrompt, COACH_PERSONALITY_POLICY_VERSION, type CoachPersonalityId } from "@fitclaw/coach-core";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { isAbsolute, join } from "path";
@@ -25,7 +25,11 @@ export interface PendingMessage {
 }
 
 export interface AgentRunner {
-	run(ctx: BotContext, pendingMessages?: PendingMessage[]): Promise<{ stopReason: string; errorMessage?: string }>;
+	run(
+		ctx: BotContext,
+		personalityId: CoachPersonalityId,
+		pendingMessages?: PendingMessage[],
+	): Promise<{ stopReason: string; errorMessage?: string }>;
 	abort(): Promise<void>;
 }
 
@@ -36,6 +40,7 @@ export interface CoachRunnerOptions {
 	sessionKey: string;
 	sessionDir: string;
 	userDataDir: string;
+	personalityId: CoachPersonalityId;
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -93,7 +98,14 @@ export async function abortUserRunners(userKey: string): Promise<number> {
  * Sets up the session and subscribes to events once.
  */
 function createRunner(options: CoachRunnerOptions): AgentRunner {
-	const { sandboxConfig, workspaceDir, sessionKey, sessionDir, userDataDir } = options;
+	const {
+		sandboxConfig,
+		workspaceDir,
+		sessionKey,
+		sessionDir,
+		userDataDir,
+		personalityId: initialPersonalityId,
+	} = options;
 	const executor = createExecutor(sandboxConfig, { workspaceRoot: workspaceDir, dataDir: userDataDir });
 	const workspacePath = executor.getWorkspacePath(workspaceDir);
 	const knowledgePaths = createKnowledgePaths(workspaceDir);
@@ -107,7 +119,7 @@ function createRunner(options: CoachRunnerOptions): AgentRunner {
 
 	// Initial system prompt (updated each run with freshly loaded skills)
 	const skills = loadCoachSkills(sessionDir, workspacePath, workspaceDir);
-	const systemPrompt = buildCoachSystemPrompt(skills);
+	const systemPrompt = buildCoachSystemPrompt(skills, initialPersonalityId);
 
 	const tools = createCoachActiveTools(executor, userDataDir, skills, undefined, knowledgeStore);
 
@@ -151,6 +163,7 @@ function createRunner(options: CoachRunnerOptions): AgentRunner {
 	return {
 		async run(
 			ctx: BotContext,
+			personalityId: CoachPersonalityId,
 			_pendingMessages?: PendingMessage[],
 		): Promise<{ stopReason: string; errorMessage?: string }> {
 			await mkdir(sessionDir, { recursive: true });
@@ -173,7 +186,7 @@ function createRunner(options: CoachRunnerOptions): AgentRunner {
 
 			// Update the system prompt and tools with freshly loaded skills
 			const skills = loadCoachSkills(sessionDir, workspacePath, workspaceDir);
-			const systemPrompt = buildCoachSystemPrompt(skills);
+			const systemPrompt = buildCoachSystemPrompt(skills, personalityId);
 			const activeTools = createCoachActiveTools(executor, userDataDir, skills, ctx.uploadFile, knowledgeStore);
 			session.updateRuntime(systemPrompt, activeTools);
 
@@ -189,6 +202,8 @@ function createRunner(options: CoachRunnerOptions): AgentRunner {
 			runState.traceId = randomUUID();
 			runState.startedAtMs = Date.now();
 			runState.modelId = `${resolvedModel.provider}/${resolvedModel.id}`;
+			runState.personalityId = personalityId;
+			runState.personalityPolicyVersion = COACH_PERSONALITY_POLICY_VERSION;
 			runState.errorCode = undefined;
 			runState.totalUsage = createEmptyUsageTotals();
 			runState.stopReason = "stop";
