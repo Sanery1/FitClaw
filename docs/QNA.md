@@ -6747,7 +6747,7 @@ session    = tenants/{tenantKey}/users/{openId}/sessions/{chatId}/context.jsonl
 
 **当前架构的承载能力：** 尚无压测数据，不能给出并发用户上限。已知风险是 Runner 缓存无回收、LLM 调用无全局并发限制，以及 Provider/飞书 API 限流。
 
-完整技术选型、发布和回滚流程见 [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)。
+普通、存储兼容的单机发布由 `scripts/deploy-release.sh <full-sha>` 执行；它不会自动进行历史迁移或把 release 标为已验收。完整技术选型、首次安装、迁移和回滚流程见 [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md)。
 
 ---
 
@@ -6820,7 +6820,7 @@ session    = tenants/{tenantKey}/users/{openId}/sessions/{chatId}/context.jsonl
 | 容器与进程管理 | Docker Compose | 生产环境启动 Bot 与隔离的 Skill Runner |
 | Python | Python 3（Dockerfile 通过 apt 安装，未固定小版本） | 仅用于 Skill 脚本（动作数据库查询） |
 
-**一个应用和八个支撑包：**
+**一个应用和七个支撑包：**
 
 | 包 | npm 名 | 职责 |
 |----|--------|------|
@@ -6832,7 +6832,6 @@ session    = tenants/{tenantKey}/users/{openId}/sessions/{chatId}/context.jsonl
 | `packages/coding-agent` | `@fitclaw/claw` | 开发/调试 CLI（交互式 TUI） |
 | `packages/tui` | `@fitclaw/tui` | 终端 UI 组件库 |
 | `packages/web-ui` | `@fitclaw/web-ui` | Web 聊天 UI 组件 |
-| `packages/pods` | `@fitclaw/pods` | GPU Pod 管理 CLI |
 
 ---
 

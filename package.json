@@ -13,7 +13,7 @@
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
-		"build": "npm run build --workspace @fitclaw/tui && npm run build --workspace @fitclaw/ai && npm run build --workspace @fitclaw/agent-core && npm run build --workspace @fitclaw/runtime && npm run build --workspace @fitclaw/coach-core && npm run build --workspace @fitclaw/claw && npm run build --workspace @fitclaw/coach-bot && npm run build --workspace @fitclaw/web-ui && npm run build --workspace @fitclaw/pods",
+		"build": "npm run build --workspace @fitclaw/tui && npm run build --workspace @fitclaw/ai && npm run build --workspace @fitclaw/agent-core && npm run build --workspace @fitclaw/runtime && npm run build --workspace @fitclaw/coach-core && npm run build --workspace @fitclaw/claw && npm run build --workspace @fitclaw/coach-bot && npm run build --workspace @fitclaw/web-ui",
 		"dev": "concurrently --names \"ai,agent,runtime,coach-core,coding-agent,coach-bot,web-ui,tui\" --prefix-colors \"cyan,yellow,blue,green,red,white,magenta,cyan\" \"npm run dev --workspace @fitclaw/ai\" \"npm run dev --workspace @fitclaw/agent-core\" \"npm run dev --workspace @fitclaw/runtime\" \"npm run dev --workspace @fitclaw/coach-core\" \"npm run dev --workspace @fitclaw/claw\" \"npm run dev --workspace @fitclaw/coach-bot\" \"npm run dev --workspace @fitclaw/web-ui\" \"npm run dev --workspace @fitclaw/tui\"",
 		"dev:tsc": "concurrently --names \"ai,web-ui\" --prefix-colors \"cyan,green\" \"cd packages/ai && npm run dev:tsc\" \"cd packages/web-ui && npm run dev:tsc\"",
 		"check": "biome check --write --error-on-warnings . && tsgo --noEmit && npm run check:browser-smoke && cd packages/web-ui && npm run check",

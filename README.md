@@ -55,7 +55,6 @@ Feishu user
 | `packages/coding-agent` | 开发与调试 CLI，不作为健身产品入口 |
 | `packages/tui` | CLI 使用的终端 UI 基础设施 |
 | `packages/web-ui` | 保留的非核心 Web UI 组件，第一阶段冻结扩张 |
-| `packages/pods` | 保留的非核心 GPU 工具，第一阶段冻结扩张 |
 | `.fitclaw/skills/bodybuilding` | 当前 canonical bodybuilding Skill 和动作资源 |
 
 ## 快速开始
@@ -72,7 +71,7 @@ docker compose up -d --build
 node packages/coding-agent/dist/cli.js
 ```
 
-上述 Docker 命令只适用于已经初始化 `feishu-workspace` 的环境。服务器首次安装、日常发布、数据迁移和回滚请按 [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md) 执行。
+上述 Docker 命令只适用于已经初始化 `feishu-workspace` 的环境。服务器首次安装、数据迁移和回滚请按 [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md) 执行；普通、存储兼容的日常发布使用 `scripts/deploy-release.sh <full-sha>`。
 
 Bot 也可以从源码启动：
 

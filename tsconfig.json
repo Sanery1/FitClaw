@@ -20,8 +20,6 @@
 			"typebox": ["./node_modules/typebox"],
 			"@fitclaw/coach-bot": ["./apps/coach-bot/src/main.ts"],
 			"@fitclaw/coach-bot/*": ["./apps/coach-bot/src/*"],
-			"@fitclaw/pods": ["./packages/pods/src/index.ts"],
-			"@fitclaw/pods/*": ["./packages/pods/src/*"],
 			"@fitclaw/tui": ["./packages/tui/src/index.ts"],
 			"@fitclaw/tui/*": ["./packages/tui/src/*"],
 			"@fitclaw/web-ui": ["./packages/web-ui/src/index.ts"],

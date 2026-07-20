@@ -21,7 +21,7 @@
 
 ## 架构概览
 
-一个主应用和八个支撑包：
+一个主应用和七个支撑包：
 
 | 包 | npm 名 | 职责 |
 |----|--------|------|
@@ -33,7 +33,6 @@
 | `packages/coding-agent` | `@fitclaw/claw` | 开发/调试 CLI（交互式 TUI） |
 | `packages/tui` | `@fitclaw/tui` | 终端 UI 组件库 |
 | `packages/web-ui` | `@fitclaw/web-ui` | 非核心 Web UI 组件，第一阶段冻结扩张 |
-| `packages/pods` | `@fitclaw/pods` | 非核心 GPU Pod 工具，第一阶段冻结扩张 |
 
 AI 接手速读 → [docs/PROJECT_UNDERSTANDING.md](./docs/PROJECT_UNDERSTANDING.md)
 架构学习、问答与风险记录 → [docs/QNA.md](./docs/QNA.md)
@@ -183,7 +182,7 @@ node packages/coding-agent/dist/cli.js
 
 ```
 
-Bot 生产部署不能只执行一次 `docker compose up`：首次安装还需要初始化 workspace 和权限。完整的首次安装、日常发布、数据迁移和回滚流程见 [部署架构与发布手册](./docs/DEPLOYMENT_ARCHITECTURE.md)。PM2 只能管理单个 Node 进程，不能替代当前 Skill Runner 的容器隔离，因此不作为等价生产方案。
+Bot 生产部署不能只执行一次 `docker compose up`：首次安装还需要初始化 workspace 和权限。普通、存储兼容的日常发布使用 `scripts/deploy-release.sh <full-sha>`；完整的首次安装、数据迁移、人工验收和回滚流程见 [部署架构与发布手册](./docs/DEPLOYMENT_ARCHITECTURE.md)。PM2 只能管理单个 Node 进程，不能替代当前 Skill Runner 的容器隔离，因此不作为等价生产方案。
 
 ## 配置系统
 
