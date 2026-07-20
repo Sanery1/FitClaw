@@ -71,7 +71,7 @@ docker compose up -d --build
 node packages/coding-agent/dist/cli.js
 ```
 
-上述 Docker 命令只适用于已经初始化 `feishu-workspace` 的环境。服务器首次安装、数据迁移和回滚请按 [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md) 执行；普通、存储兼容的日常发布使用 `scripts/deploy-release.sh <full-sha>`。
+上述 Docker 命令只适用于已经初始化 `feishu-workspace` 的环境。服务器首次安装、日常发布、数据迁移和回滚请按 [部署架构与发布手册](docs/DEPLOYMENT_ARCHITECTURE.md) 执行。
 
 Bot 也可以从源码启动：
 
